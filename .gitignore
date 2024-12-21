@@ -1,0 +1,6 @@
+/downloads/
+/dist/
+/build/
+/.venv/
+/.idea/
+/app.spec
