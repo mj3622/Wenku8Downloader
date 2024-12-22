@@ -23,15 +23,37 @@ def config_page():
                              help="当共享账号出现问题时，可以切换为自己的账号")
     password = st.text_input('请输入轻小说文库的密码', config.get('login', 'password'), type='password')
 
+    download_choice = config.get('download', 'full_title')
+
+    index_map = {'FULL': 0, 'IN': 1, 'OUT': 2}
+
+    download_name = st.selectbox('下载小说书名的格式', ['FULL', 'IN', 'OUT'], index=index_map[download_choice])
+
+    with st.container(border=True):
+        st.write('以 `败北女角太多了！(败犬女主太多了！)` 为例')
+        st.write('FULL: `败北女角太多了！(败犬女主太多了！)`')
+        st.write('IN: `败犬女主太多了！`')
+        st.write('OUT: `败北女角太多了！`')
+
+        cover_index = st.text_input('封面图片的索引', config.get('download', 'default_cover_index'), help="默认为0，即第一张插图", type='default')
+
+
     t1, c1, c2, t2 = st.columns([1, 4, 2, 1], vertical_alignment='center')
 
     container = st.container()
 
     with c1:
         if st.button("保存信息"):
+            if not str.isdigit(cover_index):
+                st.error("封面图片的索引必须为整数")
+                return
+
             config.set('login', 'username', username)
             config.set('login', 'password', password)
-            st.success("保存成功")
+            config.set('download', 'full_title', download_name)
+            config.set('download', 'default_cover_index', int(cover_index))
+            with container:
+                st.success("保存成功")
     with c2:
         if st.button("更新cookie"):
             with container:
@@ -41,7 +63,7 @@ def config_page():
 
 
 def full_volumes_download_page():
-    st.title("全卷下载")
+    st.title("整本下载")
     c1, c2 = st.columns([6, 1], vertical_alignment='bottom')
 
     info_container = st.container()
@@ -67,20 +89,9 @@ def full_volumes_download_page():
                         update_session(book)
     if book is not None:
         with info_container:
-            result = book.basic_info
             with st.spinner('Wait for it...'):
-                # 左边显示封面，右边显示信息
-                pic_col, info_col = st.columns([3, 5], vertical_alignment='bottom')
-                with pic_col:
-                    st.image(result['cover'])
-                with info_col:
-                    st.subheader(result['标题'])
-                    key_col, value_col = st.columns([2, 7])
-                    for key, value in result.items():
-                        if key == 'cover' or key == '标题' or key == '简介':
-                            continue
-                        key_col.write('**' + key + '：**')
-                        value_col.write(value)
+                show_container = st.container()
+                show_book_info(book, show_container)
 
         with button_container:
             if st.button("下载", use_container_width=True):
@@ -89,12 +100,46 @@ def full_volumes_download_page():
 
 
 def divided_volumes_download_page():
-    # TODO: 分卷下载
-    c1, c2 = st.columns([6, 1], vertical_alignment='bottom')
     st.title("分卷下载")
+    c1, c2 = st.columns([6, 1], vertical_alignment='bottom')
 
-    st.text_input('请输入轻小说文库的作品编号或链接',
-                  help="例如：3057 或 https://www.wenku8.net/book/3057.htm")
+    select_box = st.container()
+    status_bar = st.container()
+
+    book = st.session_state.book
+
+    with c1:
+        id = st.text_input('请输入轻小说文库的作品编号或链接', help="例如：3057 或 https://www.wenku8.net/book/3057.htm")
+
+        if id.startswith('https://www.wenku8.net/book/'):
+            id = id.split('/')[-1].split('.')[0]
+
+    with c2:
+        if st.button("查看信息"):
+            with status_bar:
+                with st.spinner('正在查询中...'):
+                    if safe_get_book_id() == id:
+                        book = st.session_state.book
+                    else:
+                        book = Book(id)
+                        update_session(book)
+
+    if book is not None:
+        with select_box:
+            c_s1, c_s2 = st.columns([1, 3])
+            with c_s1:
+                st.image(book.basic_info['cover'])
+            with c_s2:
+                st.subheader(book.basic_info['标题'])
+
+                selected = st.selectbox('选择要下载的卷', book.volumes.keys())
+
+                st.write('')
+                st.write('')
+                st.write('')
+
+                if st.button("下载", use_container_width=True, help="默认会以第一张插图作为封面，可在配置页面修改"):
+                    downloader.download_novel(book, status_bar, selected)
 
 
 def picture_download_page():
@@ -192,20 +237,11 @@ def search_by_id():
 
                     result = book.basic_info
                     description = result.get('简介')
-                    result.pop('简介')
+
                     with st.spinner('Wait for it...'):
                         # 左边显示封面，右边显示信息
-                        pic_col, info_col = st.columns([3, 5], vertical_alignment='bottom')
-                        with pic_col:
-                            st.image(result['cover'])
-                        with info_col:
-                            st.subheader(result['标题'])
-                            key_col, value_col = st.columns([2, 7])
-                            for key, value in result.items():
-                                if key == 'cover' or key == '标题':
-                                    continue
-                                key_col.write('**' + key + '：**')
-                                value_col.write(value)
+                        show_container = st.container()
+                        show_book_info(book, show_container)
                         st.write('**简介：**')
 
                         for e in description.split('\n'):
@@ -231,8 +267,10 @@ def debug_page():
     container = st.container()
     if st.button("查询信息"):
         book = Book(id)
-        downloader.download_novel(book, container)
-        st.success("下载完成")
+        st.write(book.get_formatted_title('FULL'))
+        st.write(book.get_formatted_title('IN'))
+        st.write(book.get_formatted_title('OUT'))
+
 
 
 def update_session(book):
@@ -255,6 +293,21 @@ def init():
         st.session_state.book = None
     if 'multiselect' not in st.session_state:
         st.session_state.multiselect = None
+
+
+def show_book_info(book, container):
+    with container:
+        pic_col, info_col = st.columns([3, 5], vertical_alignment='bottom')
+        with pic_col:
+            st.image(book.basic_info['cover'])
+        with info_col:
+            st.subheader(book.basic_info['标题'])
+            key_col, value_col = st.columns([2, 7])
+            for key, value in book.basic_info.items():
+                if key == 'cover' or key == '标题' or key == '简介':
+                    continue
+                key_col.write('**' + key + '：**')
+                value_col.write(value)
 
 
 if __name__ == "__main__":
