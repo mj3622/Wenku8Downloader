@@ -1,3 +1,5 @@
+import re
+
 from . import crawler
 
 
@@ -126,3 +128,16 @@ class Book:
 
     def get_cover_content(self):
         return self.my_crawler.fetch(self.basic_info['cover'], False)
+
+
+    def get_formatted_title(self, type):
+        title = self.basic_info['标题']
+        if type == 'FULL':
+            return title
+        else:
+            match = re.match(r"^(.*?)\((.*?)\)$", title)
+            if match:
+                if type == 'OUT':
+                    return match.group(1)
+                elif type == 'IN':
+                    return match.group(2)
