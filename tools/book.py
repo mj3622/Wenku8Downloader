@@ -39,7 +39,6 @@ class Book:
                 soup = self.my_crawler.fetch(url).find_all('img')
                 return [img['src'] for img in soup if 'src' in img.attrs]
 
-
     def get_basic_book_info(self):
         """获取轻小说文库的基本信息"""
         url = f'https://www.wenku8.net/book/{self.book_id}.htm'
@@ -124,3 +123,6 @@ class Book:
         base_chapter_url = chapter_url.replace('index.htm', '')
 
         return base_chapter_url, volumes
+
+    def get_cover_content(self):
+        return self.my_crawler.fetch(self.basic_info['cover'], False)

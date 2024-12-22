@@ -1,3 +1,4 @@
+import os
 import time
 
 import streamlit as st
@@ -5,6 +6,7 @@ from tools.config_manager import ConfigManager
 from tools.crawler import WebCrawler
 from tools.book import Book
 from tools.downloader import Downloader
+from ebooklib import epub
 
 config = ConfigManager()
 crawler = WebCrawler()
@@ -40,7 +42,50 @@ def config_page():
 
 def full_volumes_download_page():
     st.title("全卷下载")
-    # TODO: 整卷下载
+    c1, c2 = st.columns([6, 1], vertical_alignment='bottom')
+
+    info_container = st.container()
+    button_container = st.container()
+    status_bar = st.container()
+
+    book = st.session_state.book
+
+    with c1:
+        id = st.text_input('请输入轻小说文库的作品编号或链接', help="例如：3057 或 https://www.wenku8.net/book/3057.htm")
+
+        if id.startswith('https://www.wenku8.net/book/'):
+            id = id.split('/')[-1].split('.')[0]
+
+    with c2:
+        if st.button("查询信息"):
+            with status_bar:
+                with st.spinner('正在查询中...'):
+                    if safe_get_book_id() == id:
+                        book = st.session_state.book
+                    else:
+                        book = Book(id)
+                        update_session(book)
+    if book is not None:
+        with info_container:
+            result = book.basic_info
+            with st.spinner('Wait for it...'):
+                # 左边显示封面，右边显示信息
+                pic_col, info_col = st.columns([3, 5], vertical_alignment='bottom')
+                with pic_col:
+                    st.image(result['cover'])
+                with info_col:
+                    st.subheader(result['标题'])
+                    key_col, value_col = st.columns([2, 7])
+                    for key, value in result.items():
+                        if key == 'cover' or key == '标题' or key == '简介':
+                            continue
+                        key_col.write('**' + key + '：**')
+                        value_col.write(value)
+
+        with button_container:
+            if st.button("下载", use_container_width=True):
+                downloader.download_novel(book, status_bar)
+                st.success("下载完成")
 
 
 def divided_volumes_download_page():
@@ -183,11 +228,11 @@ def debug_page():
     st.title("调试")
     id = st.text_input('请输入轻小说文库的作品编号或链接', '3057',
                        help="例如：3057 或 https://www.wenku8.net/book/3057.htm")
-
+    container = st.container()
     if st.button("查询信息"):
-        result = Book(id).get_chapter_image_urls('第一卷')
-        for url in result:
-            st.image(crawler.parse_chapter(url))
+        book = Book(id)
+        downloader.download_novel(book, container)
+        st.success("下载完成")
 
 
 def update_session(book):

@@ -1,3 +1,5 @@
+import time
+
 import requests
 from bs4 import BeautifulSoup
 import http.cookies
@@ -16,7 +18,7 @@ class WebCrawler:
             'jieqiVisitInfo': self.config.get('cookie', 'jieqiVisitInfo'),
         }
 
-    def fetch(self, url):
+    def fetch(self, url, parse=True):
         """通过给定URL抓取网页，并返回BeautifulSoup解析后的对象"""
         response = requests.get(url, headers={
             'Cookie': '; '.join([f'{key}={value}' for key, value in self.cookies.items()]),
@@ -29,6 +31,9 @@ class WebCrawler:
 
         # 检测编码并解码内容
         content = response.content
+
+        if not parse:
+            return content
 
         # 使用BeautifulSoup解析HTML并返回
         soup = BeautifulSoup(content, 'html.parser')
@@ -65,13 +70,45 @@ class WebCrawler:
             self.config.set('cookie', 'jieqiVisitInfo', new_cookies['jieqiVisitInfo'])
             print("Cookies updated.")
 
-    def parse_chapter(self, url):
-        """解析图片链接为streamlit可用格式"""
+    def get_image_content(self, url):
+        """
+        仅用于获取小说中的插图content
+        """
         headers = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,/;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+            'Cache-Control': 'max-age=0',
+            'If-None-Match': '"6944BEA576E56CA6D655A7D7F0A066F7"',
+            'Priority': 'u=0, i',
             'Referer': 'https://www.wenku8.net/',
+            'Sec-CH-UA': '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'Sec-CH-UA-Mobile': '?0',
+            'Sec-CH-UA-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
         }
-        response = requests.get(url, headers=headers)
+
+        try:
+            response = requests.get(url, headers=headers)
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            # 重试
+            while True:
+                try:
+                    response = requests.get(url, headers=headers)
+                    break
+                except Exception as e:
+                    print(f"Failed to download {url}: {e}")
+                    time.sleep(1)
+
         if response.status_code == 200:
             # 将图片数据读取为二进制
-            return Image.open(BytesIO(response.content))
+            return response.content
+        else:
+            print(f"Failed to download {url}: {response.status_code}")
+            return None
