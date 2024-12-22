@@ -1,7 +1,7 @@
 import toml
 import os
 
-file_path = os.path.join(os.getcwd(), 'secrets.toml')
+file_path = os.path.join(os.getcwd(), 'config', 'secrets.toml')
 
 
 class ConfigManager:
