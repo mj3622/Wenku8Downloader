@@ -51,6 +51,7 @@ class Book:
 
         # 提取基本信息
         book_info = content.find('table').find_all('tr')[2].find_all('td')
+
         # 文库分类
         category = book_info[0].text.split('：')[1]
         # 作者
@@ -58,13 +59,22 @@ class Book:
         # 连载状态
         status = book_info[2].text.split('：')[1]
         # 更新时间
-        update_time = book_info[3].text.split('：')[1]
+        if len(book_info) > 3:
+            update_time = book_info[3].text.split('：')[1]
+        else:
+            update_time = None
         # 全文长度
-        length = book_info[4].text.split('：')[1]
+        if len(book_info) > 4:
+            length = book_info[4].text.split('：')[1]
+        else:
+            length = None
 
         # 最近章节
-        content = content.find('div').find_all('table')[2]
-        latest_chapter = content.find('a').get_text(strip=True)
+        try:
+            content = content.find('div').find_all('table')[2]
+            latest_chapter = content.find('a').get_text(strip=True)
+        except Exception as e:
+            latest_chapter = None
 
         # 简介
         description = content.find_all('span')[-1].get_text()
@@ -87,7 +97,10 @@ class Book:
         }
 
     def get_book_chapters(self):
-
+        """
+        获取小说的章节信息
+        :return: 返回一个元组，第一个元素是章节的URL，第二个元素是章节信息
+        """
         chapter_url = f'https://www.wenku8.net'
         """获取章节信息的URL"""
         soup = self.my_crawler.fetch(f'https://www.wenku8.net/book/{self.book_id}.htm')
@@ -127,10 +140,18 @@ class Book:
         return base_chapter_url, volumes
 
     def get_cover_content(self):
+        """
+        获取封面的二进制内容
+        :return: 封面的二进制内容
+        """
         return self.my_crawler.fetch(self.basic_info['cover'], False)
 
-
     def get_formatted_title(self, type):
+        """
+        获取用户自定义格式的标题
+        :param type: 标题格式，FULL为完整标题，OUT保留括号外的部分，IN保留括号内的部分
+        :return: 格式化后的标题
+        """
         title = self.basic_info['标题']
         if type == 'FULL':
             return title

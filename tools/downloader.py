@@ -81,9 +81,6 @@ class Downloader:
 
                                 # 封面的图片位置
                                 if ch_urls.index(url) == config.get('download', 'default_cover_index'):
-                                    print(f'url: {ch_urls.index(url)}')
-                                    ttt = config.get('download', 'default_cover_index')
-                                    print(f'default_cover_index: {ttt}')
                                     # 设置分卷封面
                                     ebook.set_cover(f'{volume_name}/cover.{suffix}', content)
 

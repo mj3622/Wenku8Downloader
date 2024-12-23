@@ -1,11 +1,21 @@
+import http.cookies
 import time
 
 import requests
 from bs4 import BeautifulSoup
-import http.cookies
+
 from . import config_manager
-from PIL import Image
-from io import BytesIO
+
+
+def __encode_key__(key):
+    """
+    将关键字编码为URL参数
+    :param key: 搜索关键字
+    :return: 编码后的字符串
+    """
+    # 将关键字转换为进行搜索的格式
+    encoded_bytes = key.encode('gbk')
+    return ''.join([f'%{byte:02x}' for byte in encoded_bytes])
 
 
 class WebCrawler:
@@ -19,11 +29,16 @@ class WebCrawler:
         }
 
     def fetch(self, url, parse=True):
-        """通过给定URL抓取网页，并返回BeautifulSoup解析后的对象"""
+        """
+        获取指定URL的内容，自带cookie
+        :param url: 请求的URL
+        :param parse: 是否解析HTML，默认为True
+        :return: 如果parse为False，返回原始二进制内容，否则返回BeautifulSoup对象
+        """
         response = requests.get(url, headers={
             'Cookie': '; '.join([f'{key}={value}' for key, value in self.cookies.items()]),
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
         })
 
         if response.status_code != 200:
@@ -40,7 +55,10 @@ class WebCrawler:
         return soup
 
     def get_cookie(self):
-        """通过登录请求获取新cookie"""
+        """
+        根据配置文件中的用户名和密码获取新的cookies
+        :return:
+        """
         login_url = 'https://www.wenku8.net/login.php?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php'
         data = {
             'username': self.config.get('login', 'username'),
@@ -72,24 +90,12 @@ class WebCrawler:
 
     def get_image_content(self, url):
         """
-        仅用于获取小说中的插图content
+        下载图片并返回原始二进制内容
+        :param url: 图片的URL
+        :return: 图片的二进制内容
         """
         headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,/;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-            'Cache-Control': 'max-age=0',
-            'If-None-Match': '"6944BEA576E56CA6D655A7D7F0A066F7"',
-            'Priority': 'u=0, i',
             'Referer': 'https://www.wenku8.net/',
-            'Sec-CH-UA': '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-            'Sec-CH-UA-Mobile': '?0',
-            'Sec-CH-UA-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'cross-site',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
         }
 
@@ -107,8 +113,32 @@ class WebCrawler:
                     time.sleep(1)
 
         if response.status_code == 200:
-            # 将图片数据读取为二进制
             return response.content
         else:
             print(f"Failed to download {url}: {response.status_code}")
             return None
+
+    def search(self, keyword, type):
+        """
+        搜索小说
+        :param keyword: 搜索关键字
+        :param type: 搜索类型，articlename为按书名搜索，author为按作者搜索
+        :return: 一个列表，包含搜索结果 {'title': '书名', 'cover': '封面url', 'id': '书籍ID'}
+        """
+        url = f"https://www.wenku8.net/modules/article/search.php?searchtype={type}&searchkey={__encode_key__(keyword)}"
+
+        content = self.fetch(url)
+
+        if content.find('title').text.find('搜索结果 - 轻小说文库') != -1:
+            content = content.find('div', id='content').find('table').find('tr').find('td').find_all('a')
+            res = []
+            for a in content:
+                if a.find('img'):
+                    res.append({'title': a['title'], 'cover': a.img['src'], 'id': a['href'].split('/')[-1].split('.')[0]})
+
+            return res
+        else:
+            title = content.find('title').text.split('-')[0].strip()
+            cover = content.find('div', id='content').find('img')['src']
+            book_id = cover.split('/')[-2]
+            return [{'title': title, 'cover': cover, 'id': book_id}]
