@@ -67,8 +67,8 @@ def config_page():
         st.write('IN: `败犬女主太多了！`')
         st.write('OUT: `败北女角太多了！`')
 
-        cover_index = st.text_input('封面图片的索引', config.get('download', 'default_cover_index'),
-                                    help="默认为0，即第一张插图", type='default')
+    cover_index = st.text_input('封面图片的索引', config.get('download', 'default_cover_index'),
+                                help="默认为0，即第一张插图", type='default')
 
     t1, c1, c2, t2 = st.columns([1, 4, 2, 1], vertical_alignment='center')
 
