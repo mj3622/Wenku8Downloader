@@ -45,9 +45,18 @@ class ConfigManager:
 
     def __init__(self):
         self.file_path = _CONFIG_FILE_PATH
+
+        # 若配置文件不存在，则自动从模板复制一份（保留文件中的注释说明）
+        if not os.path.exists(self.file_path):
+            example_path = self.file_path + ".example"
+            if os.path.exists(example_path):
+                import shutil
+
+                shutil.copy(example_path, self.file_path)
+
         self.config = self._read_toml()
 
-        # 若配置文件不存在，使用默认值初始化并写入
+        # 若依然无法读取，使用默认值初始化并写入
         if not self.config:
             self.config = _DEFAULT_CONFIG.copy()
             self._write_toml()
