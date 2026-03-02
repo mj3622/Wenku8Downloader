@@ -1,6 +1,23 @@
+# Build & Distribution
 /downloads/
 /dist/
 /build/
-/.venv/
-/.idea/
 /app.spec
+
+# Virtual Environments
+/.venv/
+/myenv/
+
+# Sensitive Config
+/config/secrets.toml
+
+# Python Cache
+__pycache__/
+*.py[cod]
+
+# IDE
+/.idea/
+/.vscode/
+
+# macOS
+.DS_Store
