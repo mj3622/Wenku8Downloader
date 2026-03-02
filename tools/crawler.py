@@ -1,258 +1,345 @@
-import http.cookies
+"""
+crawler.py - 网络请求与内容抓取模块
+
+封装对轻小说文库（wenku8.net）的 HTTP 请求，包括：
+  - 带 Cookie 的页面抓取
+  - 账号登录 / Cookie 刷新
+  - 图片二进制内容下载（含限次重试）
+  - 关键字搜索
+"""
+
+from typing import Optional
 import time
-import random
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import requests
+
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from . import config_manager
 
+# 最大图片下载重试次数
+_MAX_IMAGE_RETRIES = 3
 
-def __encode_key__(key):
+# 公共请求头（典型的 Chrome 特征）
+_COMMON_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
+
+# Cloudflare 要求的 Client Hints（critical-ch）
+_CLIENT_HINTS = {
+    "Sec-CH-UA": '"Not(A:Brand";v="8", "Chromium";v="144", "Microsoft Edge";v="144"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"macOS"',
+    "Sec-CH-UA-Platform-Version": '"15.0.0"',
+    "Sec-CH-UA-Arch": '"arm"',
+    "Sec-CH-UA-Bitness": '"64"',
+    "Sec-CH-UA-Full-Version-List": '"Not(A:Brand";v="8.0.0.0", "Chromium";v="144.0.0.0", "Microsoft Edge";v="144.0.0.0"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+def _encode_key(key: str) -> str:
     """
-    将关键字编码为URL参数
-    :param key: 搜索关键字
-    :return: 编码后的字符串
+    将搜索关键字编码为 GBK 百分号格式，以适配文库的搜索接口。
+
+    :param key: 原始搜索关键字（Unicode 字符串）
+    :return: 编码后的 URL 参数字符串，如 "%c4%cf%......"
     """
-    # 将关键字转换为进行搜索的格式
-    encoded_bytes = key.encode('gbk')
-    return ''.join([f'%{byte:02x}' for byte in encoded_bytes])
+    encoded_bytes = key.encode("gbk")
+    return "".join([f"%{byte:02x}" for byte in encoded_bytes])
 
 
 class WebCrawler:
-    def __init__(self, cookie=None):
+    """
+    轻小说文库爬虫，封装所有与网站交互的 HTTP 请求。
+
+    会话 Cookie 从配置文件中读取，也可在实例化时手动传入。
+    """
+
+    def __init__(self, cookie: dict = None):
+        """
+        初始化爬虫，加载配置并准备 Cookie。
+
+        :param cookie: 可选，手动传入的 Cookie 字典；
+                       若为 None，则从配置文件中读取
+        """
         self.config = config_manager.ConfigManager()
-        # 初始化UserAgent生成器
-        self.ua = UserAgent()
-        # 初始化cookies，默认为空，用户可以在创建对象时传入cookie
         self.cookies = cookie or {
-            'PHPSESSID': self.config.get('cookie', 'PHPSESSID'),
-            'jieqiUserInfo': self.config.get('cookie', 'jieqiUserInfo'),
-            'jieqiVisitInfo': self.config.get('cookie', 'jieqiVisitInfo'),
-        }
-        # 创建带有重试机制的会话
-        self.session = self._create_session()
-        # 随机请求间隔范围(秒)
-        self.delay_range = (1, 3)
-        # 最后一次请求时间
-        self.last_request_time = 0
-
-    def _create_session(self):
-        """创建带有重试机制的会话"""
-        session = requests.Session()
-
-        # 设置重试策略
-        retry_strategy = Retry(
-            total=3,  # 总重试次数
-            backoff_factor=1,  # 重试间隔时间因子
-            status_forcelist=[429, 500, 502, 503, 504]  # 需要重试的状态码
-        )
-
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-
-        return session
-
-    def _wait_for_rate_limit(self):
-        """控制请求频率，确保不会过于频繁"""
-        elapsed = time.time() - self.last_request_time
-        if elapsed < self.delay_range[0]:
-            # 计算需要等待的时间，加入随机因素
-            wait_time = random.uniform(self.delay_range[0] - elapsed, self.delay_range[1] - elapsed)
-            time.sleep(wait_time)
-        self.last_request_time = time.time()
-
-    def _get_headers(self, referer='https://www.wenku8.net/'):
-        """生成随机请求头"""
-        return {
-            'Cookie': '; '.join([f'{key}={value}' for key, value in self.cookies.items()]),
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': self.ua.random,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Referer': referer
+            "PHPSESSID": self.config.get("cookie", "PHPSESSID"),
+            "jieqiUserInfo": self.config.get("cookie", "jieqiUserInfo"),
+            "jieqiVisitInfo": self.config.get("cookie", "jieqiVisitInfo"),
+            "cf_clearance": self.config.get("cookie", "cf_clearance") or "",
         }
 
-    def fetch(self, url, parse=True, max_retries=3):
+        # 读取代理配置（留空则不使用代理）
+        proxy_http = self.config.get("proxy", "http") or ""
+        proxy_https = self.config.get("proxy", "https") or ""
+        self.proxies = {
+            "http": proxy_http if proxy_http else None,
+            "https": proxy_https if proxy_https else None,
+        } if (proxy_http or proxy_https) else None
+
+        # 初始化持久型 Session 模拟浏览器，以复用 TLS 连接特征，防止被频控拉黑
+        self.session = requests.Session(impersonate="chrome120", proxies=self.proxies)
+        # 将现有的 cookies 注入到 session 里
+        for k, v in self.cookies.items():
+            if v:
+                self.session.cookies.set(k, v)
+
+    # ------------------------------------------------------------------
+    # 公开方法
+    # ------------------------------------------------------------------
+
+    def fetch(self, url: str, parse: bool = True):
         """
-        获取指定URL的内容，自带cookie和防429措施
-        :param url: 请求的URL
-        :param parse: 是否解析HTML，默认为True
-        :param max_retries: 最大重试次数
-        :return: 如果parse为False，返回原始二进制内容，否则返回BeautifulSoup对象
+        发起 GET 请求并返回页面内容。
+
+        :param url: 目标 URL
+        :param parse: 为 True 时返回 BeautifulSoup 对象；
+                      为 False 时返回原始二进制内容
+        :return: BeautifulSoup 对象或 bytes
+        :raises Exception: 当 HTTP 状态码非 200 时抛出
         """
-        retries = 0
-        while retries <= max_retries:
+        req_headers = _COMMON_HEADERS.copy()
+        req_headers["Referer"] = "https://www.wenku8.net/"
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            # 注意这里不再单独传 cookies，因为 self.session 已经包含 CookieJar
             try:
-                # 控制请求频率
-                self._wait_for_rate_limit()
-
-                # 发送请求
                 response = self.session.get(
                     url,
-                    headers=self._get_headers(url),
-                    timeout=10
+                    headers=req_headers,
+                    allow_redirects=True,
                 )
+            except Exception as e:
+                response = None
+                print(f"[fetch] 请求出错：{e}")
 
-                # 检查状态码
-                response.raise_for_status()
-
-                # 处理429状态码（即使raise_for_status不会触发，这里额外处理）
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 10))
-                    print(f"请求过于频繁，将在{retry_after}秒后重试...")
-                    time.sleep(retry_after)
-                    retries += 1
-                    continue
-
-                content = response.content
-
+            if response is not None and response.status_code == 200:
                 if not parse:
-                    return content
-
-                # 使用BeautifulSoup解析HTML并返回
-                soup = BeautifulSoup(content, 'html.parser')
+                    return response.content
+                # 使用 html.parser 解析响应内容
+                soup = BeautifulSoup(response.content, "html.parser")
+                # 把最终 URL 挂载到 soup 对象上，方便外部提取（如防重定向重写）
+                soup.my_url = response.url
                 return soup
 
-            except requests.exceptions.HTTPError as e:
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 10))
-                    print(f"HTTP错误 {response.status_code}: {e}, 将在{retry_after}秒后重试...")
-                    time.sleep(retry_after)
-                else:
-                    print(f"HTTP错误 {response.status_code}: {e}")
-                    if retries >= max_retries:
-                        raise Exception(f"Failed to fetch {url}, status code: {response.status_code}")
-            except Exception as e:
-                print(f"请求错误: {e}")
-                if retries >= max_retries:
-                    raise Exception(f"Failed to fetch {url} after {max_retries} retries: {str(e)}")
+            # 处理 403 或其他状态码（可能被 Cloudflare 拦截）
+            status = response.status_code if response is not None else "ERROR"
+            print(f"[fetch] 尝试 {attempt + 1}/{max_retries} 返回 {status}（可能遭遇 Cloudflare 拦截/网络波动）。")
+            if attempt < max_retries - 1:
+                print("[fetch] 正在重置会话并等待 8 秒后重试...")
+                time.sleep(8)
+                # 重新初始化 Session 以刷新 TLS 握手状态
+                self.session = requests.Session(impersonate="chrome120", proxies=self.proxies)
+                for k, v in self.cookies.items():
+                    if v:
+                        self.session.cookies.set(k, v)
+        
+        raise Exception(f"请求失败：{url}，已达到最大重试次数")
 
-            retries += 1
-            # 指数退避重试
-            if retries <= max_retries:
-                sleep_time = 2 ** retries + random.random()
-                print(f"将在{sleep_time:.2f}秒后重试...")
-                time.sleep(sleep_time)
-
-        return None
-
-    def get_cookie(self):
+    def get_cookie(self) -> None:
         """
-        根据配置文件中的用户名和密码获取新的cookies
-        :return:
+        使用配置文件中的账号密码登录，并将新的 Cookie 写回配置文件。
+
+        登录成功后自动更新内存中的 Cookie 以及 config/secrets.toml。
         """
-        login_url = 'https://www.wenku8.net/login.php?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php'
-        data = {
-            'username': self.config.get('login', 'username'),
-            'password': self.config.get('login', 'password'),
-            'usecookie': '315360000',
-            'action': 'login',
-            'submit': ' %26%23160%3B%B5%C7%26%23160%3B%26%23160%3B%C2%BC%26%23160%3B',
+        login_url = (
+            "https://www.wenku8.net/login.php"
+            "?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php"
+        )
+        post_data = {
+            "username": self.config.get("login", "username"),
+            "password": self.config.get("login", "password"),
+            "usecookie": "315360000",
+            "action": "login",
+            "submit": " %26%23160%3B%B5%C7%26%23160%3B%26%23160%3B%C2%BC%26%23160%3B",
         }
 
-        # 控制请求频率
-        self._wait_for_rate_limit()
+        req_headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://www.wenku8.net",
+            "Referer": "https://www.wenku8.net/login.php",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
 
-        response = self.session.post(
-            login_url,
-            data=data,
-            headers=self._get_headers('https://www.wenku8.net/login.php')
-        )
-
-        # 从返回的响应头中解析 cookies
-        cookie_header = response.headers.get('set-cookie', '')
-        cookie_jar = http.cookies.SimpleCookie(cookie_header)
-        new_cookies = {key: morsel.value for key, morsel in cookie_jar.items()}
-
-        # 更新cookies
-        if new_cookies:
-            self.cookies.update(new_cookies)
-            # 更新配置文件
-            if 'PHPSESSID' in new_cookies:
-                self.config.set('cookie', 'PHPSESSID', new_cookies['PHPSESSID'])
-            if 'jieqiUserInfo' in new_cookies:
-                self.config.set('cookie', 'jieqiUserInfo', new_cookies['jieqiUserInfo'])
-            if 'jieqiVisitInfo' in new_cookies:
-                self.config.set('cookie', 'jieqiVisitInfo', new_cookies['jieqiVisitInfo'])
-            print("Cookies updated.")
-
-    def get_image_content(self, url, max_retries=3):
-        """
-        下载图片并返回原始二进制内容
-        :param url: 图片的URL
-        :param max_retries: 最大重试次数
-        :return: 图片的二进制内容
-        """
-        retries = 0
-        while retries <= max_retries:
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                # 控制请求频率
-                self._wait_for_rate_limit()
-
-                response = self.session.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=10
+                response = self.session.post(
+                    login_url,
+                    data=post_data,
+                    headers=req_headers,
+                    allow_redirects=True,
                 )
-
-                response.raise_for_status()
-
-                # 处理429状态码
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 10))
-                    print(f"图片请求过于频繁，将在{retry_after}秒后重试...")
-                    time.sleep(retry_after)
-                    retries += 1
-                    continue
-
-                return response.content
-
             except Exception as e:
-                print(f"下载图片失败 {url}: {e}")
-                if retries >= max_retries:
-                    return None
+                response = None
+                print(f"[login] 请求出错：{e}")
 
-            retries += 1
-            sleep_time = 2 ** retries + random.random()
-            print(f"将在{sleep_time:.2f}秒后重试下载图片...")
-            time.sleep(sleep_time)
+            if response is not None and response.status_code == 200:
+                break  # 成功，跳出重试
+            
+            status = response.status_code if response is not None else "ERROR"
+            print(f"[login] 尝试 {attempt + 1}/{max_retries} 返回 {status}（可能遭遇 Cloudflare 拦截/网络波动）。")
+            if attempt < max_retries - 1:
+                print("[login] 正在重置会话并等待 5 秒后重试...")
+                time.sleep(5)
+                # 重新初始化 Session 以刷新 TLS 握手状态
+                self.session = requests.Session(impersonate="chrome120", proxies=self.proxies)
+                for k, v in self.cookies.items():
+                    if v:
+                        self.session.cookies.set(k, v)
 
+        if response is None:
+            print("[login] ❌ 登录失败：达到最大重试次数且无响应。")
+            return
+
+        print(f"[login] 状态码: {response.status_code}")
+        print(f"[login] 最终 URL: {response.url}")
+        print(f"[login] 响应头 Set-Cookie: {response.headers.get('set-cookie', '（无）')}")
+        print(f"[login] response.cookies: {dict(response.cookies)}")
+        print(f"[login] 所有响应头: { dict(response.headers) }")
+
+        # 从自动合并的 CookieJar 中读取新 Cookie
+        new_cookies = dict(self.session.cookies)
+
+        if new_cookies:
+            # 更新内存中的 Cookie
+            self.cookies.update(new_cookies)
+            # 持久化到配置文件
+            self.config.set("cookie", "PHPSESSID", new_cookies.get("PHPSESSID", ""))
+            self.config.set("cookie", "jieqiUserInfo", new_cookies.get("jieqiUserInfo", ""))
+            self.config.set("cookie", "jieqiVisitInfo", new_cookies.get("jieqiVisitInfo", ""))
+            if new_cookies.get("cf_clearance"):
+                self.config.set("cookie", "cf_clearance", new_cookies.get("cf_clearance", ""))
+            print("[login] ✅ Cookie 已更新并写入配置文件。")
+            print(f"[login] 新 Cookie keys: {list(new_cookies.keys())}")
+        else:
+            print("[login] ❌ 未能从响应中解析到新 Cookie。")
+            if response.status_code == 403:
+                print("[login] 原因：登录端点返回 403（被 Cloudflare 或 IP 封锁），请通过「🍪 Cookie」标签手动粘贴浏览器 Cookie。")
+            elif response.status_code != 200:
+                print(f"[login] 原因：HTTP {response.status_code}，请检查账号密码或网络。")
+
+    def get_image_content(self, url: str) -> Optional[bytes]:
+        """
+        下载图片并返回原始二进制内容，失败时最多重试 _MAX_IMAGE_RETRIES 次。
+
+        :param url: 图片的完整 URL
+        :return: 图片的 bytes 内容；全部重试失败后返回 None
+        """
+        headers = _COMMON_HEADERS.copy()
+        headers["Referer"] = "https://www.wenku8.net/"
+
+        response = None
+        try:
+            response = self.session.get(
+                url, headers=headers, allow_redirects=True
+            )
+        except Exception as e:
+            print(f"图片下载失败，开始重试：{url}（{e}）")
+            # 有限次数重试
+            for attempt in range(_MAX_IMAGE_RETRIES):
+                try:
+                    response = self.session.get(url, headers=headers)
+                    break   # 请求成功，跳出重试循环
+                except Exception as retry_e:
+                    print(
+                        f"第 {attempt + 1}/{_MAX_IMAGE_RETRIES} 次重试失败："
+                        f"{url}（{retry_e}）"
+                    )
+                    time.sleep(1)
+            else:
+                # for-else：循环正常结束（未 break），说明全部重试均失败
+                print(f"已达最大重试次数，放弃下载：{url}")
+                return None
+
+        if response is not None and response.status_code == 200:
+            return response.content
+
+        status = response.status_code if response is not None else "N/A"
+        print(f"图片下载失败：{url}，状态码：{status}")
         return None
 
-    def search(self, keyword, type):
+    def search(self, keyword: str, search_type: str) -> list[dict]:
         """
-        搜索小说
+        按关键字搜索小说。
+
         :param keyword: 搜索关键字
-        :param type: 搜索类型，articlename为按书名搜索，author为按作者搜索
-        :return: 一个列表，包含搜索结果 {'title': '书名', 'cover': '封面url', 'id': '书籍ID'}
+        :param search_type: 搜索类型，"articlename" 按书名，"author" 按作者
+        :return: 搜索结果列表，每项格式为
+                 {"title": str, "cover": str, "id": str}
         """
-        encoded_keyword = __encode_key__(keyword)
-        url = f"https://www.wenku8.net/modules/article/search.php?searchtype={type}&searchkey={encoded_keyword}"
+        url = (
+            "https://www.wenku8.net/modules/article/search.php"
+            f"?searchtype={search_type}&searchkey={_encode_key(keyword)}"
+        )
+        page = self.fetch(url)
+        
+        title_tag = page.find("title")
+        if not title_tag:
+            raise Exception("无法解析返回页面，可能已被 Cloudflare 等机制拦截")
+        title_text = title_tag.text
 
-        content = self.fetch(url)
-        if not content:
-            return []
+        # 检查是否命中包含 .blockcontent 的系统提示页（如搜索间隔 < 5s 或需重新登录）
+        err_block = page.find("div", class_="blockcontent")
+        if err_block and "两次搜索的间隔时间" in err_block.text:
+            raise Exception("文库限制：两次搜索的间隔时间不得少于 5 秒，请稍后再试。")
 
-        try:
-            if content.find('title').text.find('搜索结果 - 轻小说文库') != -1:
-                content = content.find('div', id='content').find('table').find('tr').find('td').find_all('a')
-                res = []
-                for a in content:
-                    if a.find('img'):
-                        res.append({
-                            'title': a['title'],
-                            'cover': a.img['src'],
-                            'id': a['href'].split('/')[-1].split('.')[0]
-                        })
-                return res
+        # 判断是搜索结果列表页，还是直接跳转到书籍详情页
+        if "搜索结果 - 轻小说文库" in title_text:
+            # 多结果页：提取所有带封面图的 <a> 标签
+            anchor_tags = (
+                page.find("div", id="content")
+                .find("table")
+                .find("tr")
+                .find("td")
+                .find_all("a")
+            )
+            results = []
+            for tag in anchor_tags:
+                if tag.find("img"):  # 过滤掉无封面的纯文字链接
+                    results.append({
+                        "title": tag["title"],
+                        "cover": tag.img["src"],
+                        "id": tag["href"].split("/")[-1].split(".")[0],
+                    })
+            return results
+        
+        # 尝试作为单结果页（直接跳转到书籍详情）提取
+        content_div = page.find("div", id="content")
+        if content_div and content_div.find("img"):
+            title = title_text.split("-")[0].strip()
+            
+            # 由于可能发生了重定向（例如搜索直接跳到书页），应当从最终 URL 中提取数字 ID
+            # 格式：https://www.wenku8.net/book/1234.htm
+            final_url = getattr(page, "my_url", "")
+            if "/book/" in final_url:
+                book_id = final_url.split("/")[-1].split(".")[0]
             else:
-                title = content.find('title').text.split('-')[0].strip()
-                cover = content.find('div', id='content').find('img')['src']
-                book_id = cover.split('/')[-2]
-                return [{'title': title, 'cover': cover, 'id': book_id}]
-        except Exception as e:
-            print(f"解析搜索结果失败: {e}")
-            return []
+                # 后备方案：从图片尝试，但非常不可靠
+                book_id = content_div.find("img")["src"].split("/")[-2]
+                
+            cover = content_div.find("img")["src"]
+            return [{"title": title, "cover": cover, "id": book_id}]
+
+        # 既不是搜索结果列表，也不是书籍详情（例如：搜索无结果、触发了其他未写明的防刷/重定向返回用户中心等）
+        return []
