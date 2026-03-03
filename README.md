@@ -89,6 +89,15 @@ pause
 
 项目不再硬性要求配置代理。如果在 `config/secrets.toml` 中留空（如 `http=""`），系统将会自动使用直连网络进行爬取。
 
+**macOS 用户代理注意事项**：
+如果在 macOS 环境下配置并启用了代理，控制台频繁弹出以下警告：
+`NotOpenSSLWarning: urllib3 v2 only supports OpenSSL ... compiled with 'LibreSSL 2.8.3'`
+这是由于 macOS 自带环境编译构建的 Python 加密库与 `urllib3` v2.x 版本之间存在兼容性问题。这通常只会作为警告输出，但这期间所有基于底层库的代理请求可能会异常出错。
+**解决方法**：进入虚拟环境后，执行命令降级 urllib3 即可完美解决：
+```bash
+pip install "urllib3<2"
+```
+
 ### 3. 小说查询或下载失败
 
 请先检查该书是否为已下架小说，当前暂不支持对下架小说的下载操作。若仍有问题，可能是当前网络完全阻断了该文库站点的访问。
