@@ -104,7 +104,10 @@ def config_page() -> None:
 
         st.divider()
         st.subheader("代理设置（可选）")
-        st.caption("项目已内置智能 TLS 伪装。仅当你所在网络被网站完全拉黑封禁导致连接报错时才需填写代理。留空系统将自动直连。")
+        st.caption(
+            "项目已内置智能 TLS 伪装。仅当你所在网络被完全拉黑封禁导致连接报错时才需填写代理。留空默认直连。\n\n"
+            "*(注：macOS 用户若配置代理后控制台出现 `NotOpenSSLWarning: urllib3...` 报错，请执行 `pip install \"urllib3<2\"` 修复兼容性问题)*"
+        )
         col_ph, col_ps = st.columns(2)
         with col_ph:
             proxy_http = st.text_input(
