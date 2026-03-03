@@ -43,6 +43,7 @@ pathspec==0.12.1
 pefile==2023.2.7
 pillow==11.0.0
 platformdirs==4.4.0
+playwright==1.49.1
 protobuf==5.29.2
 psutil==7.2.2
 pyarrow==18.1.0
