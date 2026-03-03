@@ -263,6 +263,42 @@ class WebCrawler:
 
         print("[browser-login] 正在启动浏览器...")
         opts = ChromiumOptions()
+        
+        # 尝试寻找本地内置浏览器 (由 playwright 下载)
+        import os
+        import platform
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        browsers_dir = os.path.join(base_dir, "bin", "browsers")
+        
+        local_browser_path = None
+        if os.path.exists(browsers_dir):
+            sys_platform = platform.system().lower()
+            for root, dirs, files in os.walk(browsers_dir):
+                if sys_platform == "windows":
+                    if "chrome.exe" in files:
+                        local_browser_path = os.path.join(root, "chrome.exe")
+                        break
+                elif sys_platform == "darwin":  # macOS
+                    # Playwright 会解压到类似 chromium-1148/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+                    if "Chromium" in files and "MacOS" in root:
+                        local_browser_path = os.path.join(root, "Chromium")
+                        break
+                    # Google Chrome for Testing 可能叫 Google Chrome for Testing
+                    if "Google Chrome for Testing" in files and "MacOS" in root:
+                        local_browser_path = os.path.join(root, "Google Chrome for Testing")
+                        break
+                else:  # linux
+                    if "chrome" in files:
+                        # 确保不是目录名而是可执行文件
+                        exec_path = os.path.join(root, "chrome")
+                        if os.access(exec_path, os.X_OK):
+                            local_browser_path = exec_path
+                            break
+                            
+        if local_browser_path and os.path.exists(local_browser_path):
+            print(f"[browser-login] 检测到本地便携版浏览器，将使用：{local_browser_path}")
+            opts.set_browser_path(local_browser_path)
+
         # 不使用无头模式，避免被 Cloudflare 识别为自动化工具
         opts.set_argument("--disable-blink-features=AutomationControlled")
 

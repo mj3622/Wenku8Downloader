@@ -21,3 +21,10 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+dist/
+release/
+build/
+*.zip
+bin/
+
