@@ -144,8 +144,16 @@ class Book:
         except Exception:
             latest_chapter = None
 
-        # 简介（取最后一个 <span> 的文本）
-        description = content_div.find_all("span")[-1].get_text()
+        # 简介
+        description = ""
+        spans = content_div.find_all("span")
+        for i, span in enumerate(spans):
+            if "内容简介：" in span.get_text():
+                if len(span.get_text().strip()) > 5:
+                    description = span.get_text().replace("内容简介：", "").strip()
+                elif i + 1 < len(spans):
+                    description = spans[i + 1].get_text().strip()
+                break
 
         # 封面图（页面第二张 <img>，第一张是站点 Logo）
         img_urls = [img["src"] for img in soup.find_all("img") if "src" in img.attrs]
