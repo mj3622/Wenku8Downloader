@@ -12,11 +12,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
         include:
-          - os: ubuntu-latest
-            platform_arg: linux
-            asset_name: Wenku8Downloader-Linux.zip
           - os: macos-latest
             platform_arg: macos
             asset_name: Wenku8Downloader-macOS.zip
