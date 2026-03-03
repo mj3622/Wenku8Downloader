@@ -146,8 +146,8 @@ class WebCrawler:
                 for k, v in self.cookies.items():
                     if v:
                         self.session.cookies.set(k, v)
-        
-        raise Exception(f"请求失败：{url}，已达到最大重试次数")
+        status_code = response.status_code if response is not None else "Unknown"
+        raise Exception(f"请求失败：{url}，已达到最大重试次数（最后状态码：{status_code}）")
 
     def get_cookie(self) -> None:
         """
@@ -209,8 +209,7 @@ class WebCrawler:
                         self.session.cookies.set(k, v)
 
         if response is None:
-            print("[login] ❌ 登录失败：达到最大重试次数且无响应。")
-            return
+            raise Exception("登录失败：达到最大重试次数且无响应。")
 
         print(f"[login] 状态码: {response.status_code}")
         print(f"[login] 最终 URL: {response.url}")
@@ -235,9 +234,127 @@ class WebCrawler:
         else:
             print("[login] ❌ 未能从响应中解析到新 Cookie。")
             if response.status_code == 403:
-                print("[login] 原因：登录端点返回 403（被 Cloudflare 或 IP 封锁），请通过「🍪 Cookie」标签手动粘贴浏览器 Cookie。")
-            elif response.status_code != 200:
-                print(f"[login] 原因：HTTP {response.status_code}，请检查账号密码或网络。")
+                raise Exception(
+                    "登录端点返回 403（被 Cloudflare 或 IP 封锁）。\n"
+                    "请通过「🍪 Cookie」标签手动粘贴浏览器 Cookie。"
+                )
+            else:
+                raise Exception(
+                    f"登录失败（HTTP {response.status_code}），请检查账号密码或网络。"
+                )
+
+    def get_cookie_via_browser(self) -> None:
+        """
+        使用 DrissionPage 控制真实 Chromium 浏览器完成登录，
+        可靠获取包括 cf_clearance 在内的全部 Cookie，并写入配置文件。
+
+        相比纯 HTTP 方式，浏览器能真正通过 Cloudflare JS 挑战，
+        因此可以稳定获得 cf_clearance。
+        """
+        from DrissionPage import ChromiumPage, ChromiumOptions
+
+        username = self.config.get("login", "username")
+        password = self.config.get("login", "password")
+
+        if not username or not password:
+            error_msg = "账号或密码未配置，请先在「👤 账号」标签填写。"
+            print(f"[browser-login] ❌ {error_msg}")
+            raise Exception(error_msg)
+
+        print("[browser-login] 正在启动浏览器...")
+        opts = ChromiumOptions()
+        # 不使用无头模式，避免被 Cloudflare 识别为自动化工具
+        opts.set_argument("--disable-blink-features=AutomationControlled")
+
+        try:
+            page = ChromiumPage(addr_or_opts=opts)
+        except Exception as e:
+            if "not found" in str(e).lower() or "browser" in str(e).lower():
+                error_msg = (
+                    "启动浏览器失败：未能在系统中找到 Chrome/Edge 浏览器。\n"
+                    "请确保已安装 Google Chrome 或 Microsoft Edge 浏览器。\n"
+                    "如果你已安装但依然报错，请在 DrissionPage 全局配置中指定浏览器路径。"
+                )
+                print(f"[browser-login] ❌ {error_msg}")
+                raise Exception(error_msg)
+            else:
+                raise
+
+        try:
+            login_url = (
+                "https://www.wenku8.net/login.php"
+                "?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php"
+            )
+            print(f"[browser-login] 正在导航到登录页...")
+            page.get("https://www.wenku8.net/login.php")
+
+            # 等待 Cloudflare 挑战通过（最多 15 秒），标志是登录表单出现
+            print("[browser-login] 等待 Cloudflare 验证通过...")
+            page.wait.ele_displayed("css:[name=username]", timeout=20)
+
+            # 填写表单
+            print("[browser-login] 正在填写账号密码并设定较长有效时间...")
+            page.ele("css:[name=username]").clear().input(username)
+            page.ele("css:[name=password]").clear().input(password)
+            
+            # 选择“有效时间”下拉框中的“保存一年”选项
+            usecookie_ele = page.ele("css:select[name=usecookie]")
+            if usecookie_ele:
+                usecookie_ele.select("保存一年")
+
+            # 点击登录按钮
+            page.ele("css:[name=submit]", timeout=10).click()
+
+            # 等待跳转离开登录页（最多 20 秒）
+            print("[browser-login] 等待登录跳转...")
+            # wait.url_change(text) 要求当前 URL 必须变化且包含或不包含 text
+            page.wait.url_change("login.php", exclude=True, timeout=20)
+
+            # 检查是否跳转出了登录页（跳转失败则仍在 login.php）
+            if "login.php" in page.url:
+                error_msg = "账号密码错误或登录被拒绝，请检查账号配置。"
+                print(f"[browser-login] ❌ {error_msg}")
+                raise Exception(error_msg)
+
+            # 提取所有 Cookie（DrissionPage 4.x page.cookies() 返回 CookiesList，需手动转字典）
+            cookies_list = page.cookies()
+            raw_cookies = {cookie["name"]: cookie["value"] for cookie in cookies_list}
+            print(f"[browser-login] 获取到 Cookie keys: {list(raw_cookies.keys())}")
+
+            # 写入配置
+            self.config.set("cookie", "PHPSESSID", raw_cookies.get("PHPSESSID", ""))
+            self.config.set("cookie", "jieqiUserInfo", raw_cookies.get("jieqiUserInfo", ""))
+            self.config.set("cookie", "jieqiVisitInfo", raw_cookies.get("jieqiVisitInfo", ""))
+            if raw_cookies.get("cf_clearance"):
+                self.config.set("cookie", "cf_clearance", raw_cookies.get("cf_clearance", ""))
+                print("[browser-login] ✅ cf_clearance 已获取并写入。")
+            else:
+                print("[browser-login] ⚠️ 未获取到 cf_clearance（可能本次请求未触发 Cloudflare 挑战，通常不影响使用）。")
+
+            # 同步更新内存中的 cookies 与 session
+            self.cookies.update({
+                "PHPSESSID": raw_cookies.get("PHPSESSID", ""),
+                "jieqiUserInfo": raw_cookies.get("jieqiUserInfo", ""),
+                "jieqiVisitInfo": raw_cookies.get("jieqiVisitInfo", ""),
+                "cf_clearance": raw_cookies.get("cf_clearance", ""),
+            })
+            from curl_cffi import requests as cffi_requests
+            self.session = cffi_requests.Session(
+                impersonate="chrome120", proxies=self.proxies
+            )
+            for k, v in self.cookies.items():
+                if v:
+                    self.session.cookies.set(k, v)
+
+            print("[browser-login] ✅ 所有 Cookie 已更新并写入配置文件。")
+
+        except Exception as e:
+            print(f"[browser-login] ❌ 发生异常: {e}")
+            raise
+        finally:
+            page.quit()
+            print("[browser-login] 浏览器已关闭。")
+
 
     def get_image_content(self, url: str) -> Optional[bytes]:
         """
@@ -315,12 +432,57 @@ class WebCrawler:
                 .find_all("a")
             )
             results = []
-            for tag in anchor_tags:
-                if tag.find("img"):  # 过滤掉无封面的纯文字链接
+            container_td = page.find("div", id="content").find("table").find("tr").find("td")
+            if container_td:
+                for item_div in container_td.find_all("div", recursive=False):
+                    a_tag = item_div.find("a")
+                    if not a_tag or not a_tag.find("img"):
+                        continue
+                        
+                    title = a_tag.get("title", "")
+                    cover = a_tag.img.get("src", "")
+                    
+                    href = a_tag.get("href", "")
+                    book_id = href.split("/")[-1].split(".")[0] if href else ""
+                    
+                    author = ""
+                    status = ""
+                    tags = ""
+                    desc = ""
+                    
+                    divs = item_div.find_all("div", recursive=False)
+                    if len(divs) > 1:
+                        info_div = divs[1]
+                        ps = info_div.find_all("p")
+                        
+                        if len(ps) > 0:
+                            author_cat = ps[0].get_text()
+                            if "作者:" in author_cat:
+                                author = author_cat.split("/")[0].replace("作者:", "").strip()
+                        
+                        if len(ps) > 1:
+                            update_status = ps[1].get_text()
+                            if "连载中" in update_status:
+                                status = "连载中"
+                            elif "已完结" in update_status:
+                                status = "已完结"
+                            else:
+                                status = "未知"
+                                
+                        if len(ps) > 2:
+                            tags = ps[2].get_text().replace("Tags:", "").strip()
+                            
+                        if len(ps) > 3:
+                            desc = ps[3].get_text().replace("简介:", "").strip()
+                            
                     results.append({
-                        "title": tag["title"],
-                        "cover": tag.img["src"],
-                        "id": tag["href"].split("/")[-1].split(".")[0],
+                        "title": title,
+                        "cover": cover,
+                        "id": book_id,
+                        "author": author,
+                        "status": status,
+                        "tags": tags,
+                        "desc": desc,
                     })
             return results
         
@@ -339,7 +501,38 @@ class WebCrawler:
                 book_id = content_div.find("img")["src"].split("/")[-2]
                 
             cover = content_div.find("img")["src"]
-            return [{"title": title, "cover": cover, "id": book_id}]
+            
+            author = ""
+            status = ""
+            desc = ""
+            try:
+                info_table = content_div.find("table")
+                if info_table:
+                    info_cells = info_table.find_all("tr")[2].find_all("td")
+                    if len(info_cells) > 1:
+                        author = info_cells[1].text.split("：")[-1].strip()
+                    if len(info_cells) > 2:
+                        status = info_cells[2].text.split("：")[-1].strip()
+                spans = content_div.find_all("span")
+                for i, span in enumerate(spans):
+                    if "内容简介：" in span.get_text():
+                        if len(span.get_text().strip()) > 5:
+                            desc = span.get_text().replace("内容简介：", "").strip()
+                        elif i + 1 < len(spans):
+                            desc = spans[i + 1].get_text().strip()
+                        break
+            except Exception:
+                pass
+                
+            return [{
+                "title": title, 
+                "cover": cover, 
+                "id": book_id,
+                "author": author,
+                "status": status,
+                "tags": "",
+                "desc": desc
+            }]
 
         # 既不是搜索结果列表，也不是书籍详情（例如：搜索无结果、触发了其他未写明的防刷/重定向返回用户中心等）
         return []
