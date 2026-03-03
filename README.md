@@ -57,24 +57,11 @@
    streamlit run app.py
    ```
 
-**补充说明（Windows 一键运行脚本）：**
+**补充说明（全自动免配置便携版）：**
 
-为方便后续使用，可自行在项目根目录下创建 `start.bat` 文件实现一键启动，参考示例如下：
+项目最新版本已支持跨平台全自动便携打包发行。如果你不想在本地手动配置上述 Python 环境并解决复杂的依赖问题，你可以直接前往本项目 GitHub Releases 页面，下载对应平台的独立压缩包（如 `Wenku8Downloader-Windows.zip` 或 `.macOS.zip`）。
 
-```bat
-@echo off
-:: 进入当前目录
-cd /d %~dp0
-
-:: 激活虚拟环境
-call myenv\Scripts\activate
-
-:: 运行 Streamlit 应用
-streamlit run app.py
-
-:: 保持命令行窗口开启
-pause
-```
+解压后双击其中的 `start.bat`（Windows）或 `start.command`（macOS）即可开箱直接启动——内部已自带所有 Python 运行环境以及绕过防刷验证所需的独立 Chromium 浏览器，**完全无需其余前置安装要求**。详情可参阅代码仓库内的 `docs/build_and_release.md` 发版说明。
 
 ## 常见问题
 
