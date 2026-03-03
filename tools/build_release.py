@@ -12,6 +12,7 @@ from pathlib import Path
 # Note: we use python 3.10 as it's a good compromise for compatibility and feature set for Streamlit
 PYTHON_WIN_URL = "https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip"
 PYTHON_MAC_URL = "https://github.com/indygreg/python-build-standalone/releases/download/20240224/cpython-3.10.13+20240224-aarch64-apple-darwin-install_only.tar.gz"
+PYTHON_LINUX_URL = "https://github.com/indygreg/python-build-standalone/releases/download/20240224/cpython-3.10.13+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RELEASE_DIR = BASE_DIR / "release"
@@ -57,9 +58,10 @@ def install_python_windows(target_dir: Path):
     subprocess.run([str(python_exe), str(get_pip_script)], check=True)
     get_pip_script.unlink()
 
-def install_python_mac(target_dir: Path):
+def install_python_unix(target_dir: Path, is_macos: bool):
     archive_path = target_dir / "python.tar.gz"
-    download_file(PYTHON_MAC_URL, archive_path)
+    url = PYTHON_MAC_URL if is_macos else PYTHON_LINUX_URL
+    download_file(url, archive_path)
     extract_archive(archive_path, target_dir) # Extracts to a 'python' folder within target_dir
     archive_path.unlink()
 
@@ -103,18 +105,19 @@ def install_dependencies(target_dir: Path, is_windows: bool):
     subprocess.run([str(python_exe), "-m", "playwright", "install", "chromium"], env=env, check=True)
 
 
-def create_launch_scripts(target_dir: Path, is_windows: bool):
+def create_launch_scripts(target_dir: Path, platform_arg: str):
     print("Creating launch scripts...")
-    if is_windows:
+    if platform_arg == "windows":
         script_path = target_dir / "start.bat"
         content = """@echo off
-set "PLAYWRIGHT_BROWSERS_PATH=%~dp0bin\browsers"
-"%~dp0python\python.exe" -m streamlit run "%~dp0app.py"
+set "PLAYWRIGHT_BROWSERS_PATH=%~dp0bin\\browsers"
+"%~dp0python\\python.exe" -m streamlit run "%~dp0app.py"
 pause
 """
         script_path.write_text(content, encoding="utf-8")
     else:
-        script_path = target_dir / "start.command"
+        script_name = "start.command" if platform_arg == "macos" else "start.sh"
+        script_path = target_dir / script_name
         content = """#!/bin/bash
 cd "$(dirname "$0")"
 export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/bin/browsers"
@@ -124,14 +127,26 @@ export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/bin/browsers"
         script_path.chmod(0o755)
 
 def main():
-    sys_platform = platform.system().lower()
-    is_windows = sys_platform == "windows"
+    if len(sys.argv) > 1 and sys.argv[1] in ["windows", "macos", "linux"]:
+        platform_arg = sys.argv[1]
+    else:
+        sys_platform = platform.system().lower()
+        if sys_platform == "windows":
+            platform_arg = "windows"
+        elif sys_platform == "darwin":
+            platform_arg = "macos"
+        else:
+            platform_arg = "linux"
+
+    is_windows = platform_arg == "windows"
     
-    # We allow overriding the target platform for GitHub Actions cross-compilation
-    if len(sys.argv) > 1 and sys.argv[1] in ["windows", "macos"]:
-       is_windows = sys.argv[1] == "windows" 
-       
-    platform_name = "Windows" if is_windows else "macOS"
+    if platform_arg == "windows":
+        platform_name = "Windows"
+    elif platform_arg == "macos":
+        platform_name = "macOS"
+    else:
+        platform_name = "Linux"
+        
     print(f"Starting build for {platform_name}...")
 
     if RELEASE_DIR.exists():
@@ -144,11 +159,11 @@ def main():
     if is_windows:
         install_python_windows(target_dir)
     else:
-        install_python_mac(target_dir)
+        install_python_unix(target_dir, is_macos=(platform_arg == "macos"))
 
     setup_app_files(target_dir)
     install_dependencies(target_dir, is_windows)
-    create_launch_scripts(target_dir, is_windows)
+    create_launch_scripts(target_dir, platform_arg)
 
     # Create final ZIP
     zip_name = RELEASE_DIR / f"{APP_NAME}-{platform_name}.zip"
