@@ -62,8 +62,6 @@ def home_page() -> None:
     st.write("- ✅ 下载整本小说或分卷下载")
     st.write("- ✅ 单独下载小说插图")
     st.write("- ✅ 支持个性化下载配置")
-    st.write("- ✅ **自动突破 Cloudflare 盾与 403 拦截（内置 TLS 指纹伪造）**")
-    st.write("- ✅ **自带连接失败与被网站限流时的自动挂起自愈重试机制**")
 
     st.write("")
     st.write("**注意事项**")
@@ -143,18 +141,22 @@ def config_page() -> None:
         feedback_cookie = st.empty()
 
         st.write("### 🤖 自动获取 (推荐)")
-        st.write("点击下方按钮将启动隐形浏览器自动完成登录（绕过 Cloudflare 防护）。")
+        st.write("点击下方按钮将启动真实 Chrome 浏览器自动完成登录，可靠绕过 Cloudflare，并获取 `cf_clearance`。")
+        st.caption("⚠️ 点击后屏幕上会弹出浏览器窗口，自动操作完成后会自动关闭，无需手动干预。")
         if st.button("🚀 一键获取 / 刷新 Cookie", use_container_width=True, type="primary"):
+            _cookie_error = None
+            with st.spinner("浏览器启动中，请稍候（可能需要 10~30 秒）..."):
+                try:
+                    crawler.get_cookie_via_browser()
+                except Exception as e:
+                    _cookie_error = str(e)
             with feedback_cookie:
-                with st.spinner("正在启动无感浏览器环境获取 Cookie，请稍候..."):
-                    try:
-                        crawler.get_cookie()
-                        st.success("🎉 Cookie 自动获取成功！已写入配置并立即生效。")
-                        # 强制重新加载以更新下方输入框的显示
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 自动获取失败: {e}\n\n请检查网络、代理配置或「👤 账号」是否正确。也可以尝试下方的「手动配置」。")
+                if _cookie_error:
+                    st.error(f"❌ 自动获取失败：{_cookie_error}\n\n请检查网络、代理配置或「👤 账号」是否正确，也可尝试下方「手动配置」。")
+                else:
+                    st.success("🎉 Cookie 自动获取成功！已写入配置并立即生效。")
+                    time.sleep(1)
+                    st.rerun()
 
         st.divider()
 
@@ -277,7 +279,7 @@ def full_volumes_download_page() -> None:
                                 book = Book(book_id)
                                 update_session(book)
                             except Exception as e:
-                                st.error(f"❌ 获取书籍信息失败: {e}")
+                                _show_error_msg(e, "获取书籍信息失败")
                                 st.stop()
                         else:
                             book = st.session_state.book
@@ -320,7 +322,7 @@ def divided_volumes_download_page() -> None:
                                 book = Book(book_id)
                                 update_session(book)
                             except Exception as e:
-                                st.error(f"❌ 获取书籍信息失败: {e}")
+                                _show_error_msg(e, "获取书籍信息失败")
                                 st.stop()
                         else:
                             book = st.session_state.book
@@ -371,7 +373,7 @@ def picture_download_page() -> None:
                                 book = Book(book_id)
                                 update_session(book)
                             except Exception as e:
-                                st.error(f"❌ 获取书籍信息失败: {e}")
+                                _show_error_msg(e, "获取书籍信息失败")
                                 st.stop()
                         else:
                             book = st.session_state.book
@@ -420,7 +422,6 @@ def search_by_author_page() -> None:
     """按作者搜索页面：输入作者名，展示搜索结果，可跳转详情。"""
     st.title("按作者搜索")
     col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
-    select_container = st.container()
     info_container = st.container()
 
     show_books = st.session_state.author_search
@@ -438,20 +439,16 @@ def search_by_author_page() -> None:
                         if not show_books:
                             st.error("未找到相关作品")
                     except Exception as e:
-                        if "403" in str(e):
-                            st.error("❌ 网站访问被拒绝（403）。\n\n可能原因：\n- Cookie 已过期，请到「配置」页面点击「更新 Cookie」\n- 当前网络 IP 被网站封禁，请尝试更换网络或使用代理")
-                        else:
-                            st.error(f"查询失败：{e}")
+                        _show_error_msg(e, "查询失败")
 
     if show_books:
-        _render_search_results(show_books, select_container)
+        _render_search_results(show_books)
 
 
 def search_by_title_page() -> None:
     """按书名搜索页面：输入书名，展示搜索结果，可跳转详情。"""
     st.title("按书名搜索")
     col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
-    select_container = st.container()
     info_container = st.container()
 
     show_books = st.session_state.title_search
@@ -469,13 +466,10 @@ def search_by_title_page() -> None:
                         if not show_books:
                             st.error("未找到相关作品")
                     except Exception as e:
-                        if "403" in str(e):
-                            st.error("❌ 网站访问被拒绝（403）。\n\n可能原因：\n- Cookie 已过期，请到「配置」页面点击「更新 Cookie」\n- 当前网络 IP 被网站封禁，请尝试更换网络或使用代理")
-                        else:
-                            st.error(f"查询失败：{e}")
+                        _show_error_msg(e, "查询失败")
 
     if show_books:
-        _render_search_results(show_books, select_container)
+        _render_search_results(show_books)
 
 
 def search_by_id_page() -> None:
@@ -505,7 +499,7 @@ def search_by_id_page() -> None:
                                 book = Book(book_id)
                                 update_session(book)
                             except Exception as e:
-                                st.error(f"❌ 获取书籍信息失败: {e}")
+                                _show_error_msg(e, "获取书籍信息失败")
                                 st.stop()
 
     if st.session_state.book is not None:
@@ -546,6 +540,25 @@ def search_by_id_page() -> None:
 # 辅助函数
 # ==================================================================
 
+def _show_error_msg(e: Exception, context: str = "请求出错") -> None:
+    """
+    根据异常信息展示友好的错误提示。
+    统一处理 Cloudflare 拦截 (403) 与重试超时等常见问题。
+    """
+    err_str = str(e)
+    # 关键字匹配，抓取 403 状态或文库的防刷提示
+    if "403" in err_str or "最大重试次数" in err_str or "两次搜索的间隔时间不得少于" in err_str:
+        st.error(
+            "❌ 网站访问被拒绝（403）或请求失败。\n\n"
+            "**可能原因与建议操作：**\n"
+            "1. ⏳ **访问过于频繁**：触发了 Cloudflare 拦截，请**等待 1~2 分钟后**再试。\n"
+            "2. 🍪 **Cookie 已过期**：请前往「配置」->「Cookie」页面点击「一键获取 / 刷新 Cookie」。\n"
+            "3. 🌐 **IP 被封禁**：当前网络 IP 受到限制，请尝试更换网络或使用代理。"
+        )
+    else:
+        st.error(f"❌ {context}：{e}")
+
+
 def _parse_book_id_input(raw: str) -> str:
     """
     从用户输入中提取书籍编号。
@@ -573,44 +586,48 @@ def _parse_book_id_input(raw: str) -> str:
     return ""
 
 
-def _render_search_results(show_books: List[dict], select_container) -> None:
+def _render_search_results(show_books: List[dict]) -> None:
     """
-    渲染搜索结果：顶部下拉框用于选择并跳转，下方列表展示所有结果。
+    渲染搜索结果：展示所有结果，并在每本书右侧提供查看信息的按钮。
 
     :param show_books: 搜索结果列表，格式同 WebCrawler.search 的返回值
-    :param select_container: 放置下拉框和跳转按钮的 Streamlit 容器
     """
-    book_titles = [item["title"] for item in show_books]
-
-    with select_container:
-        col_select, col_jump = st.columns([3, 1], vertical_alignment="bottom")
-        with col_select:
-            selected = st.selectbox("选择要查看的作品", book_titles)
-        with col_jump:
-            if st.button("查看信息"):
-                for item in show_books:
-                    if item["title"] == selected:
-                        try:
-                            with st.spinner("正在获取书籍信息..."):
-                                book = Book(item["id"])
-                                update_session(book)
-                        except Exception as e:
-                            st.error(f"❌ 查阅获取失败：{e}")
-                            st.stop()
-                        break
-                st.switch_page(st.Page(search_by_id_page))
-
     # 列表展示所有结果
     for item in show_books:
-        with st.container():
-            col_cover, col_info = st.columns([1, 3])
+        with st.container(border=True):
+            col_cover, col_info, col_btn = st.columns([2, 6, 2], vertical_alignment="center")
+            
             with col_cover:
-                st.image(item["cover"])
+                if item.get("cover"):
+                    st.image(item["cover"], use_container_width=True)
+                    
             with col_info:
-                st.write(f"<h3>{item['title']}</h3>", unsafe_allow_html=True)
-                st.write("---")
-                st.write(f"编号：{item['id']}")
-            st.write("---")
+                st.write(f"### {item['title']}")
+                st.write(f"**编号：** `{item['id']}`")
+                
+                info_md = []
+                if item.get("author"):
+                    info_md.append(f"👨‍🏫 **作者：** {item['author']}")
+                if item.get("status"):
+                    info_md.append(f"📊 **状态：** {item['status']}")
+                if info_md:
+                    st.write(" | ".join(info_md))
+                    
+                if item.get("tags"):
+                    st.write(f"🏷️ **Tags：** {item['tags']}")
+                if item.get("desc"):
+                    st.caption(item["desc"][:150] + ("..." if len(item["desc"]) > 150 else ""))
+                    
+            with col_btn:
+                if st.button("查看信息", key=f"btn_view_{item['id']}", use_container_width=True):
+                    try:
+                        with st.spinner("正在获取书籍详情..."):
+                            book = Book(item["id"])
+                            update_session(book)
+                    except Exception as e:
+                        _show_error_msg(e, "查阅获取失败")
+                        st.stop()
+                    st.switch_page(st.Page(search_by_id_page))
 
 
 def show_book_info(book: Book, container) -> None:
