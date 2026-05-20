@@ -126,3 +126,7 @@ class ConfigManager:
     def get_all(self) -> dict:
         """返回完整的配置字典（只读引用）。"""
         return self.config
+
+
+# 模块级单例，确保全局唯一配置实例
+config = ConfigManager()

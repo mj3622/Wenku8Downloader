@@ -18,8 +18,8 @@ import time
 import streamlit as st
 from ebooklib import epub
 
-from .config_manager import ConfigManager
-from .crawler import WebCrawler
+from .config_manager import config as _config
+from .crawler import crawler as _crawler
 
 # ------------------------------------------------------------------
 # 下载目录常量
@@ -27,10 +27,6 @@ from .crawler import WebCrawler
 SAVE_PATH = os.path.join(os.getcwd(), "downloads")
 PIC_PATH = os.path.join(SAVE_PATH, "pics")
 NOVEL_PATH = os.path.join(SAVE_PATH, "novels")
-
-# 模块级单例：避免 Downloader 与 Book 各自创建多个 WebCrawler 实例
-_crawler = WebCrawler()
-_config = ConfigManager()
 
 
 class Downloader:

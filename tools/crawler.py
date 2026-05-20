@@ -8,13 +8,16 @@ crawler.py - 网络请求与内容抓取模块
   - 关键字搜索
 """
 
+import logging
 from typing import Optional
 import time
 
 from curl_cffi import requests
+
+logger = logging.getLogger(__name__)
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
-from . import config_manager
+from .config_manager import config as _global_config
 
 # 最大图片下载重试次数
 _MAX_IMAGE_RETRIES = 3
@@ -55,6 +58,8 @@ def _encode_key(key: str) -> str:
     :param key: 原始搜索关键字（Unicode 字符串）
     :return: 编码后的 URL 参数字符串，如 "%c4%cf%......"
     """
+    if not key:
+        return ""
     encoded_bytes = key.encode("gbk")
     return "".join([f"%{byte:02x}" for byte in encoded_bytes])
 
@@ -73,7 +78,7 @@ class WebCrawler:
         :param cookie: 可选，手动传入的 Cookie 字典；
                        若为 None，则从配置文件中读取
         """
-        self.config = config_manager.ConfigManager()
+        self.config = _global_config
         self.cookies = cookie or {
             "PHPSESSID": self.config.get("cookie", "PHPSESSID"),
             "jieqiUserInfo": self.config.get("cookie", "jieqiUserInfo"),
@@ -124,7 +129,7 @@ class WebCrawler:
                 )
             except Exception as e:
                 response = None
-                print(f"[fetch] 请求出错：{e}")
+                logger.debug("[fetch] 请求出错：%s", e)
 
             if response is not None and response.status_code == 200:
                 if not parse:
@@ -137,9 +142,12 @@ class WebCrawler:
 
             # 处理 403 或其他状态码（可能被 Cloudflare 拦截）
             status = response.status_code if response is not None else "ERROR"
-            print(f"[fetch] 尝试 {attempt + 1}/{max_retries} 返回 {status}（可能遭遇 Cloudflare 拦截/网络波动）。")
+            logger.warning(
+                "[fetch] 尝试 %d/%d 返回 %s（可能遭遇 Cloudflare 拦截/网络波动）",
+                attempt + 1, max_retries, status,
+            )
             if attempt < max_retries - 1:
-                print("[fetch] 正在重置会话并等待 8 秒后重试...")
+                logger.info("[fetch] 正在重置会话并等待 8 秒后重试...")
                 time.sleep(8)
                 # 重新初始化 Session 以刷新 TLS 握手状态
                 self.session = requests.Session(impersonate="chrome120", proxies=self.proxies)
@@ -192,15 +200,18 @@ class WebCrawler:
                 )
             except Exception as e:
                 response = None
-                print(f"[login] 请求出错：{e}")
+                logger.debug("[login] 请求出错：%s", e)
 
             if response is not None and response.status_code == 200:
                 break  # 成功，跳出重试
-            
+
             status = response.status_code if response is not None else "ERROR"
-            print(f"[login] 尝试 {attempt + 1}/{max_retries} 返回 {status}（可能遭遇 Cloudflare 拦截/网络波动）。")
+            logger.warning(
+                "[login] 尝试 %d/%d 返回 %s（可能遭遇 Cloudflare 拦截/网络波动）",
+                attempt + 1, max_retries, status,
+            )
             if attempt < max_retries - 1:
-                print("[login] 正在重置会话并等待 5 秒后重试...")
+                logger.info("[login] 正在重置会话并等待 5 秒后重试...")
                 time.sleep(5)
                 # 重新初始化 Session 以刷新 TLS 握手状态
                 self.session = requests.Session(impersonate="chrome120", proxies=self.proxies)
@@ -211,11 +222,14 @@ class WebCrawler:
         if response is None:
             raise Exception("登录失败：达到最大重试次数且无响应。")
 
-        print(f"[login] 状态码: {response.status_code}")
-        print(f"[login] 最终 URL: {response.url}")
-        print(f"[login] 响应头 Set-Cookie: {response.headers.get('set-cookie', '（无）')}")
-        print(f"[login] response.cookies: {dict(response.cookies)}")
-        print(f"[login] 所有响应头: { dict(response.headers) }")
+        logger.debug("[login] 状态码: %s", response.status_code)
+        logger.debug("[login] 最终 URL: %s", response.url)
+        logger.debug(
+            "[login] 响应头 Set-Cookie: %s",
+            response.headers.get("set-cookie", "（无）"),
+        )
+        logger.debug("[login] response.cookies: %s", dict(response.cookies))
+        logger.debug("[login] 所有响应头: %s", dict(response.headers))
 
         # 从自动合并的 CookieJar 中读取新 Cookie
         new_cookies = dict(self.session.cookies)
@@ -229,10 +243,10 @@ class WebCrawler:
             self.config.set("cookie", "jieqiVisitInfo", new_cookies.get("jieqiVisitInfo", ""))
             if new_cookies.get("cf_clearance"):
                 self.config.set("cookie", "cf_clearance", new_cookies.get("cf_clearance", ""))
-            print("[login] ✅ Cookie 已更新并写入配置文件。")
-            print(f"[login] 新 Cookie keys: {list(new_cookies.keys())}")
+            logger.info("[login] Cookie 已更新并写入配置文件")
+            logger.debug("[login] 新 Cookie keys: %s", list(new_cookies.keys()))
         else:
-            print("[login] ❌ 未能从响应中解析到新 Cookie。")
+            logger.error("[login] 未能从响应中解析到新 Cookie")
             if response.status_code == 403:
                 raise Exception(
                     "登录端点返回 403（被 Cloudflare 或 IP 封锁）。\n"
@@ -258,10 +272,10 @@ class WebCrawler:
 
         if not username or not password:
             error_msg = "账号或密码未配置，请先在「👤 账号」标签填写。"
-            print(f"[browser-login] ❌ {error_msg}")
+            logger.error("[browser-login] %s", error_msg)
             raise Exception(error_msg)
 
-        print("[browser-login] 正在启动浏览器...")
+        logger.info("[browser-login] 正在启动浏览器...")
         opts = ChromiumOptions()
         
         # 尝试寻找本地内置浏览器 (由 playwright 下载)
@@ -296,7 +310,7 @@ class WebCrawler:
                             break
                             
         if local_browser_path and os.path.exists(local_browser_path):
-            print(f"[browser-login] 检测到本地便携版浏览器，将使用：{local_browser_path}")
+            logger.info("[browser-login] 检测到本地便携版浏览器，将使用：%s", local_browser_path)
             opts.set_browser_path(local_browser_path)
 
         # 不使用无头模式，避免被 Cloudflare 识别为自动化工具
@@ -311,7 +325,7 @@ class WebCrawler:
                     "请确保已安装 Google Chrome 或 Microsoft Edge 浏览器。\n"
                     "如果你已安装但依然报错，请在 DrissionPage 全局配置中指定浏览器路径。"
                 )
-                print(f"[browser-login] ❌ {error_msg}")
+                logger.error("[browser-login] %s", error_msg)
                 raise Exception(error_msg)
             else:
                 raise
@@ -321,15 +335,15 @@ class WebCrawler:
                 "https://www.wenku8.net/login.php"
                 "?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php"
             )
-            print(f"[browser-login] 正在导航到登录页...")
+            logger.info("[browser-login] 正在导航到登录页...")
             page.get("https://www.wenku8.net/login.php")
 
             # 等待 Cloudflare 挑战通过（最多 15 秒），标志是登录表单出现
-            print("[browser-login] 等待 Cloudflare 验证通过...")
+            logger.info("[browser-login] 等待 Cloudflare 验证通过...")
             page.wait.ele_displayed("css:[name=username]", timeout=20)
 
             # 填写表单
-            print("[browser-login] 正在填写账号密码并设定较长有效时间...")
+            logger.info("[browser-login] 正在填写账号密码并设定较长有效时间...")
             page.ele("css:[name=username]").clear().input(username)
             page.ele("css:[name=password]").clear().input(password)
             
@@ -342,20 +356,20 @@ class WebCrawler:
             page.ele("css:[name=submit]", timeout=10).click()
 
             # 等待跳转离开登录页（最多 20 秒）
-            print("[browser-login] 等待登录跳转...")
+            logger.info("[browser-login] 等待登录跳转...")
             # wait.url_change(text) 要求当前 URL 必须变化且包含或不包含 text
             page.wait.url_change("login.php", exclude=True, timeout=20)
 
             # 检查是否跳转出了登录页（跳转失败则仍在 login.php）
             if "login.php" in page.url:
                 error_msg = "账号密码错误或登录被拒绝，请检查账号配置。"
-                print(f"[browser-login] ❌ {error_msg}")
+                logger.error("[browser-login] %s", error_msg)
                 raise Exception(error_msg)
 
             # 提取所有 Cookie（DrissionPage 4.x page.cookies() 返回 CookiesList，需手动转字典）
             cookies_list = page.cookies()
             raw_cookies = {cookie["name"]: cookie["value"] for cookie in cookies_list}
-            print(f"[browser-login] 获取到 Cookie keys: {list(raw_cookies.keys())}")
+            logger.info("[browser-login] 获取到 Cookie keys: %s", list(raw_cookies.keys()))
 
             # 写入配置
             self.config.set("cookie", "PHPSESSID", raw_cookies.get("PHPSESSID", ""))
@@ -363,9 +377,12 @@ class WebCrawler:
             self.config.set("cookie", "jieqiVisitInfo", raw_cookies.get("jieqiVisitInfo", ""))
             if raw_cookies.get("cf_clearance"):
                 self.config.set("cookie", "cf_clearance", raw_cookies.get("cf_clearance", ""))
-                print("[browser-login] ✅ cf_clearance 已获取并写入。")
+                logger.info("[browser-login] cf_clearance 已获取并写入")
             else:
-                print("[browser-login] ⚠️ 未获取到 cf_clearance（可能本次请求未触发 Cloudflare 挑战，通常不影响使用）。")
+                logger.warning(
+                    "[browser-login] 未获取到 cf_clearance"
+                    "（可能本次请求未触发 Cloudflare 挑战，通常不影响使用）"
+                )
 
             # 同步更新内存中的 cookies 与 session
             self.cookies.update({
@@ -382,19 +399,21 @@ class WebCrawler:
                 if v:
                     self.session.cookies.set(k, v)
 
-            print("[browser-login] ✅ 所有 Cookie 已更新并写入配置文件。")
+            logger.info("[browser-login] 所有 Cookie 已更新并写入配置文件")
 
         except Exception as e:
-            print(f"[browser-login] ❌ 发生异常: {e}")
+            logger.error("[browser-login] 发生异常: %s", e)
             raise
         finally:
             page.quit()
-            print("[browser-login] 浏览器已关闭。")
+            logger.debug("[browser-login] 浏览器已关闭")
 
 
     def get_image_content(self, url: str) -> Optional[bytes]:
         """
         下载图片并返回原始二进制内容，失败时最多重试 _MAX_IMAGE_RETRIES 次。
+
+        重试策略与 fetch() 一致：异常与非 200 状态码均触发重试。
 
         :param url: 图片的完整 URL
         :return: 图片的 bytes 内容；全部重试失败后返回 None
@@ -402,34 +421,27 @@ class WebCrawler:
         headers = _COMMON_HEADERS.copy()
         headers["Referer"] = "https://www.wenku8.net/"
 
-        response = None
-        try:
-            response = self.session.get(
-                url, headers=headers, allow_redirects=True
+        for attempt in range(_MAX_IMAGE_RETRIES):
+            try:
+                response = self.session.get(
+                    url, headers=headers, allow_redirects=True
+                )
+            except Exception as e:
+                response = None
+                logger.debug("图片下载出错：%s（%s）", url, e)
+
+            if response is not None and response.status_code == 200:
+                return response.content
+
+            status = response.status_code if response is not None else "ERROR"
+            logger.debug(
+                "[image] 尝试 %d/%d 返回 %s：%s",
+                attempt + 1, _MAX_IMAGE_RETRIES, status, url,
             )
-        except Exception as e:
-            print(f"图片下载失败，开始重试：{url}（{e}）")
-            # 有限次数重试
-            for attempt in range(_MAX_IMAGE_RETRIES):
-                try:
-                    response = self.session.get(url, headers=headers)
-                    break   # 请求成功，跳出重试循环
-                except Exception as retry_e:
-                    print(
-                        f"第 {attempt + 1}/{_MAX_IMAGE_RETRIES} 次重试失败："
-                        f"{url}（{retry_e}）"
-                    )
-                    time.sleep(1)
-            else:
-                # for-else：循环正常结束（未 break），说明全部重试均失败
-                print(f"已达最大重试次数，放弃下载：{url}")
-                return None
+            if attempt < _MAX_IMAGE_RETRIES - 1:
+                time.sleep(1)
 
-        if response is not None and response.status_code == 200:
-            return response.content
-
-        status = response.status_code if response is not None else "N/A"
-        print(f"图片下载失败：{url}，状态码：{status}")
+        logger.warning("已达最大重试次数，放弃下载：%s", url)
         return None
 
     def search(self, keyword: str, search_type: str) -> list[dict]:
@@ -572,3 +584,7 @@ class WebCrawler:
 
         # 既不是搜索结果列表，也不是书籍详情（例如：搜索无结果、触发了其他未写明的防刷/重定向返回用户中心等）
         return []
+
+
+# 模块级单例，确保全局唯一会话（共享 Cookie、TLS 状态）
+crawler = WebCrawler()
