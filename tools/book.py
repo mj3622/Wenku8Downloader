@@ -35,7 +35,6 @@ class Book:
 
         # 按顺序初始化：章节目录 → 插图 URL 映射 → 基本信息
         self.base_chapter_url, self.volumes = self._fetch_chapters()
-        self.volume_num = len(self.volumes)
         self.picture_urls = self._build_picture_url_map()
         self.basic_info = self._fetch_basic_info()
 

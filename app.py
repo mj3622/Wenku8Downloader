@@ -16,21 +16,20 @@ app.py - Wenku8Downloader 主入口
 """
 
 import os
+import re
 import time
 from typing import List
 
 import streamlit as st
 
 from tools.book import Book
-from tools.config_manager import ConfigManager
-from tools.crawler import WebCrawler
+from tools.config_manager import config
+from tools.crawler import crawler
 from tools.downloader import Downloader
 
 # ------------------------------------------------------------------
 # 应用级单例（模块加载时创建一次，所有页面共享）
 # ------------------------------------------------------------------
-config = ConfigManager()
-crawler = WebCrawler()
 downloader = Downloader()
 
 
@@ -255,38 +254,22 @@ def config_page() -> None:
 def full_volumes_download_page() -> None:
     """整本下载页面：输入书号后将整本小说下载为单个 EPUB 文件。"""
     st.title("整本下载")
-    col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
     info_container = st.container()
     button_container = st.container()
     status_bar = st.container()
 
+    book_id, clicked = _render_book_query_input(
+        label="请输入轻小说文库的作品编号或链接",
+        help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
+        button_text="查询信息",
+    )
+    if clicked:
+        if not book_id:
+            st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
+        else:
+            _execute_book_query(book_id, status_bar)
+
     book = st.session_state.book
-
-    with col_input:
-        book_id = _parse_book_id_input(
-            st.text_input(
-                "请输入轻小说文库的作品编号或链接",
-                help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
-            )
-        )
-
-    with col_btn:
-        if st.button("查询信息"):
-            if not book_id:
-                st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
-            else:
-                with status_bar:
-                    with st.spinner("正在查询中..."):
-                        if safe_get_book_id() != book_id:
-                            try:
-                                book = Book(book_id)
-                                update_session(book)
-                            except Exception as e:
-                                _show_error_msg(e, "获取书籍信息失败")
-                                st.stop()
-                        else:
-                            book = st.session_state.book
-
     if book is not None:
         with info_container:
             with st.spinner("Wait for it..."):
@@ -299,37 +282,21 @@ def full_volumes_download_page() -> None:
 def divided_volumes_download_page() -> None:
     """分卷下载页面：选择指定卷后下载为独立的 EPUB 文件。"""
     st.title("分卷下载")
-    col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
     select_box = st.container()
     status_bar = st.container()
 
+    book_id, clicked = _render_book_query_input(
+        label="请输入轻小说文库的作品编号或链接",
+        help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
+        button_text="查看信息",
+    )
+    if clicked:
+        if not book_id:
+            st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
+        else:
+            _execute_book_query(book_id, status_bar)
+
     book = st.session_state.book
-
-    with col_input:
-        book_id = _parse_book_id_input(
-            st.text_input(
-                "请输入轻小说文库的作品编号或链接",
-                help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
-            )
-        )
-
-    with col_btn:
-        if st.button("查看信息"):
-            if not book_id:
-                st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
-            else:
-                with status_bar:
-                    with st.spinner("正在查询中..."):
-                        if safe_get_book_id() != book_id:
-                            try:
-                                book = Book(book_id)
-                                update_session(book)
-                            except Exception as e:
-                                _show_error_msg(e, "获取书籍信息失败")
-                                st.stop()
-                        else:
-                            book = st.session_state.book
-
     if book is not None:
         with select_box:
             col_cover, col_info = st.columns([1, 3])
@@ -350,37 +317,21 @@ def divided_volumes_download_page() -> None:
 def picture_download_page() -> None:
     """图片下载页面：按卷或全书下载插图到本地文件夹。"""
     st.title("图片下载")
-    col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
     select_box = st.container()
     status_bar = st.container()
 
+    book_id, clicked = _render_book_query_input(
+        label="请输入轻小说文库的作品编号或链接",
+        help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
+        button_text="查看图片",
+    )
+    if clicked:
+        if not book_id:
+            st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
+        else:
+            _execute_book_query(book_id, status_bar)
+
     book = st.session_state.book
-
-    with col_input:
-        book_id = _parse_book_id_input(
-            st.text_input(
-                "请输入轻小说文库的作品编号或链接",
-                help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
-            )
-        )
-
-    with col_btn:
-        if st.button("查看图片"):
-            if not book_id:
-                st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
-            else:
-                with status_bar:
-                    with st.spinner("正在查询中..."):
-                        if safe_get_book_id() != book_id:
-                            try:
-                                book = Book(book_id)
-                                update_session(book)
-                            except Exception as e:
-                                _show_error_msg(e, "获取书籍信息失败")
-                                st.stop()
-                        else:
-                            book = st.session_state.book
-
     if book is not None:
         with select_box:
             col_cover, col_info = st.columns([1, 3])
@@ -478,32 +429,19 @@ def search_by_title_page() -> None:
 def search_by_id_page() -> None:
     """编号检索页面：输入书籍编号或链接，展示详情及下载入口。"""
     st.title("编号检索")
-    col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
     info_container = st.container()
     jump_container = st.container(border=True)
 
-    with col_input:
-        book_id = _parse_book_id_input(
-            st.text_input(
-                "请输入轻小说文库的作品编号或链接",
-                help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
-            )
-        )
-
-    with col_btn:
-        if st.button("查询信息"):
-            if not book_id:
-                st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
-            else:
-                with info_container:
-                    with st.spinner("正在查询中..."):
-                        if safe_get_book_id() != book_id:
-                            try:
-                                book = Book(book_id)
-                                update_session(book)
-                            except Exception as e:
-                                _show_error_msg(e, "获取书籍信息失败")
-                                st.stop()
+    book_id, clicked = _render_book_query_input(
+        label="请输入轻小说文库的作品编号或链接",
+        help="例如：3057 或 https://www.wenku8.net/book/3057.htm",
+        button_text="查询信息",
+    )
+    if clicked:
+        if not book_id:
+            st.warning("⚠️ 请输入有效的纯数字编号或轻小说文库书籍链接！")
+        else:
+            _execute_book_query(book_id, info_container)
 
     if st.session_state.book is not None:
         book = st.session_state.book
@@ -543,6 +481,39 @@ def search_by_id_page() -> None:
 # 辅助函数
 # ==================================================================
 
+def _render_book_query_input(label: str, help: str, button_text: str):
+    """渲染书籍编号输入行（输入框 + 查询按钮）。
+
+    :return: (book_id, button_clicked) 元组
+    """
+    col_input, col_btn = st.columns([6, 1], vertical_alignment="bottom")
+    with col_input:
+        book_id = _parse_book_id_input(st.text_input(label, help=help))
+    with col_btn:
+        clicked = st.button(button_text)
+    return book_id, clicked
+
+
+def _execute_book_query(book_id: str, status_container) -> None:
+    """执行书籍查询并更新会话状态。
+
+    若 book_id 对应书籍已在会话中，跳过重复查询。
+    查询失败时通过 st.stop() 中断渲染。
+
+    :param book_id: 非空的书籍编号
+    :param status_container: 显示进度条的 Streamlit 容器
+    """
+    if safe_get_book_id() == book_id:
+        return
+    with status_container:
+        with st.spinner("正在查询中..."):
+            try:
+                book = Book(book_id, crawler=crawler)
+                update_session(book)
+            except Exception as e:
+                _show_error_msg(e, "获取书籍信息失败")
+                st.stop()
+
 def _show_error_msg(e: Exception, context: str = "请求出错") -> None:
     """
     根据异常信息展示友好的错误提示。
@@ -572,11 +543,10 @@ def _parse_book_id_input(raw: str) -> str:
     :param raw: 用户原始输入字符串
     :return: 纯数字书籍编号字符串，若无法匹配则返回空字符串
     """
-    import re
     raw = raw.strip()
     if not raw:
         return ""
-        
+
     # 尝试正则匹配由于包含 https 或 http 等导致的长串，提取其中的 \d+
     match = re.search(r"wenku8\.net/book/(\d+)\.htm", raw)
     if match:
@@ -625,7 +595,7 @@ def _render_search_results(show_books: List[dict]) -> None:
                 if st.button("查看信息", key=f"btn_view_{item['id']}", use_container_width=True):
                     try:
                         with st.spinner("正在获取书籍详情..."):
-                            book = Book(item["id"])
+                            book = Book(item["id"], crawler=crawler)
                             update_session(book)
                     except Exception as e:
                         _show_error_msg(e, "查阅获取失败")
