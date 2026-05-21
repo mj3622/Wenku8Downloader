@@ -1,45 +1,51 @@
+import { useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
+import BookQueryInput from '../components/BookQueryInput'
+import BookInfoCard from '../components/BookInfoCard'
+import LoadingSpinner from '../components/LoadingSpinner'
+import StatusAlert from '../components/StatusAlert'
 
 export default function FullDownloadPage() {
-  const { book, fetchBook } = useBookStore()
-  const { downloading, error, success, downloadEpub } = useDownloadStore()
+  const { book, loading, error, fetchBook, clear: clearBook } = useBookStore()
+  const { downloading, error: dlError, success, downloadEpub, clear: clearDl } = useDownloadStore()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  useEffect(() => {
+    const id = searchParams.get('id')
+    if (id) {
+      fetchBook(id)
+      setSearchParams({}, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
       <h2 className="text-2xl font-bold mb-4">整本下载</h2>
-      <div className="flex gap-2 mb-6">
-        <input
-          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm"
-          placeholder="请输入作品编号，例如：3057"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') fetchBook(e.currentTarget.value)
-          }}
-        />
-        <button
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
-          onClick={() => {
-            const input = document.querySelector('input') as HTMLInputElement
-            if (input?.value) fetchBook(input.value)
-          }}
-        >
-          查询
-        </button>
-      </div>
+      <BookQueryInput
+        label="请输入轻小说文库的作品编号或链接"
+        help="例如：3057 或 https://www.wenku8.net/book/3057.htm"
+        onQuery={fetchBook}
+        loading={loading}
+      />
+      {loading && <LoadingSpinner text="正在查询中..." />}
+      {error && <StatusAlert type="error" message={error} onDismiss={clearBook} />}
       {book && (
-        <div className="p-4 rounded-lg border border-gray-800 mb-4">
-          <h3 className="font-semibold">{book.basic_info['标题']}</h3>
+        <div className="space-y-4">
+          <BookInfoCard book={book} />
           <button
             disabled={downloading}
-            className="mt-3 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded text-sm font-medium transition-colors"
+            className="px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50
+                       rounded text-sm font-medium transition-colors"
             onClick={() => downloadEpub(book.book_id)}
           >
-            {downloading ? '下载中...' : '下载 EPUB'}
+            {downloading ? '下载中...' : '下载整本 EPUB'}
           </button>
+          {dlError && <StatusAlert type="error" message={dlError} onDismiss={clearDl} />}
+          {success && <StatusAlert type="success" message={success} onDismiss={clearDl} />}
         </div>
       )}
-      {error && <p className="text-red-400">{error}</p>}
-      {success && <p className="text-green-400">{success}</p>}
     </div>
   )
 }
