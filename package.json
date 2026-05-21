@@ -27,28 +27,27 @@
     ],
     "extraResources": [
       {
-        "from": "tools",
-        "to": "tools"
-      },
-      {
         "from": "config",
         "to": "config"
-      },
-      {
-        "from": "requirements.txt",
-        "to": "requirements.txt"
       }
     ],
     "icon": "resources/icon.png",
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -57,12 +56,17 @@
     }
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
+    "iconv-lite": "^0.7.2",
+    "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",
+    "smol-toml": "^1.6.1",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@types/cheerio": "^0.22.35",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
