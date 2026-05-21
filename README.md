@@ -1,94 +1,129 @@
-# 轻小说下载器
+# 轻小说文库下载器
 
-**Wenku8Downloader** 是基于 Python 和 [Streamlit](https://streamlit.io/) 构建的一款本地工具，提供基于 Web 的操作页面，用于下载 [轻小说文库](https://www.wenku8.net/) 的小说并保存为 EPUB 格式。
+基于 Electron + React 构建的桌面端工具，用于下载[轻小说文库](https://www.wenku8.net/)的小说并保存为 EPUB 格式。
 
-![search_page](./docs/pics/search_page.png)
+## 功能
 
-## 基本功能
+- 支持按编号、书名、作者检索小说
+- 展示详尽的书籍封面、状态与简介
+- 整本下载（合并所有卷为单个 EPUB）
+- 分卷下载（多选批量下载）
+- 插图下载
+- 个性化配置（代理、Cookie、封面偏好等）
+- 自动突破 Cloudflare 拦截（通过 `DrissionPage` 拉起浏览器获取真实 Cookie）
+- 下载历史管理与失败重试
 
-下载文件均默认存储在 `/downloads` 目录下：
+## 安装
 
-- ✅ 查询文库中的小说信息（支持按编号、书名、作者查询），展示详尽的书籍封面、状态与简介
-- ✅ 下载整本小说或分卷下载
-- ✅ 单独下载小说插图
-- ✅ 个性化下载配置
-- ✅ **自动突破 Cloudflare 盾与 403 拦截**（内置使用 `DrissionPage` 自动拉起浏览器获取真实 Cookie 等机制）
-- ✅ **自带异常自愈与重试机制**（包含连接失败、网页限流 5 秒防刷等处理）
-- ⚠️ 暂不支持下载已下架小说
+前往 [Releases](https://github.com/mj3622/Wenku8Downloader/releases) 页面下载对应平台的安装包：
 
-## 使用方法
+- **macOS**: `.dmg` 或 `.zip`
+- **Windows**: `.exe` 安装程序
+- **Linux**: `.AppImage`
 
-本项目基于 `Python 3.9` 构建，请在使用前自行配置环境。最新版本已引入基于 `DrissionPage` 的浏览器自动化以绕过验证拦截，请确保本机已安装 Chrome 浏览器。
+首次使用前请确保本机已安装 Chrome 浏览器（用于自动获取 Cookie 突破网站验证）。
 
-1. **将项目拉取到本地**
+## 开发
 
-   ```bash
-   git clone https://github.com/mj3622/Wenku8Downloader.git
-   cd Wenku8Downloader
-   ```
+### 环境要求
 
-2. **创建并激活虚拟环境**
+- Node.js >= 18
+- Python >= 3.9
+- Chrome 浏览器
 
-   ```bash
-   # 创建
-   python -m venv myenv
-   
-   # 激活 (Windows)
-   myenv\Scripts\activate
-   
-   # 激活 (macOS/Linux)
-   source myenv/bin/activate
-   ```
+### 快速开始
 
-3. **安装依赖**
+```bash
+# 克隆项目
+git clone https://github.com/mj3622/Wenku8Downloader.git
+cd Wenku8Downloader
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 安装 Node.js 依赖
+npm install
 
-4. **配置应用（可选）**
+# 安装 Python 依赖
+pip install -r requirements.txt
 
-   系统首次启动时会自动基于模板生成 `config/secrets.toml` 配置文件。
-   你可以直接在应用内置的 Web 端「配置」页面中设定各项参数（如代理、登录账号、Cookie 及默认封面等），无需手动复制或修改配置文件。如不配置，系统将以默认设定直连运行。
+# 启动开发模式
+npm run dev
+```
 
-5. **启动应用**
+### 项目结构
 
-   ```bash
-   streamlit run app.py
-   ```
+```
+├── src/                    # Electron + React 前端
+│   ├── main/               # Electron 主进程
+│   ├── preload/            # 预加载脚本
+│   └── renderer/           # React 渲染进程
+│       ├── src/api/        # API 客户端
+│       ├── src/components/ # UI 组件
+│       ├── src/pages/      # 页面
+│       └── src/stores/     # Zustand 状态管理
+├── tools/                  # Python 后端
+│   ├── api_server.py       # FastAPI 服务
+│   ├── book.py             # 书籍模型
+│   ├── crawler.py          # 网页爬虫
+│   ├── downloader.py       # EPUB/图片下载
+│   └── config_manager.py   # 配置管理
+├── resources/              # 应用图标等资源
+└── config/                 # 配置文件模板
+```
 
-**补充说明（全自动免配置便携版）：**
+### 可用命令
 
-项目最新版本已支持跨平台全自动便携打包发行。如果你不想在本地手动配置上述 Python 环境并解决复杂的依赖问题，你可以直接前往本项目 GitHub Releases 页面，下载对应平台的独立压缩包（如 `Wenku8Downloader-Windows.zip` 或 `.macOS.zip`）。
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动开发模式（热重载） |
+| `npm run build` | 构建生产版本 |
+| `npm run typecheck` | TypeScript 类型检查 |
+| `npm run lint` | ESLint 代码检查 |
+| `npm run dist:mac` | 打包 macOS 安装包 |
+| `npm run dist:win` | 打包 Windows 安装包 |
+| `npm run dist:linux` | 打包 Linux 安装包 |
 
-解压后双击其中的 `start.bat`（Windows）或 `start.command`（macOS）即可开箱直接启动——内部已自带所有 Python 运行环境以及绕过防刷验证所需的独立 Chromium 浏览器，**完全无需其余前置安装要求**。详情可参阅代码仓库内的 `docs/build_and_release.md` 发版说明。
+## 打包发布
+
+```bash
+# 单平台
+npm run dist:mac
+
+# 全平台
+npm run dist:all
+```
+
+打包产物输出到 `release/` 目录。
 
 ## 常见问题
 
-### 1. 频繁提示被拦截或抛出 403 错误
+### 频繁提示被拦截或 403 错误
 
-目前的底层请求由 `curl_cffi` 配合 `requests` 等接管。对于 Cloudflare 的强拦截，当前版本已升级为通过 `DrissionPage` 自动拉起后台浏览器访问页面，以真实用户身份通过人机验证并获取 `cf_clearance` 及其它重要 Cookie，有效解决传统的 403 错误。
-1. 请进入 Web 端的全局「配置」页，点击「获取/更新 Cookie」按钮。后台会自动启动无头 Chrome 浏览器进行自动化登录和获取 Cookie，并随后自动应用到配置中。
-2. 网站可能针对你的 IP 执行了长达分钟级的完全封禁，这种情况下请在 `config/secrets.toml` 的 `[proxy]` 节点配置有效代理。
-3. 如果自动获取持续失败，你也可以按照页面提示手动提取浏览器内的 Cookie。
+进入「配置」页面，点击「获取/更新 Cookie」按钮，后台会自动启动 Chrome 浏览器完成验证并获取有效 Cookie。
 
-### 2. 代理的配置问题
+如果持续失败，可在配置中设置代理或手动填入浏览器 Cookie。
 
-项目不再硬性要求配置代理。如果在 `config/secrets.toml` 中留空（如 `http=""`），系统将会自动使用直连网络进行爬取。
+### 代理配置
 
-**macOS 用户代理注意事项**：
-如果在 macOS 环境下配置并启用了代理，控制台频繁弹出以下警告：
-`NotOpenSSLWarning: urllib3 v2 only supports OpenSSL ... compiled with 'LibreSSL 2.8.3'`
-这是由于 macOS 自带环境编译构建的 Python 加密库与 `urllib3` v2.x 版本之间存在兼容性问题。这通常只会作为警告输出，但这期间所有基于底层库的代理请求可能会异常出错。
-**解决方法**：进入虚拟环境后，执行命令降级 urllib3 即可完美解决：
+在「配置」页面中填写 HTTP/HTTPS 代理地址即可。留空则使用直连。
+
+### macOS 下代理报 SSL 警告
+
+如果控制台出现 `NotOpenSSLWarning`，降级 urllib3 可解决：
+
 ```bash
 pip install "urllib3<2"
 ```
 
-### 3. 小说查询或下载失败
+### 分卷下载时封面异常
 
-请先检查该书是否为已下架小说，当前暂不支持对下架小说的下载操作。若仍有问题，可能是当前网络完全阻断了该文库站点的访问。
+分卷下载默认使用首张插图作为封面。可在「配置」页面中修改 `default_cover_index` 选项。
 
-### 4. 分卷下载时封面异常
+## 技术栈
 
-分卷下载时，默认首张插图作为当卷的封面。你可以在 Web 端的「基本-配置」页面中进行修改，或设置 `config/secrets.toml` 中的 `default_cover_index` 选项以调整默认行为。
+- **前端**: Electron + React 18 + TypeScript + Tailwind CSS
+- **状态管理**: Zustand
+- **构建工具**: electron-vite + electron-builder
+- **后端**: Python FastAPI + curl_cffi + DrissionPage + EbookLib
+
+## License
+
+MIT
