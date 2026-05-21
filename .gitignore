@@ -25,6 +25,17 @@ __pycache__/
 # Claude Code
 /.claude/
 
+# Node.js
+/node_modules/
+/out/
+*.tsbuildinfo
+electron-vite.config.js
+# Generated JS from electron-vite/esbuild transform
+src/**/*.js
+
+# Electron build
+/release/
+
 dist/
 release/
 build/
