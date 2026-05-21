@@ -41,7 +41,7 @@ downloader = Downloader()
 class NoOpProgress:
     """模拟 Streamlit progress 的占位对象，用于非 Streamlit 环境。"""
 
-    def progress(self, value: float):
+    def progress(self, value: float, text: str = ""):
         pass
 
 
@@ -54,8 +54,11 @@ class NoOpContainer:
     def __exit__(self, *args):
         pass
 
-    def progress(self, value: float):
+    def progress(self, value: float, text: str = ""):
         return NoOpProgress()
+
+    def spinner(self, text: str = ""):
+        return contextmanager(lambda: (yield))()
 
     @staticmethod
     def write(*args, **kwargs):
@@ -80,10 +83,6 @@ class NoOpContainer:
     @staticmethod
     def image(*args, **kwargs):
         pass
-
-    @staticmethod
-    def spinner(*args, **kwargs):
-        return contextmanager(lambda: (yield))()
 
 
 # ------------------------------------------------------------------

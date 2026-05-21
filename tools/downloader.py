@@ -15,7 +15,6 @@ import os
 from typing import List, Union
 import time
 
-import streamlit as st
 from ebooklib import epub
 
 from .config_manager import config as _config
@@ -76,7 +75,7 @@ class Downloader:
 
         total = len(urls)
         with progress_container:
-            bar = st.progress(0)
+            bar = progress_container.progress(0)
             for i, url in enumerate(urls):
                 bar.progress(
                     i / total,
@@ -115,28 +114,29 @@ class Downloader:
 
         with progress_container:
             if volume_name:
-                self._download_single_volume(ebook, book, volume_name)
+                self._download_single_volume(ebook, book, volume_name, progress_container)
             else:
-                self._download_full_book(ebook, book)
+                self._download_full_book(ebook, book, progress_container)
 
     # ------------------------------------------------------------------
     # 私有辅助方法
     # ------------------------------------------------------------------
 
-    def _download_single_volume(self, ebook: epub.EpubBook, book, volume_name: str) -> None:
+    def _download_single_volume(self, ebook: epub.EpubBook, book, volume_name: str, container) -> None:
         """
         下载并打包单卷内容为 EPUB。
 
         :param ebook: 已初始化的 EpubBook 对象
         :param book: Book 实例
         :param volume_name: 目标卷名
+        :param container: 进度容器（兼容 Streamlit container 和 NoOpContainer）
         """
         volume = book.volumes[volume_name]
         book_name = book.get_formatted_title(_config.get("download", "full_title"))
         ebook.set_title(f"{book_name} {volume_name}")
 
         chapters = []
-        bar = st.progress(0)
+        bar = container.progress(0)
         total_items = len(volume)
 
         for item_idx, item in enumerate(volume):
@@ -147,7 +147,7 @@ class Downloader:
             if name == "插图":
                 # 下载该卷所有插图并内嵌到 EPUB
                 chapter.content = self._embed_images(
-                    ebook, book, volume_name, set_cover=True
+                    ebook, book, volume_name, container, set_cover=True
                 )
             else:
                 # 下载章节正文
@@ -172,20 +172,21 @@ class Downloader:
         epub.write_epub(os.path.join(save_dir, f"{volume_name}.epub"), ebook, {})
 
         bar.progress(1.0, f"✅ {book_name} {volume_name} 下载完成")
-        st.success(f"小说 {book_name}《{volume_name}》下载完成")
+        container.success(f"小说 {book_name}《{volume_name}》下载完成")
 
-    def _download_full_book(self, ebook: epub.EpubBook, book) -> None:
+    def _download_full_book(self, ebook: epub.EpubBook, book, container) -> None:
         """
         下载整本小说（所有卷）并打包为单个 EPUB。
 
         :param ebook: 已初始化的 EpubBook 对象
         :param book: Book 实例
+        :param container: 进度容器（兼容 Streamlit container 和 NoOpContainer）
         """
         book_title = book.get_formatted_title(_config.get("download", "full_title"))
         ebook.set_title(book_title)
 
         # 下载并设置封面
-        with st.spinner("正在下载封面..."):
+        with container.spinner("正在下载封面..."):
             cover_filename = book.basic_info["cover"].rsplit("/", 1)[-1]
             ebook.set_cover(cover_filename, book.get_cover_content())
 
@@ -199,8 +200,8 @@ class Downloader:
                 lang="zh",
             )
             html_parts = [f"<img src=images/{volume_name}_1.jpg>"]   # 卷首图占位
-            bar = st.progress(0)
-            img_bar = st.progress(0)
+            bar = container.progress(0)
+            img_bar = container.progress(0)
             total_items = len(volume)
 
             for item_idx, item in enumerate(volume):
@@ -249,13 +250,14 @@ class Downloader:
         ebook.spine = ["nav"] + chapters
         ebook.add_item(epub.EpubNav())
         epub.write_epub(os.path.join(NOVEL_PATH, f"{book_title}.epub"), ebook, {})
-        st.success(f"小说《{book_title}》整本下载完成")
+        container.success(f"小说《{book_title}》整本下载完成")
 
     def _embed_images(
         self,
         ebook: epub.EpubBook,
         book,
         volume_name: str,
+        container,
         set_cover: bool = False,
     ) -> str:
         """
@@ -264,12 +266,13 @@ class Downloader:
         :param ebook: 目标 EpubBook 对象
         :param book: Book 实例
         :param volume_name: 卷名
+        :param container: 进度容器
         :param set_cover: 为 True 时，将封面索引对应的图片设为 EPUB 封面
         :return: 包含所有 <img> 标签的 HTML 字符串
         """
         ch_urls = book.get_chapter_image_urls(volume_name)
         cover_index = _config.get("download", "default_cover_index")
-        pic_bar = st.progress(0)
+        pic_bar = container.progress(0)
         total = len(ch_urls)
         html_parts = []
 
