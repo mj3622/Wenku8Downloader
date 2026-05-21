@@ -1,0 +1,107 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  # ------------------------------------------------------------------
+  # 快速 CI：类型检查 + 前端构建（每次推送均执行）
+  # ------------------------------------------------------------------
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  # ------------------------------------------------------------------
+  # 平台打包矩阵（仅 tag 推送或手动触发时执行）
+  # ------------------------------------------------------------------
+  build:
+    needs: ci
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: mac
+            artifact: macos
+          - os: windows-latest
+            target: win
+            artifact: windows
+          - os: ubuntu-latest
+            target: linux
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装 Node.js 依赖
+        run: npm ci
+
+      - name: 安装 Python 依赖
+        run: pip install -r requirements.txt
+
+      - name: 打包 (${{ matrix.target }})
+        run: npm run dist:${{ matrix.target }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # 创建 GitHub Release（仅 tag 推送时执行）
+  # ------------------------------------------------------------------
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+
+      - name: 整理产物
+        run: |
+          mkdir -p dist
+          find release -type f -not -name '*.yml' -not -name '*.json' \
+            -exec mv {} dist/ \; 2>/dev/null || true
+          ls -la dist/
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
