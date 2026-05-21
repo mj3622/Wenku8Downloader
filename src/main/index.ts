@@ -7,14 +7,16 @@ let pythonPort = 52525
 
 function startPythonServer(): Promise<number> {
   return new Promise((resolve, reject) => {
+    // 开发环境：tools/ 在项目根目录
+    // 生产环境：tools/ 在 extraResources（process.resourcesPath）
     const cwd = app.isPackaged
-      ? join(process.resourcesPath, '..')
+      ? process.resourcesPath
       : join(__dirname, '..', '..')
 
     const proc = spawn(
       'python3',
       ['-c', 'from tools.api_server import start_server; port = start_server(52525); print(f"API_READY:{port}", flush=True); import time; time.sleep(999999)'],
-      { cwd, stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
     )
 
     pythonProcess = proc
