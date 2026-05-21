@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BookInfo } from '../api/client'
+import { api, type BookInfo } from '../api/client'
 
 type BookState = {
   book: BookInfo | null
@@ -16,7 +16,6 @@ export const useBookStore = create<BookState>((set) => ({
   fetchBook: async (id: string) => {
     set({ loading: true, error: null })
     try {
-      const { api } = await import('../api/client')
       const book = await api.getBook(id)
       set({ book, loading: false })
     } catch (e) {
