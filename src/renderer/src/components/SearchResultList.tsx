@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { SearchResult } from '../api/client'
 
 type Props = {
@@ -6,44 +7,73 @@ type Props = {
 }
 
 export default function SearchResultList({ results, onSelect }: Props) {
+  if (results.length === 0) return null
+
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {results.map((item) => (
         <div
           key={item.id}
-          className="flex items-start gap-4 p-3 rounded-lg border border-gray-800
-                     hover:border-blue-500/30 hover:bg-gray-800/50 transition-colors"
+          className="rounded-2xl bg-apple-card border border-apple-border-subtle shadow-card
+                     hover:shadow-md hover:scale-[1.02] transition-all duration-200
+                     overflow-hidden cursor-pointer"
+          onClick={() => onSelect(item.id)}
         >
-          {item.cover && (
-            <img
-              src={item.cover}
-              alt={item.title}
-              className="w-16 h-20 object-cover rounded flex-shrink-0"
-            />
-          )}
-          <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-sm">{item.title}</h4>
-            <div className="text-xs text-gray-500 mt-1 space-x-3">
-              {item.author && <span>作者：{item.author}</span>}
-              {item.status && <span>状态：{item.status}</span>}
-              <span>编号：{item.id}</span>
-            </div>
-            {item.tags && (
-              <p className="text-xs text-gray-600 mt-1">标签：{item.tags}</p>
-            )}
-            {item.desc && (
-              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.desc}</p>
+          <CoverImage src={item.cover} title={item.title} status={item.status} />
+          <div className="px-3.5 py-3">
+            <h4 className="text-[13px] font-semibold text-apple-heading leading-snug line-clamp-2">
+              {item.title}
+            </h4>
+            {item.author && (
+              <p className="text-[12px] text-apple-secondary mt-1 truncate">{item.author}</p>
             )}
           </div>
-          <button
-            className="px-3 py-1.5 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30
-                       rounded hover:bg-blue-600/30 transition-colors flex-shrink-0"
-            onClick={() => onSelect(item.id)}
-          >
-            查看详情
-          </button>
         </div>
       ))}
     </div>
+  )
+}
+
+function CoverImage({ src, title, status }: { src?: string; title: string; status?: string }) {
+  const retries = useRef(0)
+
+  const handleError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    if (retries.current < 2) {
+      retries.current += 1
+      const img = e.currentTarget
+      img.src = `${src}?retry=${retries.current}`
+    }
+  }
+
+  if (!src) {
+    return (
+      <div className="relative w-full aspect-[2/3] bg-apple-accent-light flex items-center justify-center">
+        <span className="text-apple-accent text-[28px] font-bold opacity-30">
+          {title.charAt(0)}
+        </span>
+        {status && <StatusBadge status={status} />}
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative aspect-[2/3]">
+      <img
+        src={src}
+        alt={title}
+        className="w-full h-full object-contain bg-apple-bg"
+        onError={handleError}
+      />
+      {status && <StatusBadge status={status} />}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span className="absolute top-2 left-2 text-[10px] bg-apple-accent text-white
+                     px-2 py-0.5 rounded-[8px] font-medium">
+      {status}
+    </span>
   )
 }

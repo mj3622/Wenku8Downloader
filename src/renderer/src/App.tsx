@@ -1,13 +1,10 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
+import SearchPage from './pages/SearchPage'
+import BookDetailPage from './pages/BookDetailPage'
+import DownloadHistoryPage from './pages/DownloadHistoryPage'
 import ConfigPage from './pages/ConfigPage'
-import SearchByIdPage from './pages/SearchByIdPage'
-import SearchByAuthorPage from './pages/SearchByAuthorPage'
-import SearchByTitlePage from './pages/SearchByTitlePage'
-import FullDownloadPage from './pages/FullDownloadPage'
-import DividedDownloadPage from './pages/DividedDownloadPage'
-import PictureDownloadPage from './pages/PictureDownloadPage'
 
 export default function App() {
   return (
@@ -15,13 +12,10 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/download" element={<DownloadHistoryPage />} />
           <Route path="/config" element={<ConfigPage />} />
-          <Route path="/search/id" element={<SearchByIdPage />} />
-          <Route path="/search/author" element={<SearchByAuthorPage />} />
-          <Route path="/search/title" element={<SearchByTitlePage />} />
-          <Route path="/download/full" element={<FullDownloadPage />} />
-          <Route path="/download/divided" element={<DividedDownloadPage />} />
-          <Route path="/download/pictures" element={<PictureDownloadPage />} />
         </Route>
       </Routes>
     </HashRouter>

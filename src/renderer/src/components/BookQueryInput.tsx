@@ -13,19 +13,20 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
   const handleSubmit = () => {
     const trimmed = value.trim()
     if (!trimmed) return
-    // 从输入中提取书籍编号
     const match = trimmed.match(/wenku8\.net\/book\/(\d+)\.htm/)
     const id = match ? match[1] : /^\d+$/.test(trimmed) ? trimmed : ''
     if (id) onQuery(id)
   }
 
   return (
-    <div className="flex items-end gap-2 mb-6">
+    <div className="flex items-end gap-3 mb-6">
       <div className="flex-1">
-        <label className="block text-sm text-gray-400 mb-1">{label}</label>
+        <label className="block text-[12px] text-apple-secondary mb-1">{label}</label>
         <input
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                     focus:outline-none focus:border-blue-500 transition-colors"
+          className="w-full px-4 py-2.5 bg-apple-card border border-apple-border-input rounded-xl
+                     text-[13px] text-apple-heading placeholder:text-apple-tertiary
+                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10
+                     transition-colors"
           placeholder={help}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -34,8 +35,8 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
       </div>
       <button
         disabled={loading}
-        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                   rounded text-sm font-medium transition-colors"
+        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleSubmit}
       >
         {loading ? '查询中...' : '查询'}
