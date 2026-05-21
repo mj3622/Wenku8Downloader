@@ -19,16 +19,16 @@ export default function ConfigPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-4">配置</h2>
-      <div className="flex gap-1 mb-6 border-b border-gray-800">
+      <h2 className="text-2xl font-bold text-apple-heading mb-4">配置</h2>
+      <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-sm transition-colors ${
               tab === t.key
-                ? 'border-b-2 border-blue-500 text-blue-400'
-                : 'text-gray-500 hover:text-gray-300'
+                ? 'border-b-2 border-apple-accent text-apple-accent font-medium'
+                : 'text-apple-secondary hover:text-apple-heading'
             }`}
           >
             {t.label}
@@ -83,50 +83,50 @@ function AccountTab({
 
   return (
     <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold">账号信息</h3>
-      <p className="text-sm text-gray-500">填写账号后点击保存，自动尝试刷新 Cookie。</p>
+      <h3 className="text-lg font-semibold text-apple-heading">账号信息</h3>
+      <p className="text-sm text-apple-secondary">填写账号后点击保存，自动尝试刷新 Cookie。</p>
       <div>
-        <label className="block text-sm text-gray-400 mb-1">用户名</label>
+        <label className="block text-sm text-apple-secondary mb-1">用户名</label>
         <input
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                     focus:outline-none focus:border-blue-500"
+          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
           placeholder="请输入轻小说文库用户名"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
       </div>
       <div>
-        <label className="block text-sm text-gray-400 mb-1">密码</label>
+        <label className="block text-sm text-apple-secondary mb-1">密码</label>
         <input
           type="password"
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                     focus:outline-none focus:border-blue-500"
+          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
           placeholder="请输入密码"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
       </div>
-      <div className="border-t border-gray-800 pt-4">
-        <h3 className="text-sm font-semibold mb-2">代理设置（可选）</h3>
-        <p className="text-xs text-gray-500 mb-3">
+      <div className="border-t border-apple-border-subtle pt-4">
+        <h3 className="text-sm font-semibold text-apple-heading mb-2">代理设置（可选）</h3>
+        <p className="text-xs text-apple-tertiary mb-3">
           仅当网络被完全封禁导致连接报错时才需填写，留空默认直连。
         </p>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">HTTP 代理</label>
+            <label className="block text-xs text-apple-secondary mb-1">HTTP 代理</label>
             <input
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                         focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                         focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
               placeholder="例如：http://127.0.0.1:7897"
               value={proxyHttp}
               onChange={(e) => setProxyHttp(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">HTTPS 代理</label>
+            <label className="block text-xs text-apple-secondary mb-1">HTTPS 代理</label>
             <input
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                         focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                         focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
               placeholder="例如：http://127.0.0.1:7897"
               value={proxyHttps}
               onChange={(e) => setProxyHttps(e.target.value)}
@@ -136,8 +136,8 @@ function AccountTab({
       </div>
       <button
         disabled={saving}
-        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                   rounded text-sm font-medium transition-colors"
+        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleSave}
       >
         {saving ? '保存中...' : '保存账号与代理'}
@@ -166,17 +166,17 @@ function CookieTab() {
 
   return (
     <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold">自动获取 (推荐)</h3>
-      <p className="text-sm text-gray-500">
+      <h3 className="text-lg font-semibold text-apple-heading">自动获取 (推荐)</h3>
+      <p className="text-sm text-apple-secondary">
         点击下方按钮将启动真实 Chrome 浏览器自动完成登录，可靠绕过 Cloudflare，并获取 cf_clearance。
       </p>
-      <p className="text-xs text-gray-600">
+      <p className="text-xs text-apple-tertiary">
         点击后屏幕上会弹出浏览器窗口，自动操作完成后会自动关闭，无需手动干预。
       </p>
       <button
         disabled={loading}
-        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                   rounded text-sm font-medium transition-colors"
+        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleAutoGet}
       >
         {loading ? '获取中（10~30 秒）...' : '一键获取 / 刷新 Cookie'}
@@ -225,9 +225,10 @@ function DownloadTab({
 
   return (
     <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold">书名格式</h3>
+      <h3 className="text-lg font-semibold text-apple-heading">书名格式</h3>
       <select
-        className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm w-32"
+        className="px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading w-32
+                   focus:outline-none focus:border-apple-accent/30"
         value={titleFormat}
         onChange={(e) => setTitleFormat(e.target.value)}
       >
@@ -235,26 +236,26 @@ function DownloadTab({
         <option value="IN">IN</option>
         <option value="OUT">OUT</option>
       </select>
-      <div className="p-3 rounded border border-gray-800 text-xs text-gray-500 space-y-1">
+      <div className="p-3 rounded-xl border border-apple-border-subtle text-xs text-apple-secondary space-y-1 bg-apple-bg">
         <p>以「败北女角太多了！(败犬女主太多了！)」为例：</p>
-        <p><strong>FULL</strong> = 败北女角太多了！(败犬女主太多了！)</p>
-        <p><strong>IN</strong> = 败犬女主太多了！</p>
-        <p><strong>OUT</strong> = 败北女角太多了！</p>
+        <p><strong className="text-apple-heading">FULL</strong> = 败北女角太多了！(败犬女主太多了！)</p>
+        <p><strong className="text-apple-heading">IN</strong> = 败犬女主太多了！</p>
+        <p><strong className="text-apple-heading">OUT</strong> = 败北女角太多了！</p>
       </div>
-      <div className="border-t border-gray-800 pt-4">
-        <h3 className="text-sm font-semibold mb-2">封面图片索引</h3>
+      <div className="border-t border-apple-border-subtle pt-4">
+        <h3 className="text-sm font-semibold text-apple-heading mb-2">封面图片索引</h3>
         <input
-          className="w-24 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
-                     focus:outline-none focus:border-blue-500"
+          className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
           value={coverIndex}
           onChange={(e) => setCoverIndex(e.target.value)}
         />
-        <p className="text-xs text-gray-500 mt-1">0 表示第一张插图，1 表示第二张，依此类推</p>
+        <p className="text-xs text-apple-tertiary mt-1">0 表示第一张插图，1 表示第二张，依此类推</p>
       </div>
       <button
         disabled={saving}
-        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                   rounded text-sm font-medium transition-colors"
+        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleSave}
       >
         {saving ? '保存中...' : '保存下载设置'}

@@ -8,16 +8,20 @@ export default function StatusAlert({ type, message, onDismiss }: Props) {
   if (!message) return null
 
   const styles = {
-    error: 'border-red-500/30 bg-red-900/20 text-red-400',
-    success: 'border-green-500/30 bg-green-900/20 text-green-400',
-    warning: 'border-yellow-500/30 bg-yellow-900/20 text-yellow-400',
+    error: 'border-red-200 bg-red-50 text-red-600',
+    success: 'border-green-200 bg-green-50 text-green-600',
+    warning: 'border-amber-200 bg-amber-50 text-amber-600',
   }
 
   return (
-    <div className={`flex items-start gap-3 p-3 rounded border text-sm ${styles[type]} mb-4`}>
-      <span className="flex-1 whitespace-pre-wrap">{message}</span>
+    <div
+      className={`flex items-start gap-3 px-4 py-3 rounded-xl border text-[12px] ${styles[type]} mb-4`}
+    >
+      <span className="flex-1 whitespace-pre-wrap leading-relaxed">{message}</span>
       {onDismiss && (
-        <button onClick={onDismiss} className="opacity-50 hover:opacity-100">&times;</button>
+        <button onClick={onDismiss} className="opacity-40 hover:opacity-100 transition-opacity text-base leading-none">
+          &times;
+        </button>
       )}
     </div>
   )

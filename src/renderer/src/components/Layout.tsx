@@ -1,43 +1,43 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
 const navItems = [
-  { to: '/', label: '主页', icon: '🏠' },
-  { to: '/config', label: '配置', icon: '⚙️' },
-  { to: '/search/id', label: '编号检索', icon: '🔢' },
-  { to: '/search/author', label: '作者检索', icon: '👤' },
-  { to: '/search/title', label: '书名检索', icon: '📖' },
-  { to: '/download/full', label: '整本下载', icon: '📚' },
-  { to: '/download/divided', label: '分卷下载', icon: '📑' },
-  { to: '/download/pictures', label: '图片下载', icon: '🖼️' },
+  { to: '/', label: '主页' },
+  { to: '/search', label: '检索' },
+  { to: '/download', label: '下载' },
+  { to: '/config', label: '配置' },
 ]
 
 export default function Layout() {
   return (
-    <div className="flex h-screen bg-gray-950 text-gray-100">
-      <aside className="w-56 flex-shrink-0 border-r border-gray-800 bg-gray-900 flex flex-col">
-        <div className="h-14 flex items-center px-4 border-b border-gray-800">
-          <h1 className="text-sm font-bold text-gray-200">轻小说文库下载器</h1>
-        </div>
-        <nav className="flex-1 overflow-y-auto py-2">
+    <div className="flex h-screen bg-apple-bg text-apple-heading">
+      <aside
+        className="w-52 flex-shrink-0 flex flex-col border-r border-apple-border-medium"
+        style={{
+          background: 'rgba(255,255,255,0.72)',
+          backdropFilter: 'blur(40px)',
+          WebkitBackdropFilter: 'blur(40px)',
+        }}
+      >
+        <nav className="flex-1 overflow-y-auto py-3">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                `flex items-center mx-2 px-3 py-1.5 text-[13px] rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-blue-600/20 text-blue-400 border-r-2 border-blue-500'
-                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                    ? 'bg-apple-accent-light text-apple-accent font-medium'
+                    : 'text-apple-secondary hover:bg-black/5 hover:text-apple-heading'
                 }`
               }
             >
-              <span className="w-5 text-center">{item.icon}</span>
               {item.label}
             </NavLink>
           ))}
         </nav>
       </aside>
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-8">
         <Outlet />
       </main>
     </div>

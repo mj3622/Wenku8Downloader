@@ -11,31 +11,35 @@ export default function BookInfoCard({ book, actions }: Props) {
   const { basic_info } = book
 
   return (
-    <div className="flex items-start gap-6 p-4 rounded-lg border border-gray-800 bg-gray-900/50">
+    <div className="flex items-start gap-5 p-5 rounded-2xl bg-apple-card border border-apple-border-subtle shadow-card">
       {basic_info['cover'] && (
         <img
           src={basic_info['cover']}
           alt={basic_info['标题']}
-          className="w-32 rounded shadow-lg flex-shrink-0"
+          className="w-[100px] rounded-[10px] shadow-sm flex-shrink-0"
         />
       )}
       <div className="flex-1 min-w-0">
-        <h3 className="text-lg font-semibold mb-2">{basic_info['标题']}</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <h3 className="text-[17px] font-semibold tracking-tight mb-2 text-apple-heading">
+          {basic_info['标题']}
+        </h3>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] leading-loose">
           {Object.entries(basic_info).map(([key, value]) => {
             if (SKIP_KEYS.has(key)) return null
             return (
               <div key={key} className="flex">
-                <span className="text-gray-500 mr-2">{key}：</span>
-                <span className="text-gray-300 truncate">{value}</span>
+                <span className="text-apple-tertiary mr-2">{key}</span>
+                <span className="text-apple-body truncate">{value}</span>
               </div>
             )
           })}
         </div>
         {basic_info['简介'] && (
-          <p className="text-sm text-gray-400 mt-3 line-clamp-4">{basic_info['简介']}</p>
+          <p className="text-[12px] text-apple-secondary mt-3 line-clamp-4 leading-relaxed">
+            {basic_info['简介']}
+          </p>
         )}
-        {actions && <div className="mt-3">{actions}</div>}
+        {actions && <div className="mt-4">{actions}</div>}
       </div>
     </div>
   )
