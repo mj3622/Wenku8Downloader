@@ -1,7 +1,21 @@
-const BASE_URL = 'http://127.0.0.1:52525'
+let baseUrlPromise: Promise<string> | null = null
+
+function getBaseUrl(): Promise<string> {
+  if (!baseUrlPromise) {
+    baseUrlPromise = (async () => {
+      if (window.electronAPI?.getApiPort) {
+        const port = await window.electronAPI.getApiPort()
+        return `http://127.0.0.1:${port}`
+      }
+      return 'http://127.0.0.1:52525'
+    })()
+  }
+  return baseUrlPromise
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const base = await getBaseUrl()
+  const res = await fetch(`${base}${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
