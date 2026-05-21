@@ -59,25 +59,23 @@ export default function BookDetailPage() {
 
       {book && (
         <>
-          {/* 信息区 — 方案 C */}
-          <div className="flex gap-5 mb-6 items-start">
+          {/* 信息区 */}
+          <div className="flex flex-col items-center mb-6">
             {book.basic_info['cover'] && (
               <img
                 src={book.basic_info['cover']}
                 alt={book.basic_info['标题']}
-                className="w-[120px] h-[170px] object-cover rounded-[14px] flex-shrink-0 bg-apple-bg shadow-sm"
+                className="w-[150px] h-[212px] object-cover rounded-[14px] bg-apple-bg shadow-md mb-4"
               />
             )}
-            <div className="flex-1 min-w-0 pt-1">
-              <h2 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
-                {book.basic_info['标题']}
-              </h2>
-              <p className="text-[12px] text-apple-secondary">
-                {book.basic_info['作者']}
-                {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
-                {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
-              </p>
-            </div>
+            <h2 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight text-center">
+              {book.basic_info['标题']}
+            </h2>
+            <p className="text-[12px] text-apple-secondary text-center">
+              {book.basic_info['作者']}
+              {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
+              {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
+            </p>
           </div>
 
           {/* 统计条 */}
