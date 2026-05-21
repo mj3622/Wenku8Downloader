@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { api } from '../api/client'
 
 type ConfigState = {
   config: Record<string, unknown> | null
@@ -13,7 +14,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
   fetchConfig: async () => {
     set({ loading: true })
     try {
-      const { api } = await import('../api/client')
       const config = await api.getConfig()
       set({ config, loading: false })
     } catch {
@@ -21,7 +21,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
     }
   },
   setConfig: async (section, key, value) => {
-    const { api } = await import('../api/client')
     await api.setConfig(section, key, value)
     set((state) => ({
       config: state.config

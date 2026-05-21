@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SearchResult } from '../api/client'
+import { api, type SearchResult } from '../api/client'
 
 type SearchType = 'id' | 'author' | 'title'
 
@@ -20,7 +20,6 @@ export const useSearchStore = create<SearchState>((set) => ({
   search: async (type, query) => {
     set({ loading: true, error: null, results: [], searchType: type })
     try {
-      const { api } = await import('../api/client')
       if (type === 'author') {
         const data = await api.searchAuthor(query)
         set({ results: data.results, loading: false })
