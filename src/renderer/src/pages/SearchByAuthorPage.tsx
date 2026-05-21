@@ -1,41 +1,50 @@
+import { useNavigate } from 'react-router-dom'
 import { useSearchStore } from '../stores/searchStore'
+import SearchResultList from '../components/SearchResultList'
+import LoadingSpinner from '../components/LoadingSpinner'
+import StatusAlert from '../components/StatusAlert'
 
 export default function SearchByAuthorPage() {
-  const { results, loading, error, search } = useSearchStore()
+  const { results, loading, error, search, clear } = useSearchStore()
+  const navigate = useNavigate()
+
+  const handleSelect = (id: string) => {
+    navigate(`/search/id?id=${id}`)
+  }
 
   return (
     <div>
       <h2 className="text-2xl font-bold mb-4">按作者搜索</h2>
-      <div className="flex gap-2 mb-6">
-        <input
-          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm"
-          placeholder="请输入作者名，例如：橘公司"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') search('author', e.currentTarget.value)
-          }}
-        />
+      <div className="flex items-end gap-2 mb-6">
+        <div className="flex-1">
+          <label className="block text-sm text-gray-400 mb-1">请输入轻小说文库的作者</label>
+          <input
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm
+                       focus:outline-none focus:border-blue-500 transition-colors"
+            placeholder="例如：橘公司"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') search('author', (e.target as HTMLInputElement).value)
+            }}
+          />
+        </div>
         <button
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
+          disabled={loading}
+          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50
+                     rounded text-sm font-medium transition-colors"
           onClick={() => {
-            const input = document.querySelector('input') as HTMLInputElement
-            if (input?.value) search('author', input.value)
+            const input = document.querySelector<HTMLInputElement>('input[placeholder*="作者"]')
+            if (input?.value.trim()) search('author', input.value.trim())
           }}
         >
-          查询
+          {loading ? '查询中...' : '查询'}
         </button>
       </div>
-      {loading && <p className="text-gray-400">查询中...</p>}
-      {error && <p className="text-red-400">{error}</p>}
-      {results.length > 0 && (
-        <div className="space-y-3">
-          {results.map((item) => (
-            <div key={item.id} className="p-3 rounded-lg border border-gray-800">
-              <span className="font-medium">{item.title}</span>
-              <span className="text-gray-500 text-sm ml-2">#{item.id}</span>
-            </div>
-          ))}
-        </div>
+      {loading && <LoadingSpinner text="正在查询中..." />}
+      {error && <StatusAlert type="error" message={error} onDismiss={clear} />}
+      {!loading && !error && results.length === 0 && (
+        <p className="text-sm text-gray-500">输入作者名开始搜索</p>
       )}
+      <SearchResultList results={results} onSelect={handleSelect} />
     </div>
   )
 }
