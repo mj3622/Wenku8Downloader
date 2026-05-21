@@ -21,15 +21,15 @@ export default function BookDetailPage() {
     return () => clear()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDownload = async (type: DownloadTab, volume?: string) => {
+  const handleDownload = async (type: DownloadTab) => {
     if (!book) return
     setDlStatus('loading')
     setDlMessage('')
     try {
       if (type === 'pictures') {
-        await downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], volume)
+        await downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
       } else {
-        await downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], volume)
+        await downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
       }
       setDlStatus('success')
       setDlMessage('下载任务已添加，可在下载历史页面查看进度')
@@ -37,6 +37,21 @@ export default function BookDetailPage() {
       setDlStatus('error')
       setDlMessage(String(e))
     }
+  }
+
+  const handleMultiDownload = async (type: DownloadTab, volumes: string[]) => {
+    if (!book) return
+    setDlStatus('loading')
+    setDlMessage('')
+    for (const v of volumes) {
+      if (type === 'pictures') {
+        downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
+      } else {
+        downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
+      }
+    }
+    setDlStatus('success')
+    setDlMessage(`${volumes.length} 个下载任务已添加，可在下载历史页面查看进度`)
   }
 
   const tabs: { key: DownloadTab; label: string }[] = [
@@ -79,22 +94,22 @@ export default function BookDetailPage() {
           </div>
 
           {/* 统计条 */}
-          <div className="flex gap-6 px-4 py-3 bg-apple-card rounded-xl border border-apple-border-subtle mb-4 text-[12px]">
+          <div className="grid grid-cols-3 px-4 py-3 bg-apple-card rounded-xl border border-apple-border-subtle mb-4 text-[12px]">
             {book.basic_info['最新章节'] && (
-              <div><span className="text-apple-tertiary">最新</span> <span className="text-apple-heading">{book.basic_info['最新章节']}</span></div>
+              <div className="text-left"><span className="text-apple-heading">最新</span> <span className="text-apple-body">{book.basic_info['最新章节']}</span></div>
             )}
             {book.basic_info['更新时间'] && (
-              <div><span className="text-apple-tertiary">更新</span> <span className="text-apple-heading">{book.basic_info['更新时间']}</span></div>
+              <div className="text-left"><span className="text-apple-heading">更新</span> <span className="text-apple-body">{book.basic_info['更新时间']}</span></div>
             )}
             {book.basic_info['全文长度'] && (
-              <div><span className="text-apple-tertiary">字数</span> <span className="text-apple-heading">{book.basic_info['全文长度']}</span></div>
+              <div className="text-left"><span className="text-apple-heading">字数</span> <span className="text-apple-body">{book.basic_info['全文长度']}</span></div>
             )}
           </div>
 
           {/* 简介 */}
           {book.basic_info['简介'] && (
             <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
-              <h4 className="text-[12px] font-semibold text-apple-secondary mb-2">简介</h4>
+              <h4 className="text-[12px] font-semibold text-apple-heading mb-2">简介</h4>
               {book.basic_info['简介'].split('\n').map((line, i) => (
                 <p key={i} className="text-[13px] text-apple-body leading-relaxed">{line}</p>
               ))}
@@ -135,18 +150,18 @@ export default function BookDetailPage() {
               )}
 
               {dlTab === 'divided' && (
-                <VolumeDownload
+                <MultiVolumeSelector
                   volumes={book.volumes}
                   loading={dlStatus === 'loading'}
-                  onDownload={(v) => handleDownload('divided', v)}
+                  onDownload={(vols) => handleMultiDownload('divided', vols)}
                 />
               )}
 
               {dlTab === 'pictures' && (
-                <VolumeDownload
+                <MultiVolumeSelector
                   volumes={book.volumes}
                   loading={dlStatus === 'loading'}
-                  onDownload={(v) => handleDownload('pictures', v)}
+                  onDownload={(vols) => handleMultiDownload('pictures', vols)}
                 />
               )}
 
@@ -164,39 +179,76 @@ export default function BookDetailPage() {
   )
 }
 
-function VolumeDownload({
+function MultiVolumeSelector({
   volumes, loading, onDownload,
 }: {
   volumes: Record<string, unknown>
   loading: boolean
-  onDownload: (volume: string) => void
+  onDownload: (volumes: string[]) => void
 }) {
-  const [selected, setSelected] = useState('')
+  const volumeKeys = Object.keys(volumes)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  const toggle = (v: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(v)) next.delete(v)
+      else next.add(v)
+      return next
+    })
+  }
+
+  const selectAll = () => setSelected(new Set(volumeKeys))
+  const deselectAll = () => setSelected(new Set())
+
+  const allSelected = selected.size === volumeKeys.length
+  const count = selected.size
 
   return (
-    <div className="flex items-end gap-4 justify-center">
-      <div>
-        <label className="block text-sm text-apple-secondary mb-1">选择卷</label>
-        <select
-          className="px-3 py-2 bg-apple-bg border border-apple-border-input rounded-xl text-sm text-apple-heading min-w-[200px]
-                     focus:outline-none focus:border-apple-accent/30"
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-        >
-          <option value="">-- 请选择 --</option>
-          {Object.keys(volumes).map((v) => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[13px] font-semibold text-apple-heading">选择卷</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] text-apple-secondary">已选 {count}/{volumeKeys.length}</span>
+          <button
+            onClick={allSelected ? deselectAll : selectAll}
+            className="px-3 py-1 text-[11px] border border-apple-border-input rounded-[14px] text-apple-accent
+                       hover:bg-apple-accent/5 transition-colors"
+          >
+            {allSelected ? '取消' : '全选'}
+          </button>
+        </div>
       </div>
-      <button
-        disabled={loading || !selected}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
-                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-        onClick={() => selected && onDownload(selected)}
-      >
-        {loading ? '添加中...' : '下载'}
-      </button>
+
+      <div className="border border-apple-border-subtle rounded-xl overflow-hidden max-h-[280px] overflow-y-auto mb-4">
+        {volumeKeys.map((v) => (
+          <label
+            key={v}
+            className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors
+                       border-b border-apple-border-subtle last:border-b-0 hover:bg-apple-bg
+                       ${selected.has(v) ? 'bg-blue-50' : ''}`}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(v)}
+              onChange={() => toggle(v)}
+              className="w-4 h-4 accent-[#0071e3]"
+            />
+            <span className="text-[13px] text-apple-heading">{v}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="text-center">
+        <button
+          disabled={loading || count === 0}
+          className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                     rounded-[24px] text-[13px] font-medium text-white transition-opacity"
+          onClick={() => count > 0 && onDownload([...selected])}
+        >
+          {loading ? '添加中...' : count === 0 ? '请选择要下载的卷' : `下载选中的 ${count} 卷`}
+        </button>
+      </div>
     </div>
   )
 }
