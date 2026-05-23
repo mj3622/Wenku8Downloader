@@ -208,12 +208,14 @@ ${items.join('\n')}
   }
 
   private wrapXhtml(ch: EpubChapter): string {
+    const content = this.htmlEntitiesToNumeric(ch.content)
+    const xhtmlContent = this.fixVoidElementsForXhtml(content)
     return `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>${this.escapeXml(ch.title)}</title></head>
 <body>
   <h2>${this.escapeXml(ch.title)}</h2>
-  ${this.htmlEntitiesToNumeric(ch.content)}
+  ${xhtmlContent}
 </body>
 </html>`
   }
@@ -243,14 +245,27 @@ ${items.join('\n')}
       .replace(/\x00APOS\x00/g, '&apos;')
   }
 
-  private escapeXml(s: string): string {
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;')
+  /** 将 HTML void 元素转为 XHTML 兼容的自闭合标签（如 <br> → <br/>） */
+  private fixVoidElementsForXhtml(s: string): string {
+    const voidElements = ['br', 'hr', 'img', 'input', 'link', 'meta', 'area', 'base', 'col', 'embed', 'source', 'track', 'wbr']
+    // 匹配未自闭合的 void 元素: <tagname ...>  排除已闭合的 /> 和 </tagname>
+    const pattern = new RegExp(`<(${voidElements.join('|')})(\\s[^>]*)?(?<!/)>`, 'gi')
+    return s.replace(pattern, '<$1$2/>')
   }
+
+  private escapeXml(s: string): string {
+    return escapeXml(s)
+  }
+}
+
+/** XML 特殊字符转义 */
+export function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
 }
 
 /** 常见 HTML 命名实体 → Unicode 码点映射 */
