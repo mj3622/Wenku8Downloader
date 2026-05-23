@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { config } from './config-manager'
 import { WebCrawler } from './crawler'
+import { CookieService } from './cookie-service'
 import { Book } from './book'
 import { Downloader } from './downloader'
 
@@ -20,18 +21,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('config:set', async (_e, { section, key, value }) => {
     config.set(section, key, value)
     if (crawler) {
-      if (section === 'proxy') crawler.syncProxy()
-      else if (section === 'cookie') crawler.syncCookies()
+      if (section === 'cookie') crawler.syncCookies()
     }
     return { status: 'ok' }
   })
 
   // ---- Cookie 自动获取 ----
-  ipcMain.handle('cookie:auto', async () => {
+  ipcMain.handle('cookie:auto', async (event) => {
     try {
-      const c = getCrawler()
-      await c.getCookieViaBrowser()
-      return { status: 'ok', message: 'Cookie 自动获取成功' }
+      const service = new CookieService(getCrawler())
+      await service.acquire((progress) => {
+        event.sender.send('cookie:progress', progress)
+      })
+      return { status: 'ok', message: '登录成功，已获取 Cookie' }
     } catch (e) {
       throw new Error(String(e))
     }
@@ -66,16 +68,22 @@ export function registerIpcHandlers(): void {
   })
 
   // ---- 下载 ----
-  ipcMain.handle('download:epub', async (_e, { bookId, volumeName }) => {
+  ipcMain.handle('download:epub', async (event, { bookId, volumeName, taskId }) => {
     const book = await Book.create(bookId, getCrawler())
-    const downloader = new Downloader()
+    const downloader = new Downloader(getCrawler())
+    downloader.setOnProgress((p) => {
+      event.sender.send('download:progress', { taskId, ...p })
+    })
     await downloader.downloadNovel(book, volumeName ?? undefined)
     return { status: 'ok', message: '下载完成' }
   })
 
-  ipcMain.handle('download:images', async (_e, { bookId, volumeName }) => {
+  ipcMain.handle('download:images', async (event, { bookId, volumeName, taskId }) => {
     const book = await Book.create(bookId, getCrawler())
-    const downloader = new Downloader()
+    const downloader = new Downloader(getCrawler())
+    downloader.setOnProgress((p) => {
+      event.sender.send('download:progress', { taskId, ...p })
+    })
     if (volumeName) {
       const urls = await book.getChapterImageUrls(volumeName)
       if (urls) {
