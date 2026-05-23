@@ -56,7 +56,8 @@ export default function HomePage() {
 
       {/* 快速入门 */}
       <section className="mb-10">
-        <h3 className="text-[13px] font-semibold text-apple-heading mb-4">快速入门</h3>
+        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">快速入门</h3>
+        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="space-y-3">
           <Step index={1} title="配置账号与 Cookie" to="/config">
             首次使用请先在「配置」页面填写文库账号密码，点击「一键获取 / 刷新 Cookie」自动完成登录认证。Cookie 是下载小说的必要凭证。
@@ -72,7 +73,8 @@ export default function HomePage() {
 
       {/* 功能概览 */}
       <section className="mb-10">
-        <h3 className="text-[13px] font-semibold text-apple-heading mb-4">功能概览</h3>
+        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">功能概览</h3>
+        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="grid grid-cols-2 gap-3">
           <FeatureCard
             title="EPUB 整本下载"
@@ -95,7 +97,8 @@ export default function HomePage() {
 
       {/* 提示 */}
       <section>
-        <h3 className="text-[13px] font-semibold text-apple-heading mb-4">提示</h3>
+        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">提示</h3>
+        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="rounded-xl border border-apple-border-subtle bg-apple-card p-4">
           <ul className="text-[12px] text-apple-secondary space-y-1.5 leading-relaxed">
             <li>

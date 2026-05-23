@@ -64,7 +64,7 @@ export default function SearchPage() {
       {tab === 'author' && (
         <SearchTab
           type="author"
-          placeholder="例如：橘公司"
+          placeholder="例如：三上库太"
           results={results}
           loading={searchLoading}
           error={searchError}
@@ -116,7 +116,7 @@ function SearchTab({
 }) {
   const label = type === 'author' ? '请输入轻小说文库的作者' : '请输入轻小说文库的作品名称'
   const emptyText = type === 'author' ? '输入作者名开始搜索' : '输入书名开始搜索'
-  const exampleText = type === 'author' ? '例如：橘公司' : '例如：败犬女主太多了！'
+  const exampleText = type === 'author' ? '例如：三上库太' : '例如：败犬女主太多了！'
 
   return (
     <div>
