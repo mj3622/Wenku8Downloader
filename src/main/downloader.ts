@@ -61,6 +61,7 @@ export class Downloader {
   private crawler: WebCrawler
   private speedTier = 0
   private consecutiveSuccess = 0
+  private tierLock = false
   private onProgress: ((p: DownloadProgress) => void) | null = null
 
   constructor(crawler: WebCrawler) {
@@ -81,20 +82,24 @@ export class Downloader {
     return SPEED_TIERS[this.speedTier]
   }
 
-  /** 检测响应状态，触发降级 */
+  /** 检测响应状态，触发降级。tierLock 防止并行 worker 同时触发等级变更造成抖动 */
   private checkRateLimit(status: number): void {
     if (status === 429 || status === 503) {
       this.consecutiveSuccess = 0
-      if (this.speedTier < SPEED_TIERS.length - 1) {
+      if (!this.tierLock && this.speedTier < SPEED_TIERS.length - 1) {
+        this.tierLock = true
         this.speedTier++
         console.warn(`[下载] 检测到限流，降级至「${this.speed.name}」等级`)
+        setTimeout(() => { this.tierLock = false }, 5000)
       }
     } else if (status === 200) {
       this.consecutiveSuccess++
-      if (this.consecutiveSuccess >= SUCCESS_RESET_THRESHOLD && this.speedTier > 0) {
+      if (!this.tierLock && this.consecutiveSuccess >= SUCCESS_RESET_THRESHOLD && this.speedTier > 0) {
+        this.tierLock = true
         this.speedTier--
         this.consecutiveSuccess = 0
         console.log(`[下载] 连续成功 ${SUCCESS_RESET_THRESHOLD} 次，升级至「${this.speed.name}」等级`)
+        setTimeout(() => { this.tierLock = false }, 5000)
       }
     }
   }
