@@ -341,67 +341,87 @@ export class Downloader {
     const chapters: EpubChapter[] = []
     const images: EpubImage[] = []
     const allVolumes = Object.entries(book.volumes)
-    const totalVolumes = allVolumes.length
+
+    // 统计总章节数（用于进度百分比）
+    let totalChapters = 0
+    for (const [, volume] of allVolumes) {
+      totalChapters += volume.filter(item => item.name !== '插图').length
+    }
+    let completedChapters = 0
 
     for (let vi = 0; vi < allVolumes.length; vi++) {
       const [volName, volume] = allVolumes[vi]
-      this.emitProgress(vi, totalVolumes, `正在处理: ${volName}`)
 
       let htmlParts = ''
       let hasContent = false
 
-      for (const item of volume) {
-        const name = item.name
-        const link = `${book.baseChapterUrl}${item.link}`
+      const illustItem = volume.find(item => item.name === '插图')
+      const chapterItems = volume.filter(item => item.name !== '插图')
 
-        if (name === '插图') {
-          this.emitProgress(vi, totalVolumes, `正在下载插图 (${volName})`)
-          const urls = await book.getChapterImageUrls(volName)
-          if (urls) {
-            const retries = this.speed.maxRetries
-            if (this.speed.imageConcurrency === 1) {
-              for (let picIdx = 0; picIdx < urls.length; picIdx++) {
-                const url = urls[picIdx]
-                const suffix = url.split('.').pop() || 'jpg'
-                const content = await this.fetchImageWithRetry(url, retries)
-                if (content) {
-                  const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
+      // 插图串行处理（已有独立的图片并发逻辑）
+      if (illustItem) {
+        this.emitProgress(completedChapters, totalChapters, `正在下载插图 (${volName})`)
+        const urls = await book.getChapterImageUrls(volName)
+        if (urls) {
+          const retries = this.speed.maxRetries
+          if (this.speed.imageConcurrency === 1) {
+            for (let picIdx = 0; picIdx < urls.length; picIdx++) {
+              const url = urls[picIdx]
+              const suffix = url.split('.').pop() || 'jpg'
+              const content = await this.fetchImageWithRetry(url, retries)
+              if (content) {
+                const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
+                images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
+                htmlParts += `<img src="${imgName}"/>`
+              }
+              this.emitProgress(completedChapters, totalChapters, `正在下载图片 ${picIdx + 1}/${urls.length}`)
+            }
+          } else {
+            const batchSize = this.speed.imageConcurrency
+            for (let i = 0; i < urls.length; i += batchSize) {
+              const batch = urls.slice(i, i + batchSize)
+              const results = await Promise.allSettled(
+                batch.map(async (imgUrl, batchIdx) => {
+                  const picIdx = i + batchIdx
+                  const suffix = imgUrl.split('.').pop() || 'jpg'
+                  const content = await this.fetchImageWithRetry(imgUrl, retries)
+                  if (content) {
+                    const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
+                    return { imgName, content, suffix, picIdx, imgUrl }
+                  }
+                  return null
+                })
+              )
+              for (const r of results) {
+                if (r.status === 'fulfilled' && r.value) {
+                  const { imgName, content, suffix } = r.value
                   images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
                   htmlParts += `<img src="${imgName}"/>`
                 }
-                this.emitProgress(vi, totalVolumes, `正在下载图片 ${picIdx + 1}/${urls.length}`)
               }
-            } else {
-              const batchSize = this.speed.imageConcurrency
-              for (let i = 0; i < urls.length; i += batchSize) {
-                const batch = urls.slice(i, i + batchSize)
-                const results = await Promise.allSettled(
-                  batch.map(async (imgUrl, batchIdx) => {
-                    const picIdx = i + batchIdx
-                    const suffix = imgUrl.split('.').pop() || 'jpg'
-                    const content = await this.fetchImageWithRetry(imgUrl, retries)
-                    if (content) {
-                      const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
-                      return { imgName, content, suffix, picIdx, imgUrl }
-                    }
-                    return null
-                  })
-                )
-                for (const r of results) {
-                  if (r.status === 'fulfilled' && r.value) {
-                    const { imgName, content, suffix } = r.value
-                    images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
-                    htmlParts += `<img src="${imgName}"/>`
-                  }
-                }
-                this.emitProgress(vi, totalVolumes, `正在下载图片 ${Math.min(i + batchSize, urls.length)}/${urls.length}`)
-                if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
-              }
+              this.emitProgress(completedChapters, totalChapters, `正在下载图片 ${Math.min(i + batchSize, urls.length)}/${urls.length}`)
+              if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
             }
-            htmlParts += '<br/>'
           }
-        } else {
-          const html = await this.fetchChapterContent(link)
+          htmlParts += '<br/>'
+        }
+      }
+
+      // 章节并行抓取
+      if (chapterItems.length > 0) {
+        const chapterResults = await asyncPool(
+          this.speed.chapterConcurrency,
+          chapterItems,
+          async (item) => {
+            const link = `${book.baseChapterUrl}${item.link}`
+            const html = await this.fetchChapterContent(link)
+            completedChapters++
+            this.emitProgress(completedChapters, totalChapters,
+              `正在下载: ${item.name} (${completedChapters}/${totalChapters})`)
+            return { name: item.name, html }
+          }
+        )
+        for (const { name, html } of chapterResults) {
           htmlParts += `<h2>${escapeXml(name)}</h2><div>${html}</div><br/>`
           hasContent = true
         }
