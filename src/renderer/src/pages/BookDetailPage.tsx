@@ -80,17 +80,28 @@ export default function BookDetailPage() {
             </div>
           </div>
 
-          {/* 统计条 */}
-          <div className="grid grid-cols-3 px-4 py-3 bg-apple-card rounded-xl border border-apple-border-subtle mb-4 text-[12px]">
-            {book.basic_info['最新章节'] && (
-              <div className="text-left"><span className="text-apple-heading">最新</span> <span className="text-apple-body">{book.basic_info['最新章节']}</span></div>
-            )}
-            {book.basic_info['更新时间'] && (
-              <div className="text-left"><span className="text-apple-heading">更新</span> <span className="text-apple-body">{book.basic_info['更新时间']}</span></div>
-            )}
-            {book.basic_info['全文长度'] && (
-              <div className="text-left"><span className="text-apple-heading">字数</span> <span className="text-apple-body">{book.basic_info['全文长度']}</span></div>
-            )}
+          {/* 统计区 */}
+          <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
+            <div className="grid grid-cols-3 gap-4">
+              {book.basic_info['最新章节'] && (
+                <div>
+                  <h4 className="text-[12px] font-semibold text-apple-heading mb-1">最新</h4>
+                  <p className="text-[13px] text-apple-body truncate">{book.basic_info['最新章节']}</p>
+                </div>
+              )}
+              {book.basic_info['更新时间'] && (
+                <div>
+                  <h4 className="text-[12px] font-semibold text-apple-heading mb-1">更新</h4>
+                  <p className="text-[13px] text-apple-body">{book.basic_info['更新时间']}</p>
+                </div>
+              )}
+              {book.basic_info['全文长度'] && (
+                <div>
+                  <h4 className="text-[12px] font-semibold text-apple-heading mb-1">字数</h4>
+                  <p className="text-[13px] text-apple-body">{book.basic_info['全文长度']}</p>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 简介 */}
