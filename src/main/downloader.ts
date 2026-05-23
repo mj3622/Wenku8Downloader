@@ -18,10 +18,10 @@ export type DownloadProgress = {
 
 /** 请求限流降级等级 */
 const SPEED_TIERS = [
-  { level: 0, name: '激进', concurrency: Infinity, delayMs: 0, maxRetries: 1 },
-  { level: 1, name: '中等', concurrency: 5, delayMs: 500, maxRetries: 2 },
-  { level: 2, name: '保守', concurrency: 1, delayMs: 1000, maxRetries: 3 },
-  { level: 3, name: '兜底', concurrency: 1, delayMs: 2000, maxRetries: 3 },
+  { level: 0, name: '激进', chapterConcurrency: 8, imageConcurrency: Infinity, delayMs: 0, maxRetries: 1 },
+  { level: 1, name: '中等', chapterConcurrency: 4, imageConcurrency: 5, delayMs: 500, maxRetries: 2 },
+  { level: 2, name: '保守', chapterConcurrency: 2, imageConcurrency: 1, delayMs: 1000, maxRetries: 3 },
+  { level: 3, name: '兜底', chapterConcurrency: 1, imageConcurrency: 1, delayMs: 2000, maxRetries: 3 },
 ] as const
 
 const SUCCESS_RESET_THRESHOLD = 10  // 连续成功 N 次后升一级
@@ -122,7 +122,7 @@ export class Downloader {
     const total = urls.length
     let completed = 0
 
-    if (this.speed.concurrency === 1) {
+    if (this.speed.imageConcurrency === 1) {
       // 顺序下载
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i]
@@ -137,8 +137,8 @@ export class Downloader {
       }
     } else {
       // 并发下载（按 concurrency 分组）
-      for (let i = 0; i < urls.length; i += this.speed.concurrency) {
-        const batch = urls.slice(i, i + this.speed.concurrency)
+      for (let i = 0; i < urls.length; i += this.speed.imageConcurrency) {
+        const batch = urls.slice(i, i + this.speed.imageConcurrency)
         const results = await Promise.allSettled(
           batch.map((url, batchIdx) =>
             this.fetchImageWithRetry(url, retries).then((content) => {
@@ -234,7 +234,7 @@ export class Downloader {
     let htmlParts = ''
     const retries = this.speed.maxRetries
 
-    if (this.speed.concurrency === 1) {
+    if (this.speed.imageConcurrency === 1) {
       for (let picIdx = 0; picIdx < urls.length; picIdx++) {
         const imgUrl = urls[picIdx]
         const suffix = imgUrl.split('.').pop() || 'jpg'
@@ -252,7 +252,7 @@ export class Downloader {
         this.emitProgress(itemIdx + 1, total, `正在下载图片 ${picIdx + 1}/${urls.length}`)
       }
     } else {
-      const batchSize = this.speed.concurrency
+      const batchSize = this.speed.imageConcurrency
       for (let i = 0; i < urls.length; i += batchSize) {
         const batch = urls.slice(i, i + batchSize)
         const results = await Promise.allSettled(
@@ -327,7 +327,7 @@ export class Downloader {
           const urls = await book.getChapterImageUrls(volName)
           if (urls) {
             const retries = this.speed.maxRetries
-            if (this.speed.concurrency === 1) {
+            if (this.speed.imageConcurrency === 1) {
               for (let picIdx = 0; picIdx < urls.length; picIdx++) {
                 const url = urls[picIdx]
                 const suffix = url.split('.').pop() || 'jpg'
@@ -340,7 +340,7 @@ export class Downloader {
                 this.emitProgress(vi, totalVolumes, `正在下载图片 ${picIdx + 1}/${urls.length}`)
               }
             } else {
-              const batchSize = this.speed.concurrency
+              const batchSize = this.speed.imageConcurrency
               for (let i = 0; i < urls.length; i += batchSize) {
                 const batch = urls.slice(i, i + batchSize)
                 const results = await Promise.allSettled(
