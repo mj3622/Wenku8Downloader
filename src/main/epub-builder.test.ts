@@ -147,4 +147,80 @@ describe('EpubBuilder', () => {
     expect(nav).toContain('chapter1.xhtml')
     expect(nav).toContain('chapter2.xhtml')
   })
+
+  it('converts HTML5 void elements to XHTML self-closing tags', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('Void元素测试')
+    builder.setAuthor('作者')
+    builder.addChapter({
+      title: '测试',
+      content: '<p>第一行<br>第二行<br>第三行</p><br>结尾<hr>分隔',
+      fileName: 'ch1.xhtml',
+    })
+
+    const result = await builder.build()
+    const xhtml = await readTextFromZip(result, 'OEBPS/ch1.xhtml')
+
+    // <br> 应该转为 <br/>
+    expect(xhtml).toContain('<br/>')
+    // <hr> 应该转为 <hr/>
+    expect(xhtml).toContain('<hr/>')
+    // 不应该有未闭合的 <br>（即后紧跟非 /> 的上下文）
+    expect(xhtml).not.toMatch(/<br[^/]/)
+    expect(xhtml).not.toMatch(/<hr[^/]/)
+  })
+
+  it('preserves already self-closing void elements', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('已有自闭合')
+    builder.setAuthor('作者')
+    builder.addChapter({
+      title: '测试',
+      content: '<p>自闭合的br</p><br/><br /><img src="a.jpg" /><img src="b.jpg"/>',
+      fileName: 'ch1.xhtml',
+    })
+
+    const result = await builder.build()
+    const xhtml = await readTextFromZip(result, 'OEBPS/ch1.xhtml')
+
+    // 已有的自闭合标签不应该被双重闭合（如 <br/>/>）
+    expect(xhtml).not.toContain('/>/>')
+    // 所有 br 标签应该是自闭合的
+    const brTags = xhtml.match(/<br[^>]*>/g) || []
+    expect(brTags.length).toBe(2)
+    for (const tag of brTags) {
+      expect(tag.endsWith('/>')).toBe(true)
+    }
+  })
+
+  it('handles merged chapter content with mixed void elements and entities', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('合并内容测试')
+    builder.setAuthor('作者')
+
+    // 模拟 downloadFullBook 合并后的内容：含 &nbsp;、<br>、多个章节
+    const mergedContent =
+      '<h2>序章</h2><div>&nbsp;&nbsp;&nbsp;&nbsp;第一段<br>继续<br>结束</div><br>' +
+      '<h2>第一章</h2><div>&nbsp;&nbsp;新章节<br>内容</div><br>' +
+      '<h2>第二章</h2><div>最后一章&mdash;结束<hr>分隔线</div>'
+
+    builder.addChapter({
+      title: '合并卷',
+      content: mergedContent,
+      fileName: 'merged.xhtml',
+    })
+
+    const result = await builder.build()
+    const xhtml = await readTextFromZip(result, 'OEBPS/merged.xhtml')
+
+    // 不应有命名实体（除了 XML 预定义）
+    expect(xhtml).not.toContain('&nbsp;')
+    expect(xhtml).not.toContain('&mdash;')
+    // 数值实体应存在
+    expect(xhtml).toContain('&#160;')
+    expect(xhtml).toContain('&#8212;')
+    // 不应有未闭合的 void 元素
+    expect(xhtml).not.toMatch(/<br[^/]/)
+    expect(xhtml).not.toMatch(/<hr[^/]/)
+  })
 })
