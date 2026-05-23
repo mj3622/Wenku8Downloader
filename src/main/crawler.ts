@@ -33,7 +33,6 @@ function encodeKey(key: string): string {
 
 export class WebCrawler {
   private cookies: Record<string, string>
-  private proxies: { http: string; https: string } | null
   private fetchCount = 0
 
   constructor(cookie?: Record<string, string>) {
@@ -45,24 +44,7 @@ export class WebCrawler {
       cf_clearance: cfg.cookie?.cf_clearance ?? '',
     }
 
-    const proxyCfg = cfg.proxy
-    if (proxyCfg?.http || proxyCfg?.https) {
-      this.proxies = { http: proxyCfg.http, https: proxyCfg.https }
-    } else {
-      this.proxies = null
-    }
-
-    this.injectCookies()
-  }
-
-  syncProxy(): void {
-    const cfg = config.getAll()
-    const px = cfg.proxy
-    if (px?.http || px?.https) {
-      this.proxies = { http: px.http, https: px.https }
-    } else {
-      this.proxies = null
-    }
+    void this.injectCookies()
   }
 
   syncCookies(): void {
@@ -94,6 +76,10 @@ export class WebCrawler {
   async fetch(url: string): Promise<cheerio.CheerioAPI>
   async fetch(url: string, parse: false): Promise<Buffer>
   async fetch(url: string, parse: boolean = true): Promise<cheerio.CheerioAPI | Buffer> {
+    // Resolve relative URLs against base
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
+    }
     const maxRetries = 3
     let lastError: Error | null = null
 
@@ -127,7 +113,6 @@ export class WebCrawler {
         }
       } catch (err) {
         lastError = err as Error
-        console.error(`[Crawler] fetch failed (attempt ${attempt + 1}/${maxRetries}):`, (err as Error).message)
         if (attempt < maxRetries - 1) {
           await sleep(8000)
           // Re-inject cookies on retry
@@ -199,25 +184,6 @@ export class WebCrawler {
         await sleep(5000)
       }
     }
-  }
-
-  async getCookieViaBrowser(): Promise<void> {
-    const { acquireCookiesViaBrowser } = require('./cookie-acquirer')
-    const loginCfg = config.getAll().login
-    const username = loginCfg?.username
-    const password = loginCfg?.password
-
-    if (!username || !password) {
-      throw new Error('请先配置登录账号和密码')
-    }
-
-    const cookies = await acquireCookiesViaBrowser(username, password)
-
-    config.set('cookie', 'PHPSESSID', cookies['PHPSESSID'] ?? '')
-    config.set('cookie', 'jieqiUserInfo', cookies['jieqiUserInfo'] ?? '')
-    config.set('cookie', 'jieqiVisitInfo', cookies['jieqiVisitInfo'] ?? '')
-    config.set('cookie', 'cf_clearance', cookies['cf_clearance'] ?? '')
-    this.syncCookies()
   }
 
   async getImageContent(url: string): Promise<Buffer | null> {
@@ -344,4 +310,3 @@ export class WebCrawler {
   }
 }
 
-export const crawler = new WebCrawler()
