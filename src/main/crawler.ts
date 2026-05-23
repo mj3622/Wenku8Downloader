@@ -253,9 +253,11 @@ export class WebCrawler {
         const tags = ps.eq(2).text().replace('Tags:', '').trim()
         const desc = ps.eq(3).text().replace('简介:', '').trim()
 
-        // 从第一段提取作者
+        // 从第一段提取作者、状态、更新时间
         const authorPart = p1.split('/').find((s: string) => s.includes('作者:')) || ''
         const author = authorPart.replace('作者:', '').trim()
+        const updatePart = p1.split('/').find((s: string) => s.includes('更新:')) || ''
+        const updateTime = updatePart.replace('更新:', '').trim()
 
         results.push({
           title: titleText,
@@ -263,6 +265,7 @@ export class WebCrawler {
           id: bookId,
           author,
           status: statusText.trim(),
+          updateTime,
           tags,
           desc,
         })
