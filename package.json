@@ -56,9 +56,12 @@
     }
   },
   "dependencies": {
-    "cheerio": "^1.2.0",
+    "cheerio": "^1.0.0-rc.12",
     "iconv-lite": "^0.7.2",
     "jszip": "^3.10.1",
+    "puppeteer-core": "^25.0.4",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",
