@@ -39,7 +39,8 @@ export default function SearchPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-apple-heading mb-4">检索</h2>
+      <h2 className="text-2xl font-bold text-apple-heading mb-2">检索</h2>
+      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
       <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
         {tabs.map((t) => (
           <button
@@ -114,6 +115,8 @@ function SearchTab({
   onClear: () => void
 }) {
   const label = type === 'author' ? '请输入轻小说文库的作者' : '请输入轻小说文库的作品名称'
+  const emptyText = type === 'author' ? '输入作者名开始搜索' : '输入书名开始搜索'
+  const exampleText = type === 'author' ? '例如：橘公司' : '例如：败犬女主太多了！'
 
   return (
     <div>
@@ -143,14 +146,35 @@ function SearchTab({
           {loading ? '查询中...' : '查询'}
         </button>
       </div>
+
       {loading && <LoadingSpinner text="正在查询中..." />}
+
       {error && <StatusAlert type="error" message={error} onDismiss={onClear} />}
+
       {!loading && !error && results.length === 0 && (
-        <p className="text-sm text-apple-tertiary">
-          {type === 'author' ? '输入作者名开始搜索' : '输入书名开始搜索'}
-        </p>
+        <div className="flex flex-col items-center justify-center py-16">
+          <svg
+            className="w-12 h-12 text-apple-tertiary mb-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <p className="text-sm text-apple-tertiary mb-1">{emptyText}</p>
+          <p className="text-xs text-apple-tertiary/60">{exampleText}</p>
+        </div>
       )}
-      <SearchResultList results={results} onSelect={onSelect} />
+
+      {results.length > 0 && (
+        <div className="px-2">
+          <SearchResultList results={results} onSelect={onSelect} />
+        </div>
+      )}
     </div>
   )
 }

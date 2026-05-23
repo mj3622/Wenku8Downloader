@@ -13,45 +13,30 @@ export default function BookDetailPage() {
   const { book, loading, error, fetchBook, clear } = useBookStore()
   const { downloadEpub, downloadImages } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
-  const [dlStatus, setDlStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-  const [dlMessage, setDlMessage] = useState('')
 
   useEffect(() => {
     if (id) fetchBook(id)
     return () => clear()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDownload = async (type: DownloadTab) => {
+  const handleDownload = (type: DownloadTab) => {
     if (!book) return
-    setDlStatus('loading')
-    setDlMessage('')
-    try {
-      if (type === 'pictures') {
-        await downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
-      } else {
-        await downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
-      }
-      setDlStatus('success')
-      setDlMessage('下载任务已添加，可在下载历史页面查看进度')
-    } catch (e) {
-      setDlStatus('error')
-      setDlMessage(String(e))
+    if (type === 'pictures') {
+      downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
+    } else {
+      downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
     }
+    navigate('/download')
   }
 
-  const handleMultiDownload = async (type: DownloadTab, volumes: string[]) => {
+  const handleMultiDownload = (type: DownloadTab, volumes: string[]) => {
     if (!book) return
-    setDlStatus('loading')
-    setDlMessage('')
-    for (const v of volumes) {
-      if (type === 'pictures') {
-        downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
-      } else {
-        downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
-      }
-    }
-    setDlStatus('success')
-    setDlMessage(`${volumes.length} 个下载任务已添加，可在下载历史页面查看进度`)
+    volumes.forEach(v =>
+      type === 'pictures'
+        ? downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
+        : downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
+    )
+    navigate('/download')
   }
 
   const tabs: { key: DownloadTab; label: string }[] = [
@@ -75,22 +60,24 @@ export default function BookDetailPage() {
       {book && (
         <>
           {/* 信息区 */}
-          <div className="flex flex-col items-center mb-6">
+          <div className="flex items-start gap-6 mb-6">
             {book.basic_info['cover'] && (
               <img
                 src={book.basic_info['cover']}
                 alt={book.basic_info['标题']}
-                className="w-[150px] h-[212px] object-cover rounded-[14px] bg-apple-bg shadow-md mb-4"
+                className="w-[130px] h-[184px] object-cover rounded-[14px] bg-apple-bg shadow-md flex-shrink-0"
               />
             )}
-            <h2 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight text-center">
-              {book.basic_info['标题']}
-            </h2>
-            <p className="text-[12px] text-apple-secondary text-center">
-              {book.basic_info['作者']}
-              {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
-              {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
-            </p>
+            <div className="min-w-0">
+              <h2 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
+                {book.basic_info['标题']}
+              </h2>
+              <p className="text-[12px] text-apple-secondary">
+                {book.basic_info['作者']}
+                {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
+                {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
+              </p>
+            </div>
           </div>
 
           {/* 统计条 */}
@@ -139,12 +126,11 @@ export default function BookDetailPage() {
                 <div className="text-center">
                   <p className="text-[13px] text-apple-secondary mb-4">合并全部卷为一个 EPUB 文件，包含封面与目录</p>
                   <button
-                    disabled={dlStatus === 'loading'}
                     className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                                rounded-[24px] text-[13px] font-medium text-white transition-opacity"
                     onClick={() => handleDownload('full')}
                   >
-                    {dlStatus === 'loading' ? '添加中...' : '下载整本 EPUB'}
+                    下载整本 EPUB
                   </button>
                 </div>
               )}
@@ -152,7 +138,6 @@ export default function BookDetailPage() {
               {dlTab === 'divided' && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
-                  loading={dlStatus === 'loading'}
                   onDownload={(vols) => handleMultiDownload('divided', vols)}
                 />
               )}
@@ -160,16 +145,8 @@ export default function BookDetailPage() {
               {dlTab === 'pictures' && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
-                  loading={dlStatus === 'loading'}
                   onDownload={(vols) => handleMultiDownload('pictures', vols)}
                 />
-              )}
-
-              {dlStatus === 'success' && dlMessage && (
-                <StatusAlert type="success" message={dlMessage} onDismiss={() => setDlStatus('idle')} />
-              )}
-              {dlStatus === 'error' && dlMessage && (
-                <StatusAlert type="error" message={dlMessage} onDismiss={() => setDlStatus('idle')} />
               )}
             </div>
           </div>
@@ -180,10 +157,9 @@ export default function BookDetailPage() {
 }
 
 function MultiVolumeSelector({
-  volumes, loading, onDownload,
+  volumes, onDownload,
 }: {
   volumes: Record<string, unknown>
-  loading: boolean
   onDownload: (volumes: string[]) => void
 }) {
   const volumeKeys = Object.keys(volumes)
@@ -241,12 +217,12 @@ function MultiVolumeSelector({
 
       <div className="text-center">
         <button
-          disabled={loading || count === 0}
+          disabled={count === 0}
           className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                      rounded-[24px] text-[13px] font-medium text-white transition-opacity"
           onClick={() => count > 0 && onDownload([...selected])}
         >
-          {loading ? '添加中...' : count === 0 ? '请选择要下载的卷' : `下载选中的 ${count} 卷`}
+          {count === 0 ? '请选择要下载的卷' : `下载选中的 ${count} 卷`}
         </button>
       </div>
     </div>

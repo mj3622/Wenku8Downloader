@@ -3,23 +3,29 @@ import { useConfigStore } from '../stores/configStore'
 import { api } from '../api/client'
 import StatusAlert from '../components/StatusAlert'
 
+const TITLE_FORMATS = [
+  { value: 'FULL', label: '完整', desc: '中文译名（日文原名）' },
+  { value: 'IN', label: '原名', desc: '仅保留日文原名' },
+  { value: 'OUT', label: '译名', desc: '仅保留中文译名' },
+] as const
+
 export default function ConfigPage() {
   const { config, fetchConfig, setConfig } = useConfigStore()
-  const [tab, setTab] = useState<'account' | 'cookie' | 'download'>('account')
+  const [tab, setTab] = useState<'login' | 'download'>('login')
 
   useEffect(() => {
     fetchConfig()
   }, [fetchConfig])
 
   const tabs = [
-    { key: 'account' as const, label: '账号' },
-    { key: 'cookie' as const, label: 'Cookie' },
+    { key: 'login' as const, label: '登录' },
     { key: 'download' as const, label: '下载设置' },
   ]
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-apple-heading mb-4">配置</h2>
+      <h2 className="text-2xl font-bold text-apple-heading mb-1">配置</h2>
+      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
       <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
         {tabs.map((t) => (
           <button
@@ -35,155 +41,202 @@ export default function ConfigPage() {
           </button>
         ))}
       </div>
-      {tab === 'account' && <AccountTab config={config} onSave={setConfig} />}
-      {tab === 'cookie' && <CookieTab />}
+      {tab === 'login' && <LoginTab />}
       {tab === 'download' && <DownloadTab config={config} onSave={setConfig} />}
     </div>
   )
 }
 
-function AccountTab({
-  config,
-  onSave,
-}: {
-  config: Record<string, unknown> | null
-  onSave: (section: string, key: string, value: string) => Promise<void>
-}) {
+function LoginTab() {
+  const { config, setConfig } = useConfigStore()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [proxyHttp, setProxyHttp] = useState('')
-  const [proxyHttps, setProxyHttps] = useState('')
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
+  const [cookieState, setCookieState] = useState<'idle' | 'loading' | 'valid' | 'error'>('idle')
+  const [cookieMsg, setCookieMsg] = useState('')
+  const [lastRefresh, setLastRefresh] = useState<number | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
   useEffect(() => {
     if (config) {
       setUsername(((config.login as Record<string, string>)?.username) ?? '')
       setPassword(((config.login as Record<string, string>)?.password) ?? '')
-      setProxyHttp(((config.proxy as Record<string, string>)?.http) ?? '')
-      setProxyHttps(((config.proxy as Record<string, string>)?.https) ?? '')
     }
   }, [config])
 
-  const handleSave = async () => {
-    setSaving(true)
-    setStatus(null)
+  const doRefresh = async () => {
+    setRefreshing(true)
+    setCookieState('loading')
+    setCookieMsg('正在登录...')
     try {
-      await onSave('login', 'username', username)
-      await onSave('login', 'password', password)
-      await onSave('proxy', 'http', proxyHttp)
-      await onSave('proxy', 'https', proxyHttps)
-      setStatus({ type: 'success', msg: '账号与代理配置已保存' })
+      api.getCookieProgress((data) => {
+        setCookieMsg(data.message)
+      })
+      const result = await api.autoGetCookie()
+      setCookieState('valid')
+      setLastRefresh(Date.now())
+      setCookieMsg('已就绪')
     } catch (e) {
-      setStatus({ type: 'error', msg: String(e) })
+      setCookieState('error')
+      setCookieMsg(String(e))
     } finally {
-      setSaving(false)
+      setRefreshing(false)
     }
   }
 
+  const handleSave = async () => {
+    setSaving(true)
+    setAlert(null)
+    try {
+      await setConfig('login', 'username', username)
+      await setConfig('login', 'password', password)
+      setAlert({ type: 'success', msg: '账号已保存' })
+    } catch (e) {
+      setAlert({ type: 'error', msg: String(e) })
+      setSaving(false)
+      return
+    }
+    setSaving(false)
+    // Auto refresh cookie after save
+    setCookieState('loading')
+    setCookieMsg('正在登录...')
+    try {
+      api.getCookieProgress((data) => {
+        setCookieMsg(data.message)
+      })
+      const result = await api.autoGetCookie()
+      setCookieState('valid')
+      setLastRefresh(Date.now())
+      setCookieMsg('已就绪')
+    } catch {
+      // Cookie error shown in the status section, not as alert
+    }
+  }
+
+  const handleRefresh = async () => {
+    if (!username) {
+      setAlert({ type: 'error', msg: '请先填写并保存账号' })
+      return
+    }
+    setAlert(null)
+    await doRefresh()
+  }
+
+  const timeAgo = lastRefresh ? formatTimeAgo(lastRefresh) : null
+
   return (
     <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold text-apple-heading">账号信息</h3>
-      <p className="text-sm text-apple-secondary">填写账号后点击保存，自动尝试刷新 Cookie。</p>
-      <div>
-        <label className="block text-sm text-apple-secondary mb-1">用户名</label>
-        <input
-          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
-                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-          placeholder="请输入轻小说文库用户名"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-apple-secondary mb-1">密码</label>
-        <input
-          type="password"
-          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
-                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-          placeholder="请输入密码"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
-      <div className="border-t border-apple-border-subtle pt-4">
-        <h3 className="text-sm font-semibold text-apple-heading mb-2">代理设置（可选）</h3>
-        <p className="text-xs text-apple-tertiary mb-3">
-          仅当网络被完全封禁导致连接报错时才需填写，留空默认直连。
-        </p>
-        <div className="space-y-3">
+      {/* 账号凭证 */}
+      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-apple-accent flex-shrink-0" />
+          <h3 className="text-sm font-semibold text-apple-heading">账号凭证</h3>
+        </div>
+        <div className="grid grid-cols-2 gap-3.5">
           <div>
-            <label className="block text-xs text-apple-secondary mb-1">HTTP 代理</label>
+            <label className="block text-[12px] font-medium text-apple-secondary mb-1.5">用户名</label>
             <input
-              className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading
                          focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-              placeholder="例如：http://127.0.0.1:7897"
-              value={proxyHttp}
-              onChange={(e) => setProxyHttp(e.target.value)}
+              placeholder="轻小说文库用户名"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-xs text-apple-secondary mb-1">HTTPS 代理</label>
+            <label className="block text-[12px] font-medium text-apple-secondary mb-1.5">密码</label>
             <input
-              className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+              type="password"
+              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading
                          focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-              placeholder="例如：http://127.0.0.1:7897"
-              value={proxyHttps}
-              onChange={(e) => setProxyHttps(e.target.value)}
+              placeholder="请输入密码"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </div>
         </div>
+        <button
+          disabled={saving}
+          className="mt-4 w-full px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+                     rounded-[20px] text-[13px] font-medium text-white transition-opacity"
+          onClick={handleSave}
+        >
+          {saving ? '保存中...' : '保存账号'}
+        </button>
+        <p className="text-[12px] text-apple-tertiary mt-2">保存后自动尝试登录并获取 Cookie</p>
       </div>
-      <button
-        disabled={saving}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
-                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-        onClick={handleSave}
-      >
-        {saving ? '保存中...' : '保存账号与代理'}
-      </button>
-      {status && <StatusAlert type={status.type} message={status.msg} onDismiss={() => setStatus(null)} />}
+
+      {/* Cookie 状态 */}
+      <div className={`rounded-xl border p-5 ${
+        cookieState === 'valid'
+          ? 'border-green-200 bg-green-50/50'
+          : cookieState === 'error'
+            ? 'border-red-200 bg-red-50/50'
+            : 'border-apple-border-subtle bg-[#fafafa]'
+      }`}>
+        <div className="flex items-center gap-2 mb-4">
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            cookieState === 'valid' ? 'bg-green-500'
+            : cookieState === 'error' ? 'bg-red-500'
+            : cookieState === 'loading' ? 'bg-apple-accent animate-pulse'
+            : 'bg-apple-tertiary'
+          }`} />
+          <h3 className="text-sm font-semibold text-apple-heading">Cookie 状态</h3>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              {cookieState === 'loading' && (
+                <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              <span className={`text-[13px] font-medium ${
+                cookieState === 'valid' ? 'text-green-600'
+                : cookieState === 'error' ? 'text-red-500'
+                : 'text-apple-secondary'
+              }`}>
+                {cookieState === 'idle' && '未获取'}
+                {cookieState === 'loading' && cookieMsg}
+                {cookieState === 'valid' && '已就绪'}
+                {cookieState === 'error' && '获取失败'}
+              </span>
+            </div>
+            {cookieState === 'valid' && timeAgo && (
+              <p className="text-[12px] text-apple-tertiary mt-1">上次刷新：{timeAgo}</p>
+            )}
+            {cookieState === 'error' && (
+              <p className="text-[12px] text-apple-tertiary mt-1 truncate max-w-[280px]" title={cookieMsg}>{cookieMsg}</p>
+            )}
+          </div>
+          <button
+            disabled={refreshing}
+            className="px-5 py-2 bg-apple-accent-light text-apple-accent hover:bg-apple-accent/15 disabled:opacity-40
+                       rounded-[20px] text-[13px] font-medium transition-colors flex-shrink-0"
+            onClick={handleRefresh}
+          >
+            {refreshing ? '刷新中...' : '刷新 Cookie'}
+          </button>
+        </div>
+      </div>
+
+      <p className="text-[12px] text-apple-tertiary text-center">
+        修改账号后自动保存，Cookie 过期后点击「刷新 Cookie」重新获取
+      </p>
+
+      {alert && <StatusAlert type={alert.type} message={alert.msg} onDismiss={() => setAlert(null)} />}
     </div>
   )
 }
 
-function CookieTab() {
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
-
-  const handleAutoGet = async () => {
-    setLoading(true)
-    setStatus(null)
-    try {
-      await api.autoGetCookie()
-      setStatus({ type: 'success', msg: 'Cookie 自动获取成功！已写入配置并立即生效。' })
-    } catch (e) {
-      setStatus({ type: 'error', msg: String(e) })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold text-apple-heading">自动获取 (推荐)</h3>
-      <p className="text-sm text-apple-secondary">
-        点击下方按钮将启动真实 Chrome 浏览器自动完成登录，可靠绕过 Cloudflare，并获取 cf_clearance。
-      </p>
-      <p className="text-xs text-apple-tertiary">
-        点击后屏幕上会弹出浏览器窗口，自动操作完成后会自动关闭，无需手动干预。
-      </p>
-      <button
-        disabled={loading}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
-                   rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-        onClick={handleAutoGet}
-      >
-        {loading ? '获取中（10~30 秒）...' : '一键获取 / 刷新 Cookie'}
-      </button>
-      {status && <StatusAlert type={status.type} message={status.msg} onDismiss={() => setStatus(null)} />}
-    </div>
-  )
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
 function DownloadTab({
@@ -226,31 +279,45 @@ function DownloadTab({
   return (
     <div className="space-y-4 max-w-lg">
       <h3 className="text-lg font-semibold text-apple-heading">书名格式</h3>
-      <select
-        className="px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading w-32
-                   focus:outline-none focus:border-apple-accent/30"
-        value={titleFormat}
-        onChange={(e) => setTitleFormat(e.target.value)}
-      >
-        <option value="FULL">FULL</option>
-        <option value="IN">IN</option>
-        <option value="OUT">OUT</option>
-      </select>
-      <div className="p-3 rounded-xl border border-apple-border-subtle text-xs text-apple-secondary space-y-1 bg-apple-bg">
-        <p>以「败北女角太多了！(败犬女主太多了！)」为例：</p>
-        <p><strong className="text-apple-heading">FULL</strong> = 败北女角太多了！(败犬女主太多了！)</p>
-        <p><strong className="text-apple-heading">IN</strong> = 败犬女主太多了！</p>
-        <p><strong className="text-apple-heading">OUT</strong> = 败北女角太多了！</p>
+      <div className="space-y-2">
+        {TITLE_FORMATS.map((fmt) => {
+          const examples: Record<string, string> = {
+            FULL: '败北女角太多了！(败犬女主太多了！)',
+            IN: '败犬女主太多了！',
+            OUT: '败北女角太多了！',
+          }
+          return (
+            <button
+              key={fmt.value}
+              type="button"
+              onClick={() => setTitleFormat(fmt.value)}
+              className={`w-full text-left px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+                titleFormat === fmt.value
+                  ? 'border-apple-accent bg-[rgba(0,113,227,0.06)]'
+                  : 'border-apple-border-subtle bg-white hover:border-apple-accent/40'
+              }`}
+            >
+              <div className={`text-sm font-semibold ${titleFormat === fmt.value ? 'text-apple-accent' : 'text-apple-heading'}`}>
+                {fmt.label}
+              </div>
+              <div className={`text-[11px] mt-0.5 ${titleFormat === fmt.value ? 'text-apple-accent/70' : 'text-apple-tertiary'}`}>
+                {examples[fmt.value]}
+              </div>
+            </button>
+          )
+        })}
       </div>
-      <div className="border-t border-apple-border-subtle pt-4">
+      <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">封面图片索引</h3>
-        <input
-          className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
-                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-          value={coverIndex}
-          onChange={(e) => setCoverIndex(e.target.value)}
-        />
-        <p className="text-xs text-apple-tertiary mt-1">0 表示第一张插图，1 表示第二张，依此类推</p>
+        <div className="flex items-center gap-3">
+          <input
+            className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                       focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+            value={coverIndex}
+            onChange={(e) => setCoverIndex(e.target.value)}
+          />
+          <span className="text-xs text-apple-tertiary">0 表示第一张插图，1 表示第二张，依此类推</span>
+        </div>
       </div>
       <button
         disabled={saving}

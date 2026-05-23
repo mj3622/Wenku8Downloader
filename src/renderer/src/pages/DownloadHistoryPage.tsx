@@ -11,7 +11,8 @@ export default function DownloadHistoryPage() {
   if (tasks.length === 0) {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-apple-heading mb-4">下载历史</h2>
+        <h2 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h2>
+        <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
         <div className="text-center py-16">
           <p className="text-apple-tertiary text-[14px]">暂无下载记录</p>
           <p className="text-apple-tertiary text-[12px] mt-1">前往检索页面搜索书籍并下载</p>
@@ -22,13 +23,18 @@ export default function DownloadHistoryPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-apple-heading mb-4">下载历史</h2>
+      <h2 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h2>
+      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
 
       {/* 进行中 */}
       {downloading.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[11px] font-semibold text-apple-secondary mb-2">
-            进行中 · {downloading.length} 项
+          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-apple-accent inline-block" />
+            <span className="text-apple-accent">进行中</span>
+            <span className="text-apple-secondary text-[12px] font-normal">
+              · {downloading.length} 项
+            </span>
           </h3>
           {downloading.map((task) => (
             <div
@@ -37,18 +43,44 @@ export default function DownloadHistoryPage() {
             >
               <div className="flex items-center gap-3">
                 {task.cover && (
-                  <img src={task.cover} alt="" className="w-10 h-14 object-cover rounded-md flex-shrink-0 bg-apple-bg" />
+                  <img
+                    src={task.cover}
+                    alt=""
+                    className="w-10 h-14 object-cover rounded-md flex-shrink-0 bg-apple-bg"
+                  />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-[14px] font-semibold text-apple-heading">{task.title}</div>
+                  <div className="text-[14px] font-semibold text-apple-heading">
+                    {task.title}
+                  </div>
                   <div className="text-[12px] text-apple-secondary">
                     {task.type === 'images' ? '插图下载' : 'EPUB 下载'}
                     {task.volume && ` · ${task.volume}`}
                   </div>
-                  <div className="mt-2 h-1.5 bg-apple-bg rounded-full overflow-hidden">
-                    <div className="h-full bg-apple-accent rounded-full animate-pulse" style={{ width: '100%' }} />
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-apple-bg rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-apple-accent rounded-full animate-pulse"
+                        style={{ width: `${task.progress}%` }}
+                      />
+                    </div>
+                    <span className="text-[11px] text-apple-secondary font-medium tabular-nums">
+                      {task.progress}%
+                    </span>
                   </div>
+                  {task.phase && (
+                    <div className="text-[11px] text-apple-secondary mt-1">
+                      {task.phase}
+                    </div>
+                  )}
                 </div>
+                <button
+                  disabled
+                  className="px-4 py-1.5 text-[11px] font-medium text-apple-tertiary bg-apple-bg
+                             rounded-[14px] cursor-not-allowed opacity-60 flex-shrink-0"
+                >
+                  下载中
+                </button>
               </div>
             </div>
           ))}
@@ -58,8 +90,12 @@ export default function DownloadHistoryPage() {
       {/* 失败 */}
       {failed.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[11px] font-semibold text-red-500 mb-2">
-            失败 · {failed.length} 项
+          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+            <span className="text-red-500">失败</span>
+            <span className="text-apple-secondary text-[12px] font-normal">
+              · {failed.length} 项
+            </span>
           </h3>
           {failed.map((task) => (
             <FailedTaskItem key={task.id} task={task} onRetry={retryTask} onRemove={removeTask} />
@@ -70,15 +106,23 @@ export default function DownloadHistoryPage() {
       {/* 已完成 */}
       {completed.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[11px] font-semibold text-green-500 mb-2">
-            已完成 · {completed.length} 项
+          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+            <span className="text-green-500">已完成</span>
+            <span className="text-apple-secondary text-[12px] font-normal">
+              · {completed.length} 项
+            </span>
           </h3>
           <div className="bg-apple-card rounded-xl border border-apple-border-subtle divide-y divide-apple-border-subtle">
             {completed.map((task) => (
               <div key={task.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 {task.cover && (
-                  <img src={task.cover} alt="" className="w-9 h-12 object-cover rounded-md flex-shrink-0 bg-apple-bg" />
+                  <img
+                    src={task.cover}
+                    alt=""
+                    className="w-9 h-12 object-cover rounded-md flex-shrink-0 bg-apple-bg"
+                  />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] font-medium text-apple-heading">{task.title}</div>
