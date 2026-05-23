@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { config } from './config-manager'
-import { EpubBuilder } from './epub-builder'
+import { EpubBuilder, escapeXml } from './epub-builder'
 import type { Book } from './book'
 import type { WebCrawler } from './crawler'
 import type { EpubChapter, EpubImage } from './epub-builder'
@@ -370,7 +370,7 @@ export class Downloader {
           }
         } else {
           const html = await this.fetchChapterContent(link)
-          htmlParts += `<h2>${name}</h2><div>${html}</div><br/>`
+          htmlParts += `<h2>${escapeXml(name)}</h2><div>${html}</div><br/>`
           hasContent = true
         }
       }
