@@ -30,6 +30,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** 并发池：限制同时执行的 Promise 数量，保持结果顺序 */
+async function asyncPool<T, R>(
+  concurrency: number,
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (!isFinite(concurrency)) {
+    return Promise.all(items.map((item, i) => fn(item, i)))
+  }
+  const results: R[] = new Array(items.length)
+  let idx = 0
+
+  async function worker(): Promise<void> {
+    while (idx < items.length) {
+      const i = idx++
+      results[i] = await fn(items[i], i)
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
+  return results
+}
+
 export class Downloader {
   private crawler: WebCrawler
   private speedTier = 0
