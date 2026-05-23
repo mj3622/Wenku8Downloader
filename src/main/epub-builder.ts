@@ -86,7 +86,7 @@ export class EpubBuilder {
     oebps.file('nav.xhtml', this.buildNav())
 
     // 生成 ZIP buffer
-    const arrayBuffer = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLETE' })
+    const arrayBuffer = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })
     return Buffer.from(arrayBuffer)
   }
 
@@ -134,8 +134,7 @@ export class EpubBuilder {
       const coverImg = this.images.find((img) => img.fileName === `images/${this.coverFileName}`)
       if (coverImg) {
         const idx = this.images.indexOf(coverImg)
-        // id 从 chapters.length 开始的第一个 image
-        const coverId = `id${this.chapters.length + idx + 2}` // +2 for ncx and nav
+        const coverId = `id${this.chapters.length + idx + 1}`
         coverMeta = `    <meta name="cover" content="${coverId}"/>`
       }
     }
