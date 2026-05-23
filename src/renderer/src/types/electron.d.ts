@@ -7,8 +7,10 @@ export interface ElectronAPI {
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
   getBook: (bookId: string) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
-  downloadEpub: (bookId: string, volumeName?: string) => Promise<{ status: string; message: string }>
-  downloadImages: (bookId: string, volumeName?: string) => Promise<{ status: string; message: string }>
+  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
+  downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
+  onCookieProgress: (callback: (data: { step: string; message: string }) => void) => void
+  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => void
 }
 
 interface SearchResult {

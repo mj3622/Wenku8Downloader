@@ -1,3 +1,15 @@
+export type CookieProgress = {
+  step: string
+  message: string
+}
+
+export type DownloadProgress = {
+  taskId: string
+  current: number
+  total: number
+  phase: string
+}
+
 export const api = {
   // 配置
   getConfig: () => window.electronAPI.getConfig(),
@@ -7,6 +19,9 @@ export const api = {
 
   // Cookie
   autoGetCookie: () => window.electronAPI.autoGetCookie(),
+  getCookieProgress: (callback: (data: CookieProgress) => void) => {
+    window.electronAPI.onCookieProgress(callback)
+  },
 
   // 搜索
   searchAuthor: (q: string) => window.electronAPI.searchAuthor(q),
@@ -17,10 +32,13 @@ export const api = {
   getBookImages: (id: string) => window.electronAPI.getBookImages(id),
 
   // 下载
-  downloadEpub: (bookId: string, volumeName?: string) =>
-    window.electronAPI.downloadEpub(bookId, volumeName),
-  downloadImages: (bookId: string, volumeName?: string) =>
-    window.electronAPI.downloadImages(bookId, volumeName),
+  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) =>
+    window.electronAPI.downloadEpub(bookId, volumeName, taskId),
+  downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
+    window.electronAPI.downloadImages(bookId, volumeName, taskId),
+  getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
+    window.electronAPI.onDownloadProgress(callback)
+  },
 }
 
 export type SearchResult = {
