@@ -7,10 +7,6 @@ import type { SearchResult } from './types'
 const COMMON_HEADERS: Record<string, string> = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  'Sec-Fetch-Dest': 'document',
-  'Sec-Fetch-Mode': 'navigate',
-  'Sec-Fetch-Site': 'same-origin',
-  'Sec-Fetch-User': '?1',
   'Upgrade-Insecure-Requests': '1',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
@@ -187,6 +183,8 @@ export class WebCrawler {
   }
 
   async getImageContent(url: string): Promise<Buffer | null> {
+    // 将图片 URL 升级为 HTTPS（避免 HTTP 降级被拦截）
+    url = url.replace('http://', 'https://')
     const maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -195,7 +193,7 @@ export class WebCrawler {
           method: 'GET',
           headers: {
             ...COMMON_HEADERS,
-            'Referer': `${BASE_URL}/`,
+            'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
         })
 
