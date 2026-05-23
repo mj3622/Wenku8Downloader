@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import { parse, stringify } from 'smol-toml'
@@ -40,39 +40,12 @@ class ConfigManager {
     mkdirSync(CONFIG_DIR, { recursive: true })
 
     if (!existsSync(CONFIG_PATH)) {
-      // 尝试从默认位置复制（开发: cwd/config, 生产: resourcesPath/config）
-      const defaultDirs = [join(process.cwd(), 'config')]
-      try {
-        if (app.isPackaged) {
-          defaultDirs.unshift(join(process.resourcesPath, 'config'))
-        }
-      } catch {
-        // app 未就绪时忽略
-      }
-
-      const examplePath = CONFIG_PATH + '.example'
-      let seeded = false
-
-      // 优先从示例文件复制
-      for (const dir of defaultDirs) {
-        const src = join(dir, 'secrets.toml.example')
-        if (existsSync(src)) {
-          copyFileSync(src, examplePath)
-          seeded = true
-          break
-        }
-      }
-
-      if (existsSync(examplePath)) {
-        copyFileSync(examplePath, CONFIG_PATH)
-      } else if (!seeded) {
-        // 无示例文件时创建默认配置
-        writeFileSync(
-          CONFIG_PATH,
-          stringify(DEFAULT_CONFIG as unknown as Record<string, unknown>),
-          'utf-8',
-        )
-      }
+      // 首次启动，创建默认配置
+      writeFileSync(
+        CONFIG_PATH,
+        stringify(DEFAULT_CONFIG as unknown as Record<string, unknown>),
+        'utf-8',
+      )
     }
 
     this.config = this.readToml()
