@@ -212,36 +212,44 @@ export class Downloader {
 
     const chapters: EpubChapter[] = []
     const images: EpubImage[] = []
-    const total = volume.length
 
-    for (let itemIdx = 0; itemIdx < volume.length; itemIdx++) {
-      const item = volume[itemIdx]
-      const name = item.name
-      const link = `${book.baseChapterUrl}${item.link}`
+    const illustItem = volume.find(item => item.name === '插图')
+    const chapterItems = volume.filter(item => item.name !== '插图')
+    const totalChapters = chapterItems.length
+    let completedChapters = 0
 
-      if (name === '插图') {
-        this.emitProgress(itemIdx, total, `正在下载插图 (${volumeName})`)
-        const urls = await book.getChapterImageUrls(volumeName)
-        if (urls) {
-          let htmlParts = ''
-          const imgResults = await this.downloadVolumeImages(
-            urls, volumeName, book, itemIdx, total, images, builder,
-          )
-          htmlParts = imgResults.html
-          chapters.push({
-            title: '插图',
-            content: htmlParts,
-            fileName: `illustrations_${volumeName}.xhtml`,
-          })
-        }
-      } else {
-        this.emitProgress(itemIdx, total, `正在下载: ${name}`)
-        const html = await this.fetchChapterContent(link)
+    // 插图串行处理
+    if (illustItem) {
+      this.emitProgress(0, totalChapters, `正在下载插图 (${volumeName})`)
+      const urls = await book.getChapterImageUrls(volumeName)
+      if (urls) {
+        const imgResults = await this.downloadVolumeImages(
+          urls, volumeName, book, 0, totalChapters, images, builder,
+        )
         chapters.push({
-          title: name,
-          content: html,
-          fileName: `${itemIdx}.xhtml`,
+          title: '插图',
+          content: imgResults.html,
+          fileName: `illustrations_${volumeName}.xhtml`,
         })
+      }
+    }
+
+    // 章节并行抓取
+    if (chapterItems.length > 0) {
+      const chapterResults = await asyncPool(
+        this.speed.chapterConcurrency,
+        chapterItems,
+        async (item, idx) => {
+          const link = `${book.baseChapterUrl}${item.link}`
+          const html = await this.fetchChapterContent(link)
+          completedChapters++
+          this.emitProgress(completedChapters, totalChapters,
+            `正在下载: ${item.name} (${completedChapters}/${totalChapters})`)
+          return { title: item.name, content: html, fileName: `${idx}.xhtml` }
+        }
+      )
+      for (const ch of chapterResults) {
+        chapters.push(ch)
       }
     }
 
