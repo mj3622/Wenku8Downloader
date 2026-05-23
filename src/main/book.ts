@@ -117,40 +117,34 @@ export class Book {
 
     // 最新章节
     let latestChapter: string | null = null
-    const tables = contentDiv.find('div table')
-    if (tables.length >= 2) {
-      const latestLink = tables.eq(1).find('a')
-      if (latestLink.length > 0) {
-        latestChapter = latestLink.text().trim()
-      }
-    }
-
-    // 简介
-    let description = ''
-    const spans = $('#content span')
-    spans.each((_i, span) => {
-      const t = $(span).text()
-      if (t.includes('内容简介：')) {
-        description = t.replace('内容简介：', '').trim()
+    $('#content span.hottext').each((_i, el) => {
+      const t = $(el).text()
+      if (t.includes('最新章节') || t.includes('最近章节')) {
+        const chapterSpan = $(el).nextAll('span').first()
+        const link = chapterSpan.find('a')
+        if (link.length > 0) {
+          latestChapter = link.text().trim()
+        }
         return false
       }
     })
-    if (!description) {
-      spans.each((_i, span) => {
-        const t = $(span).text()
-        if (t.includes('内容简介')) {
-          const next = $(span).next()
-          if (next.length > 0) {
-            description = next.text().trim()
-            return false
-          }
-        }
-      })
-    }
 
-    // 封面：第二个 img
+    // 简介
+    let description = ''
+    $('#content span.hottext').each((_i, el) => {
+      const t = $(el).text()
+      if (t.includes('内容简介')) {
+        const descSpan = $(el).nextAll('span').first()
+        if (descSpan.length > 0) {
+          description = descSpan.text().trim()
+        }
+        return false
+      }
+    })
+
+    // 封面
     const imgs = contentDiv.find('img')
-    const cover = imgs.length > 1 ? imgs.eq(1).attr('src') || null : null
+    const cover = imgs.length > 0 ? imgs.eq(0).attr('src') || null : null
 
     return {
       '标题': title,
