@@ -47,6 +47,7 @@ export type SearchResult = {
   id: string
   author?: string
   status?: string
+  updateTime?: string
   tags?: string
   desc?: string
 }
