@@ -357,7 +357,7 @@ export class Downloader {
                 )
                 for (const r of results) {
                   if (r.status === 'fulfilled' && r.value) {
-                    const { imgName, content } = r.value
+                    const { imgName, content, suffix } = r.value
                     images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
                     htmlParts += `<img src="${imgName}"/>`
                   }
@@ -390,7 +390,7 @@ export class Downloader {
   }
 }
 
-function guessType(ext: string): string {
+export function guessType(ext: string): string {
   switch (ext.toLowerCase()) {
     case 'png': return 'image/png'
     case 'gif': return 'image/gif'

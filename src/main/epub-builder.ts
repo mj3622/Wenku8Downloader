@@ -213,9 +213,34 @@ ${items.join('\n')}
 <head><title>${this.escapeXml(ch.title)}</title></head>
 <body>
   <h2>${this.escapeXml(ch.title)}</h2>
-  ${ch.content}
+  ${this.htmlEntitiesToNumeric(ch.content)}
 </body>
 </html>`
+  }
+
+  /** 将 HTML 命名实体转为 XML 兼容的数值实体（如 &nbsp; → &#160;） */
+  private htmlEntitiesToNumeric(s: string): string {
+    // 先保护已有的 XML 预定义实体（&amp; &lt; &gt; &quot; &apos;）
+    // 用占位符替换它们，避免被后续的 & 替换误伤
+    const amp = s.replace(/&amp;/g, '\x00AMP\x00')
+    const lt = amp.replace(/&lt;/g, '\x00LT\x00')
+    const gt = lt.replace(/&gt;/g, '\x00GT\x00')
+    const quot = gt.replace(/&quot;/g, '\x00QUOT\x00')
+    const apos = quot.replace(/&apos;/g, '\x00APOS\x00')
+
+    // 将所有 &word; 模式转为 &#NNN; 数值实体
+    const converted = apos.replace(/&([a-zA-Z]+);/g, (_m, name: string) => {
+      const cp = HTML_ENTITY_CODEPOINTS[name]
+      return cp !== undefined ? `&#${cp};` : _m
+    })
+
+    // 恢复 XML 预定义实体
+    return converted
+      .replace(/\x00AMP\x00/g, '&amp;')
+      .replace(/\x00LT\x00/g, '&lt;')
+      .replace(/\x00GT\x00/g, '&gt;')
+      .replace(/\x00QUOT\x00/g, '&quot;')
+      .replace(/\x00APOS\x00/g, '&apos;')
   }
 
   private escapeXml(s: string): string {
@@ -226,6 +251,39 @@ ${items.join('\n')}
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;')
   }
+}
+
+/** 常见 HTML 命名实体 → Unicode 码点映射 */
+const HTML_ENTITY_CODEPOINTS: Record<string, number> = {
+  nbsp: 160, iexcl: 161, cent: 162, pound: 163, curren: 164, yen: 165,
+  brvbar: 166, sect: 167, uml: 168, copy: 169, ordf: 170, laquo: 171,
+  not: 172, shy: 173, reg: 174, macr: 175, deg: 176, plusmn: 177,
+  sup2: 178, sup3: 179, acute: 180, micro: 181, para: 182, middot: 183,
+  cedil: 184, sup1: 185, ordm: 186, raquo: 187, frac14: 188, frac12: 189,
+  frac34: 190, iquest: 191, times: 215, divide: 247,
+  quot: 34, apos: 39, lt: 60, gt: 62,
+  ndash: 8211, mdash: 8212, hellip: 8230,
+  lsquo: 8216, rsquo: 8217, sbquo: 8218,
+  ldquo: 8220, rdquo: 8221, bdquo: 8222,
+  bull: 8226, trade: 8482,
+  weierp: 8472, image: 8465, real: 8476,
+  larr: 8592, uarr: 8593, rarr: 8594, darr: 8595,
+  harr: 8596, crarr: 8629,
+  spades: 9824, clubs: 9827, hearts: 9829, diams: 9830,
+  OElig: 338, oelig: 339, Scaron: 352, scaron: 353,
+  Yuml: 376, circ: 710, tilde: 732,
+  ensp: 8194, emsp: 8195, thinsp: 8201, zwnj: 8204,
+  zwj: 8205, lrm: 8206, rlm: 8207,
+  minus: 8722, lowast: 8727, radic: 8730,
+  prop: 8733, infin: 8734, ang: 8736, and: 8743, or: 8744,
+  cap: 8745, cup: 8746, int: 8747, there4: 8756,
+  sim: 8764, cong: 8773, asymp: 8776, ne: 8800,
+  equiv: 8801, le: 8804, ge: 8805,
+  sub: 8834, sup: 8835, nsub: 8836, sube: 8838, supe: 8839,
+  oplus: 8853, otimes: 8855, perp: 8869, sdot: 8901,
+  lceil: 8968, rceil: 8969, lfloor: 8970, rfloor: 8971,
+  lang: 9001, rang: 9002,
+  loz: 9674, amp: 38,
 }
 
 function guessMediaType(fileName: string): string {
