@@ -42,10 +42,6 @@ export interface Wenku8Config {
     username: string
     password: string
   }
-  proxy: {
-    http: string
-    https: string
-  }
   download: {
     full_title: string
     default_cover_index: number
