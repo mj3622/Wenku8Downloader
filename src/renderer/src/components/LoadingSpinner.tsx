@@ -4,8 +4,8 @@ type Props = {
 
 export default function LoadingSpinner({ text = '加载中...' }: Props) {
   return (
-    <div className="flex items-center gap-3 text-apple-secondary mb-4">
-      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+    <div className="flex flex-col items-center justify-center gap-4 text-apple-secondary py-20">
+      <svg className="animate-spin h-8 w-8" viewBox="0 0 24 24">
         <circle
           className="opacity-20"
           cx="12" cy="12" r="10"
@@ -17,7 +17,7 @@ export default function LoadingSpinner({ text = '加载中...' }: Props) {
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
         />
       </svg>
-      <span className="text-[12px]">{text}</span>
+      <span className="text-sm">{text}</span>
     </div>
   )
 }

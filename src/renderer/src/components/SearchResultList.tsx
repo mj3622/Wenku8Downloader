@@ -1,13 +1,18 @@
 import { useRef } from 'react'
 import type { SearchResult } from '../api/client'
+import { useDownloadStore } from '../stores/downloadStore'
 
 type Props = {
   results: SearchResult[]
   onSelect: (id: string) => void
+  loading?: boolean
 }
 
-export default function SearchResultList({ results, onSelect }: Props) {
+export default function SearchResultList({ results, onSelect, loading = false }: Props) {
   if (results.length === 0) return null
+
+  const tasks = useDownloadStore((s) => s.tasks)
+  const downloadEpub = useDownloadStore((s) => s.downloadEpub)
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -27,6 +32,30 @@ export default function SearchResultList({ results, onSelect }: Props) {
             {item.author && (
               <p className="text-[12px] text-apple-secondary mt-1 truncate">{item.author}</p>
             )}
+            <div className="mt-2">
+              {tasks.some((t) => t.bookId === item.id) ? (
+                <button
+                  disabled
+                  className="w-full py-1.5 text-[12px] bg-apple-card border border-apple-border-subtle
+                             text-apple-tertiary rounded-[10px] cursor-not-allowed"
+                >
+                  已添加
+                </button>
+              ) : (
+                <button
+                  disabled={loading}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (loading) return
+                    downloadEpub(item.id, item.title, item.cover)
+                  }}
+                  className="w-full py-1.5 text-[12px] bg-apple-accent hover:opacity-90 disabled:opacity-40
+                             text-white rounded-[10px] font-medium transition-opacity"
+                >
+                  {loading ? '加载中...' : '下载'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       ))}
