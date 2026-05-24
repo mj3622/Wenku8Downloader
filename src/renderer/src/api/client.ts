@@ -39,6 +39,9 @@ export const api = {
   getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
     window.electronAPI.onDownloadProgress(callback)
   },
+
+  // 文件
+  openFolder: (subdir: string) => window.electronAPI.openFolder(subdir),
 }
 
 export type SearchResult = {

@@ -7,7 +7,6 @@ type SearchState = {
   results: SearchResult[]
   loading: boolean
   error: string | null
-  searchType: SearchType
   search: (type: SearchType, query: string) => Promise<void>
   clear: () => void
 }
@@ -16,9 +15,8 @@ export const useSearchStore = create<SearchState>((set) => ({
   results: [],
   loading: false,
   error: null,
-  searchType: 'id',
   search: async (type, query) => {
-    set({ loading: true, error: null, results: [], searchType: type })
+    set({ loading: true, error: null, results: [] })
     try {
       if (type === 'author') {
         const data = await api.searchAuthor(query)

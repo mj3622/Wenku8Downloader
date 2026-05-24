@@ -2,12 +2,18 @@ import { useEffect, useState } from 'react'
 import { useConfigStore } from '../stores/configStore'
 import { api } from '../api/client'
 import StatusAlert from '../components/StatusAlert'
+import { formatTimeAgo } from '../utils/format'
 
 const TITLE_FORMATS = [
   { value: 'FULL', label: '完整', desc: '中文译名（日文原名）' },
   { value: 'IN', label: '原名', desc: '仅保留日文原名' },
   { value: 'OUT', label: '译名', desc: '仅保留中文译名' },
 ] as const
+
+const CONFIG_TABS = [
+  { key: 'login' as const, label: '登录' },
+  { key: 'download' as const, label: '下载设置' },
+]
 
 export default function ConfigPage() {
   const { config, fetchConfig, setConfig } = useConfigStore()
@@ -17,17 +23,12 @@ export default function ConfigPage() {
     fetchConfig()
   }, [fetchConfig])
 
-  const tabs = [
-    { key: 'login' as const, label: '登录' },
-    { key: 'download' as const, label: '下载设置' },
-  ]
-
   return (
     <div>
       <h2 className="text-2xl font-bold text-apple-heading mb-1">配置</h2>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
       <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
-        {tabs.map((t) => (
+        {CONFIG_TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
@@ -47,6 +48,73 @@ export default function ConfigPage() {
   )
 }
 
+const COOKIE_STATE_CONFIG = {
+  idle:    { dot: 'bg-apple-tertiary',        text: 'text-apple-secondary', label: '未获取',   showSpinner: false },
+  loading: { dot: 'bg-apple-accent animate-pulse', text: 'text-apple-secondary', label: '',    showSpinner: true },
+  valid:   { dot: 'bg-green-500',              text: 'text-green-600',       label: '已就绪',  showSpinner: false },
+  error:   { dot: 'bg-red-500',                text: 'text-red-500',         label: '获取失败', showSpinner: false },
+} as const
+
+const CARD_STYLE = {
+  idle:    'border-apple-border-subtle bg-[#fafafa]',
+  loading: 'border-apple-border-subtle bg-[#fafafa]',
+  valid:   'border-green-200 bg-green-50/50',
+  error:   'border-red-200 bg-red-50/50',
+} as const
+
+function CookieStatusCard({
+  cookieState,
+  cookieMsg,
+  timeAgo,
+  onRefresh,
+}: {
+  cookieState: 'idle' | 'loading' | 'valid' | 'error'
+  cookieMsg: string
+  timeAgo: string | null
+  onRefresh: () => void
+}) {
+  const cs = COOKIE_STATE_CONFIG[cookieState]
+  const cardStyle = CARD_STYLE[cookieState]
+
+  return (
+    <div className={`rounded-xl border p-5 ${cardStyle}`}>
+      <div className="flex items-center gap-2 mb-4">
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cs.dot}`} />
+        <h3 className="text-sm font-semibold text-apple-heading">Cookie 状态</h3>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            {cs.showSpinner && (
+              <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            <span className={`text-[13px] font-medium ${cs.text}`}>
+              {cookieState === 'loading' ? cookieMsg : cs.label}
+            </span>
+          </div>
+          {cookieState === 'valid' && timeAgo && (
+            <p className="text-[12px] text-apple-tertiary mt-1">上次刷新：{timeAgo}</p>
+          )}
+          {cookieState === 'error' && (
+            <p className="text-[12px] text-apple-tertiary mt-1 truncate max-w-[280px]" title={cookieMsg}>{cookieMsg}</p>
+          )}
+        </div>
+        <button
+          disabled={cookieState === 'loading'}
+          className="px-5 py-2 bg-apple-accent-light text-apple-accent hover:bg-apple-accent/15 disabled:opacity-40
+                     rounded-[20px] text-[13px] font-medium transition-colors flex-shrink-0"
+          onClick={onRefresh}
+        >
+          {cookieState === 'loading' ? '刷新中...' : '刷新 Cookie'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function LoginTab() {
   const { config, setConfig } = useConfigStore()
   const [username, setUsername] = useState('')
@@ -55,7 +123,6 @@ function LoginTab() {
   const [cookieState, setCookieState] = useState<'idle' | 'loading' | 'valid' | 'error'>('idle')
   const [cookieMsg, setCookieMsg] = useState('')
   const [lastRefresh, setLastRefresh] = useState<number | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
   useEffect(() => {
@@ -66,22 +133,19 @@ function LoginTab() {
   }, [config])
 
   const doRefresh = async () => {
-    setRefreshing(true)
     setCookieState('loading')
     setCookieMsg('正在登录...')
     try {
       api.getCookieProgress((data) => {
         setCookieMsg(data.message)
       })
-      const result = await api.autoGetCookie()
+      await api.autoGetCookie()
       setCookieState('valid')
       setLastRefresh(Date.now())
       setCookieMsg('已就绪')
     } catch (e) {
       setCookieState('error')
       setCookieMsg(String(e))
-    } finally {
-      setRefreshing(false)
     }
   }
 
@@ -98,20 +162,7 @@ function LoginTab() {
       return
     }
     setSaving(false)
-    // Auto refresh cookie after save
-    setCookieState('loading')
-    setCookieMsg('正在登录...')
-    try {
-      api.getCookieProgress((data) => {
-        setCookieMsg(data.message)
-      })
-      const result = await api.autoGetCookie()
-      setCookieState('valid')
-      setLastRefresh(Date.now())
-      setCookieMsg('已就绪')
-    } catch {
-      // Cookie error shown in the status section, not as alert
-    }
+    await doRefresh()
   }
 
   const handleRefresh = async () => {
@@ -167,60 +218,12 @@ function LoginTab() {
         <p className="text-[12px] text-apple-tertiary mt-2">保存后自动尝试登录并获取 Cookie</p>
       </div>
 
-      {/* Cookie 状态 */}
-      <div className={`rounded-xl border p-5 ${
-        cookieState === 'valid'
-          ? 'border-green-200 bg-green-50/50'
-          : cookieState === 'error'
-            ? 'border-red-200 bg-red-50/50'
-            : 'border-apple-border-subtle bg-[#fafafa]'
-      }`}>
-        <div className="flex items-center gap-2 mb-4">
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-            cookieState === 'valid' ? 'bg-green-500'
-            : cookieState === 'error' ? 'bg-red-500'
-            : cookieState === 'loading' ? 'bg-apple-accent animate-pulse'
-            : 'bg-apple-tertiary'
-          }`} />
-          <h3 className="text-sm font-semibold text-apple-heading">Cookie 状态</h3>
-        </div>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              {cookieState === 'loading' && (
-                <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              )}
-              <span className={`text-[13px] font-medium ${
-                cookieState === 'valid' ? 'text-green-600'
-                : cookieState === 'error' ? 'text-red-500'
-                : 'text-apple-secondary'
-              }`}>
-                {cookieState === 'idle' && '未获取'}
-                {cookieState === 'loading' && cookieMsg}
-                {cookieState === 'valid' && '已就绪'}
-                {cookieState === 'error' && '获取失败'}
-              </span>
-            </div>
-            {cookieState === 'valid' && timeAgo && (
-              <p className="text-[12px] text-apple-tertiary mt-1">上次刷新：{timeAgo}</p>
-            )}
-            {cookieState === 'error' && (
-              <p className="text-[12px] text-apple-tertiary mt-1 truncate max-w-[280px]" title={cookieMsg}>{cookieMsg}</p>
-            )}
-          </div>
-          <button
-            disabled={refreshing}
-            className="px-5 py-2 bg-apple-accent-light text-apple-accent hover:bg-apple-accent/15 disabled:opacity-40
-                       rounded-[20px] text-[13px] font-medium transition-colors flex-shrink-0"
-            onClick={handleRefresh}
-          >
-            {refreshing ? '刷新中...' : '刷新 Cookie'}
-          </button>
-        </div>
-      </div>
+      <CookieStatusCard
+        cookieState={cookieState}
+        cookieMsg={cookieMsg}
+        timeAgo={timeAgo}
+        onRefresh={handleRefresh}
+      />
 
       <p className="text-[12px] text-apple-tertiary text-center">
         修改账号后自动保存，Cookie 过期后点击「刷新 Cookie」重新获取
@@ -229,14 +232,6 @@ function LoginTab() {
       {alert && <StatusAlert type={alert.type} message={alert.msg} onDismiss={() => setAlert(null)} />}
     </div>
   )
-}
-
-function formatTimeAgo(ts: number): string {
-  const diff = Date.now() - ts
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
 function DownloadTab({

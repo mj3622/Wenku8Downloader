@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useSearchStore } from '../stores/searchStore'
 import BookQueryInput from '../components/BookQueryInput'
@@ -117,6 +117,7 @@ function SearchTab({
   const label = type === 'author' ? '请输入轻小说文库的作者' : '请输入轻小说文库的作品名称'
   const emptyText = type === 'author' ? '输入作者名开始搜索' : '输入书名开始搜索'
   const exampleText = type === 'author' ? '例如：三上库太' : '例如：败犬女主太多了！'
+  const inputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div>
@@ -124,6 +125,7 @@ function SearchTab({
         <div className="flex-1">
           <label className="block text-sm text-apple-secondary mb-1">{label}</label>
           <input
+            ref={inputRef}
             className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
                        focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
             placeholder={placeholder}
@@ -137,10 +139,7 @@ function SearchTab({
           className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                      rounded-[24px] text-[13px] font-medium text-white transition-opacity"
           onClick={() => {
-            const input = document.querySelector<HTMLInputElement>(
-              `input[placeholder="${placeholder}"]`
-            )
-            if (input?.value.trim()) onSearch(input.value.trim())
+            if (inputRef.current?.value.trim()) onSearch(inputRef.current.value.trim())
           }}
         >
           {loading ? '查询中...' : '查询'}

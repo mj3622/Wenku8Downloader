@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useDownloadStore, type DownloadTask } from '../stores/downloadStore'
+import { formatTimeAgo } from '../utils/format'
+import { api } from '../api/client'
 
 export default function DownloadHistoryPage() {
   const { tasks, removeTask, clearCompleted, clearHistory, retryTask } = useDownloadStore()
@@ -130,12 +132,22 @@ export default function DownloadHistoryPage() {
                     {task.type === 'images' ? '插图下载' : 'EPUB 下载'}
                     {task.volume && ` · ${task.volume}`}
                     {' · '}
-                    {formatTime(task.createdAt)}
+                    {formatTimeAgo(task.createdAt)}
                   </div>
                 </div>
                 <button
+                  onClick={() => api.openFolder(task.type === 'images' ? 'pics' : 'novels')}
+                  className="text-apple-tertiary hover:text-apple-accent transition-colors px-1"
+                  title="打开所在文件夹"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                </button>
+                <button
                   onClick={() => removeTask(task.id)}
                   className="text-apple-tertiary hover:text-red-400 transition-colors text-[16px] leading-none px-1"
+                  title="删除记录"
                 >
                   ×
                 </button>
@@ -224,10 +236,3 @@ function FailedTaskItem({
   )
 }
 
-function formatTime(ts: number): string {
-  const diff = Date.now() - ts
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
-}
