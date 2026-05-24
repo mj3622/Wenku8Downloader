@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio'
 import iconv from 'iconv-lite'
 import { config } from './config-manager'
 import type { SearchResult } from './types'
+import { sleep } from './utils'
 
 const COMMON_HEADERS: Record<string, string> = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -12,10 +13,6 @@ const COMMON_HEADERS: Record<string, string> = {
 }
 
 const BASE_URL = 'https://www.wenku8.net'
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 function encodeKey(key: string): string {
   const gbk = iconv.encode(key, 'gbk')
@@ -29,29 +26,25 @@ function encodeKey(key: string): string {
 
 export class WebCrawler {
   private cookies: Record<string, string>
-  private fetchCount = 0
-
   constructor(cookie?: Record<string, string>) {
-    const cfg = config.getAll()
-    this.cookies = cookie ?? {
-      PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
-      jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
-      jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
-      cf_clearance: cfg.cookie?.cf_clearance ?? '',
-    }
+    this.cookies = cookie ?? this.getCookieDefaults()
 
     void this.injectCookies()
   }
 
   syncCookies(): void {
+    this.cookies = this.getCookieDefaults()
+    this.injectCookies()
+  }
+
+  private getCookieDefaults(): Record<string, string> {
     const cfg = config.getAll()
-    this.cookies = {
+    return {
       PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
       jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
       jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
       cf_clearance: cfg.cookie?.cf_clearance ?? '',
     }
-    this.injectCookies()
   }
 
   private async injectCookies(): Promise<void> {
@@ -113,7 +106,6 @@ export class WebCrawler {
           await sleep(8000)
           // Re-inject cookies on retry
           await this.injectCookies()
-          this.fetchCount++
         }
       }
     }
@@ -214,99 +206,102 @@ export class WebCrawler {
     return null
   }
 
-  async search(keyword: string, searchType: 'articlename' | 'author'): Promise<SearchResult[]> {
+  async search(keyword: string, type: 'author' | 'title'): Promise<SearchResult[]> {
     const encoded = encodeKey(keyword)
+    const searchType = type === 'author' ? 'author' : 'articlename'
     const url = `${BASE_URL}/modules/article/search.php?searchtype=${searchType}&searchkey=${encoded}`
 
     const $ = await this.fetch(url)
 
-    // 检查是否被拦截
     const title = $('title').text()
     if (!title) {
       throw new Error('页面无标题，可能被拦截')
     }
 
-    // 检查频率限制
     const blockMsg = $('.blockcontent').text()
     if (blockMsg.includes('两次搜索的间隔时间')) {
       throw new Error('搜索过于频繁，请等待片刻再试')
     }
 
-    const results: SearchResult[] = []
-
-    if (title.includes('搜索结果 - 轻小说文库')) {
-      // 多结果页面
-      const td = $('#content table tr td')
-      td.children('div').each((_i, div) => {
-        const a = $(div).find('a').first()
-        const img = a.find('img')
-        const titleText = a.attr('title') || ''
-        const cover = img.attr('src') || ''
-        const href = a.attr('href') || ''
-        const bookId = href.split('/').pop()?.split('.')[0] || ''
-
-        const ps = $(div).find('p')
-        const p1 = ps.eq(0).text()
-        const statusText = ps.eq(1).text()
-        const tags = ps.eq(2).text().replace('Tags:', '').trim()
-        const desc = ps.eq(3).text().replace('简介:', '').trim()
-
-        // 从第一段提取作者、状态、更新时间
-        const authorPart = p1.split('/').find((s: string) => s.includes('作者:')) || ''
-        const author = authorPart.replace('作者:', '').trim()
-        const updatePart = p1.split('/').find((s: string) => s.includes('更新:')) || ''
-        const updateTime = updatePart.replace('更新:', '').trim()
-
-        results.push({
-          title: titleText,
-          cover,
-          id: bookId,
-          author,
-          status: statusText.trim(),
-          updateTime,
-          tags,
-          desc,
-        })
-      })
-    } else {
-      // 单结果页面（直接重定向到书籍页）
-      const pageTitle = title.split('-')[0]?.trim() || ''
-      const myUrl = ($ as unknown as Record<string, string>).myUrl || url
-      const bookId = myUrl.split('/book/')[1]?.split('.')[0] || ''
-      const cover = $('#content img').first().attr('src') || ''
-      const infoTable = $('#content table')
-      let author = ''
-      let status = ''
-      let desc = ''
-
-      infoTable.find('tr').eq(2).find('td').each((i, td) => {
-        const text = $(td).text().trim()
-        if (text.includes('作者：')) author = text.replace('作者：', '').trim()
-        if (text.includes('状态：')) status = text.replace('状态：', '').trim()
-      })
-
-      // 提取简介
-      const spans = $('#content span')
-      spans.each((_i, span) => {
-        const t = $(span).text()
-        if (t.includes('内容简介：')) {
-          desc = t.replace('内容简介：', '').trim()
-        }
-      })
-
-      if (bookId) {
-        results.push({
-          title: pageTitle,
-          cover,
-          id: bookId,
-          author,
-          status,
-          tags: '',
-          desc,
-        })
-      }
+    if ($('#content table.grid').length > 0) {
+      return this.searchMultiResult($, keyword)
     }
+    return this.searchSingleResult($, keyword)
+  }
 
+  private searchMultiResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+    const results: SearchResult[] = []
+    const td = $('#content table tr td')
+    td.children('div').each((_i, div) => {
+      const a = $(div).find('a').first()
+      const img = a.find('img')
+      const titleText = a.attr('title') || ''
+      const cover = img.attr('src') || ''
+      const href = a.attr('href') || ''
+      const bookId = href.split('/').pop()?.split('.')[0] || ''
+
+      const ps = $(div).find('p')
+      const p1 = ps.eq(0).text()
+      const statusText = ps.eq(1).text()
+      const tags = ps.eq(2).text().replace('Tags:', '').trim()
+      const desc = ps.eq(3).text().replace('简介:', '').trim()
+
+      const authorPart = p1.split('/').find((s: string) => s.includes('作者:')) || ''
+      const author = authorPart.replace('作者:', '').trim()
+      const updatePart = p1.split('/').find((s: string) => s.includes('更新:')) || ''
+      const updateTime = updatePart.replace('更新:', '').trim()
+
+      results.push({
+        title: titleText,
+        cover,
+        id: bookId,
+        author,
+        status: statusText.trim(),
+        updateTime,
+        tags,
+        desc,
+      })
+    })
+    return results
+  }
+
+  private searchSingleResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+    const results: SearchResult[] = []
+    const title = $('title').text()
+    const pageTitle = title.split('-')[0]?.trim() || ''
+    const myUrl = ($ as unknown as Record<string, string>).myUrl || ''
+    const bookId = myUrl.split('/book/')[1]?.split('.')[0] || ''
+    const cover = $('#content img').first().attr('src') || ''
+    const infoTable = $('#content table')
+    let author = ''
+    let status = ''
+    let desc = ''
+
+    infoTable.find('tr').eq(2).find('td').each((i, td) => {
+      const text = $(td).text().trim()
+      if (text.includes('作者：')) author = text.replace('作者：', '').trim()
+      if (text.includes('状态：')) status = text.replace('状态：', '').trim()
+    })
+
+    const spans = $('#content span')
+    spans.each((_i, span) => {
+      const t = $(span).text()
+      if (t.includes('内容简介：')) {
+        desc = t.replace('内容简介：', '').trim()
+      }
+    })
+
+    if (bookId) {
+      results.push({
+        title: pageTitle,
+        cover,
+        id: bookId,
+        author,
+        status,
+        tags: '',
+        desc,
+      })
+    }
     return results
   }
 }

@@ -1,4 +1,3 @@
-import { config } from './config-manager'
 import type { WebCrawler } from './crawler'
 import type { BasicInfo, Chapter } from './types'
 

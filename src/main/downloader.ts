@@ -2,12 +2,13 @@ import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import { config } from './config-manager'
-import { EpubBuilder, escapeXml } from './epub-builder'
+import { EpubBuilder, escapeXml, guessMediaType } from './epub-builder'
 import type { Book } from './book'
 import type { WebCrawler } from './crawler'
 import type { EpubChapter, EpubImage } from './epub-builder'
+import { sleep } from './utils'
 
-function getSavePath(): string {
+export function getSavePath(): string {
   const customPath = config.get('download', 'download_path') as string
   if (customPath) return customPath
   return app.isPackaged
@@ -30,10 +31,6 @@ const SPEED_TIERS = [
 ] as const
 
 const SUCCESS_RESET_THRESHOLD = 10  // 连续成功 N 次后升一级
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 /** 并发池：限制同时执行的 Promise 数量，保持结果顺序 */
 async function asyncPool<T, R>(
@@ -145,6 +142,46 @@ export class Downloader {
     return html
   }
 
+  private async downloadImagesWithConcurrency(
+    urls: string[],
+    onImage: (data: Buffer, ext: string, index: number) => void,
+    onProgress: (completed: number, total: number) => void,
+  ): Promise<void> {
+    const retries = this.speed.maxRetries
+    const total = urls.length
+    let completed = 0
+
+    if (this.speed.imageConcurrency === 1) {
+      for (let i = 0; i < urls.length; i++) {
+        const content = await this.fetchImageWithRetry(urls[i], retries)
+        if (content) {
+          const ext = urls[i].split('.').pop() || 'jpg'
+          onImage(content, ext, i)
+        }
+        completed++
+        onProgress(completed, total)
+      }
+    } else {
+      const batchSize = this.speed.imageConcurrency
+      for (let i = 0; i < urls.length; i += batchSize) {
+        const batch = urls.slice(i, i + batchSize)
+        await Promise.allSettled(
+          batch.map(async (url, batchIdx) => {
+            const idx = i + batchIdx
+            const content = await this.fetchImageWithRetry(url, retries)
+            if (content) {
+              const ext = url.split('.').pop() || 'jpg'
+              onImage(content, ext, idx)
+            }
+          })
+        )
+        completed += batch.length
+        onProgress(completed, total)
+        if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
+      }
+    }
+  }
+
   async downloadPictures(
     urls: string[],
     volumeName: string,
@@ -155,43 +192,16 @@ export class Downloader {
     const volumePath = join(getSavePath(), 'pics', novelName, dirName)
     mkdirSync(volumePath, { recursive: true })
 
-    const retries = this.speed.maxRetries
-    const total = urls.length
-    let completed = 0
-
-    if (this.speed.imageConcurrency === 1) {
-      // 顺序下载
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i]
-        const suffix = url.split('.').pop() || 'jpg'
-        const content = await this.fetchImageWithRetry(url, retries)
-        if (content) {
-          const filePath = join(volumePath, `${i + 1}.${suffix}`)
-          writeFileSync(filePath, content)
-        }
-        completed++
+    await this.downloadImagesWithConcurrency(
+      urls,
+      (content, ext, i) => {
+        const filePath = join(volumePath, `${i + 1}.${ext}`)
+        writeFileSync(filePath, content)
+      },
+      (completed, total) => {
         this.emitProgress(completed, total, `正在下载图片 (${volumeName})`)
       }
-    } else {
-      // 并发下载（按 concurrency 分组）
-      for (let i = 0; i < urls.length; i += this.speed.imageConcurrency) {
-        const batch = urls.slice(i, i + this.speed.imageConcurrency)
-        const results = await Promise.allSettled(
-          batch.map((url, batchIdx) =>
-            this.fetchImageWithRetry(url, retries).then((content) => {
-              if (content) {
-                const suffix = url.split('.').pop() || 'jpg'
-                const filePath = join(volumePath, `${i + batchIdx + 1}.${suffix}`)
-                writeFileSync(filePath, content)
-              }
-            })
-          )
-        )
-        completed += results.length
-        this.emitProgress(completed, total, `正在下载图片 (${volumeName})`)
-        if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
-      }
-    }
+    )
   }
 
   async downloadNovel(book: Book, volumeName?: string): Promise<void> {
@@ -229,7 +239,7 @@ export class Downloader {
       const urls = await book.getChapterImageUrls(volumeName)
       if (urls) {
         const imgResults = await this.downloadVolumeImages(
-          urls, volumeName, book, 0, totalChapters, images, builder,
+          urls, volumeName, 0, totalChapters, images, builder,
         )
         chapters.push({
           title: '插图',
@@ -270,64 +280,30 @@ export class Downloader {
   private async downloadVolumeImages(
     urls: string[],
     volumeName: string,
-    book: Book,
     itemIdx: number,
     total: number,
     images: EpubImage[],
     builder: EpubBuilder,
   ): Promise<{ html: string }> {
     let htmlParts = ''
-    const retries = this.speed.maxRetries
 
-    if (this.speed.imageConcurrency === 1) {
-      for (let picIdx = 0; picIdx < urls.length; picIdx++) {
-        const imgUrl = urls[picIdx]
-        const suffix = imgUrl.split('.').pop() || 'jpg'
-        const content = await this.fetchImageWithRetry(imgUrl, retries)
-        if (content) {
-          const imgName = `images/${volumeName}_${picIdx + 1}.${suffix}`
-          images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
-          htmlParts += `<img src="${imgName}"/>`
+    await this.downloadImagesWithConcurrency(
+      urls,
+      (content, ext, picIdx) => {
+        const imgName = `images/${volumeName}_${picIdx + 1}.${ext}`
+        images.push({ fileName: imgName, data: content, mediaType: guessMediaType(ext) })
+        htmlParts += `<img src="${imgName}"/>`
 
-          const coverIndex = config.get('download', 'default_cover_index') as number
-          if (coverIndex === picIdx) {
-            builder.setCover(`${volumeName}_${picIdx + 1}.${suffix}`, content)
-          }
+        const coverIndex = config.get('download', 'default_cover_index') as number
+        if (coverIndex === picIdx) {
+          builder.setCover(`${volumeName}_${picIdx + 1}.${ext}`, content)
         }
-        this.emitProgress(itemIdx + 1, total, `正在下载图片 ${picIdx + 1}/${urls.length}`)
+      },
+      (completed, totalUrls) => {
+        this.emitProgress(itemIdx + 1, total, `正在下载图片 ${completed}/${totalUrls}`)
       }
-    } else {
-      const batchSize = this.speed.imageConcurrency
-      for (let i = 0; i < urls.length; i += batchSize) {
-        const batch = urls.slice(i, i + batchSize)
-        const results = await Promise.allSettled(
-          batch.map(async (imgUrl, batchIdx) => {
-            const picIdx = i + batchIdx
-            const suffix = imgUrl.split('.').pop() || 'jpg'
-            const content = await this.fetchImageWithRetry(imgUrl, retries)
-            if (content) {
-              const imgName = `images/${volumeName}_${picIdx + 1}.${suffix}`
-              return { imgName, content, suffix, picIdx, imgUrl }
-            }
-            return null
-          })
-        )
-        for (const r of results) {
-          if (r.status === 'fulfilled' && r.value) {
-            const { imgName, content, suffix, picIdx, imgUrl } = r.value
-            images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
-            htmlParts += `<img src="${imgName}"/>`
-            const coverIndex = config.get('download', 'default_cover_index') as number
-            if (coverIndex === picIdx) {
-              // Need to call setCover on the builder - but that's outside this function
-              // We'll handle this differently
-            }
-          }
-        }
-        this.emitProgress(itemIdx + 1, total, `正在下载图片 ${Math.min(i + batchSize, urls.length)}/${urls.length}`)
-        if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
-      }
-    }
+    )
+
     return { html: htmlParts }
   }
 
@@ -376,46 +352,17 @@ export class Downloader {
         this.emitProgress(completedChapters, totalChapters, `正在下载插图 (${volName})`)
         const urls = await book.getChapterImageUrls(volName)
         if (urls) {
-          const retries = this.speed.maxRetries
-          if (this.speed.imageConcurrency === 1) {
-            for (let picIdx = 0; picIdx < urls.length; picIdx++) {
-              const url = urls[picIdx]
-              const suffix = url.split('.').pop() || 'jpg'
-              const content = await this.fetchImageWithRetry(url, retries)
-              if (content) {
-                const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
-                images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
-                htmlParts += `<img src="${imgName}"/>`
-              }
-              this.emitProgress(completedChapters, totalChapters, `正在下载图片 ${picIdx + 1}/${urls.length}`)
+          await this.downloadImagesWithConcurrency(
+            urls,
+            (content, ext, picIdx) => {
+              const imgName = `images/${volName}_${picIdx + 1}.${ext}`
+              images.push({ fileName: imgName, data: content, mediaType: guessMediaType(ext) })
+              htmlParts += `<img src="${imgName}"/>`
+            },
+            (completed, urlsLen) => {
+              this.emitProgress(completedChapters, totalChapters, `正在下载图片 ${completed}/${urlsLen}`)
             }
-          } else {
-            const batchSize = this.speed.imageConcurrency
-            for (let i = 0; i < urls.length; i += batchSize) {
-              const batch = urls.slice(i, i + batchSize)
-              const results = await Promise.allSettled(
-                batch.map(async (imgUrl, batchIdx) => {
-                  const picIdx = i + batchIdx
-                  const suffix = imgUrl.split('.').pop() || 'jpg'
-                  const content = await this.fetchImageWithRetry(imgUrl, retries)
-                  if (content) {
-                    const imgName = `images/${volName}_${picIdx + 1}.${suffix}`
-                    return { imgName, content, suffix, picIdx, imgUrl }
-                  }
-                  return null
-                })
-              )
-              for (const r of results) {
-                if (r.status === 'fulfilled' && r.value) {
-                  const { imgName, content, suffix } = r.value
-                  images.push({ fileName: imgName, data: content, mediaType: guessType(suffix) })
-                  htmlParts += `<img src="${imgName}"/>`
-                }
-              }
-              this.emitProgress(completedChapters, totalChapters, `正在下载图片 ${Math.min(i + batchSize, urls.length)}/${urls.length}`)
-              if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
-            }
-          }
+          )
           htmlParts += '<br/>'
         }
       }
@@ -455,12 +402,4 @@ export class Downloader {
   }
 }
 
-export function guessType(ext: string): string {
-  switch (ext.toLowerCase()) {
-    case 'png': return 'image/png'
-    case 'gif': return 'image/gif'
-    case 'webp': return 'image/webp'
-    case 'svg': return 'image/svg+xml'
-    default: return 'image/jpeg'
-  }
-}
+export { guessMediaType as guessType }

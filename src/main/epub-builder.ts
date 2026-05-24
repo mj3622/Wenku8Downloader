@@ -301,7 +301,7 @@ const HTML_ENTITY_CODEPOINTS: Record<string, number> = {
   loz: 9674, amp: 38,
 }
 
-function guessMediaType(fileName: string): string {
+export function guessMediaType(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase()
   switch (ext) {
     case 'png': return 'image/png'
