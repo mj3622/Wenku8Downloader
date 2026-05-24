@@ -12,9 +12,6 @@
   <a href="https://github.com/mj3622/Wenku8Downloader/releases"><img src="https://img.shields.io/github/v/release/mj3622/Wenku8Downloader?label=release" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/mj3622/Wenku8Downloader" alt="License" /></a>
   <a href="https://github.com/mj3622/Wenku8Downloader/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Platform" /></a>
-  <img src="https://img.shields.io/badge/Electron-31-47848F" alt="Electron 31" />
-  <img src="https://img.shields.io/badge/React-18-61DAFB" alt="React 18" />
-  <img src="https://img.shields.io/badge/TypeScript-5-blue" alt="TypeScript 5" />
 </p>
 
 <p align="center">
