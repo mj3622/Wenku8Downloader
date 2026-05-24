@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('download:progress', (_event, data) => callback(data))
   },
   openFolder: (subdir: string) => ipcRenderer.invoke('shell:openFolder', subdir),
+  selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
+  openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 })

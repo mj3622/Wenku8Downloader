@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { registerIpcHandlers } from './ipc-handlers'
@@ -35,6 +35,9 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    Menu.setApplicationMenu(null)
+  }
   registerIpcHandlers()
   createWindow()
 })

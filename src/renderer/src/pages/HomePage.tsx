@@ -9,10 +9,9 @@ export default function HomePage() {
           v2.0.0
         </span>
         <a
+          onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://github.com/mj3622/Wenku8Downloader') }}
           href="https://github.com/mj3622/Wenku8Downloader"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors cursor-pointer"
         >
           <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
@@ -60,13 +59,13 @@ export default function HomePage() {
         <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="space-y-3">
           <Step index={1} title="配置账号与 Cookie" to="/config">
-            首次使用请先在「配置」页面填写文库账号密码，点击「一键获取 / 刷新 Cookie」自动完成登录认证。Cookie 是下载小说的必要凭证。
+            首次使用请先在「配置」页面填写文库账号密码，保存后自动登录获取 Cookie。可在「下载设置」中自定义文件保存路径。
           </Step>
           <Step index={2} title="检索作品" to="/search">
             进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
           </Step>
           <Step index={3} title="下载小说" to="/download">
-            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载进度和已完成文件可在「下载历史」中查看。
+            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载完成后可在「下载历史」中点击文件夹图标打开文件所在目录。
           </Step>
         </div>
       </section>
@@ -104,7 +103,7 @@ export default function HomePage() {
             <li>
               · 本工具仅支持{' '}
               <strong className="text-apple-heading">
-                轻小说文库 (<a href="https://www.wenku8.net" target="_blank" rel="noopener noreferrer" className="text-apple-accent hover:underline">wenku8.net</a>)
+                轻小说文库 (<a onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://www.wenku8.net') }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
               </strong>{' '}
               的内容下载
             </li>
