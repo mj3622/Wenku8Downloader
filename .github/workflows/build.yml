@@ -41,9 +41,6 @@ jobs:
           - os: windows-latest
             target: win
             artifact: windows
-          - os: ubuntu-latest
-            target: linux
-            artifact: linux
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -86,7 +83,7 @@ jobs:
       - name: 整理产物
         run: |
           mkdir -p dist
-          find release -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' \) \
+          find release -type f \( -name '*.dmg' -o -name '*.exe' \) \
             -exec mv {} dist/ \; 2>/dev/null || true
           ls -la dist/
 
