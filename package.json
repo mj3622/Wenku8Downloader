@@ -15,7 +15,7 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
     "dist:linux": "npm run build && electron-builder --linux",
-    "dist:all": "npm run build && electron-builder --mac --win --linux"
+    "dist": "npm run build && electron-builder --mac --win"
   },
   "build": {
     "appId": "com.wenku8.downloader",
@@ -29,32 +29,33 @@
     ],
     "extraResources": [
       {
-        "from": "config",
-        "to": "config"
+        "from": "resources/icon.png",
+        "to": "icon.png"
       }
     ],
     "icon": "resources/icon.png",
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
-        "dmg",
-        "zip"
-      ]
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
     },
     "win": {
       "target": [
-        "nsis"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ]
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "language": "2052"
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-${version}-Linux-${arch}.${ext}"
     }
   },
   "dependencies": {
