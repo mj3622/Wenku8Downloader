@@ -14,6 +14,12 @@ const COMMON_HEADERS: Record<string, string> = {
 
 const BASE_URL = 'https://www.wenku8.net'
 
+function formatHttpError(status: number): string {
+  if (status === 429) return '访问过于频繁（HTTP 429），服务器限制了请求频率，请稍后重试'
+  if (status === 403) return '访问被拒绝（HTTP 403），Cookie 可能已过期，请尝试刷新 Cookie'
+  return `HTTP ${status}`
+}
+
 function encodeKey(key: string): string {
   const gbk = iconv.encode(key, 'gbk')
   let result = ''
@@ -86,7 +92,7 @@ export class WebCrawler {
         })
 
         if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`)
+          throw new Error(formatHttpError(resp.status))
         }
 
         if (parse) {
@@ -147,7 +153,7 @@ export class WebCrawler {
         })
 
         if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`)
+          throw new Error(formatHttpError(resp.status))
         }
 
         // Extract cookies from response
@@ -175,9 +181,9 @@ export class WebCrawler {
   }
 
   async getImageContent(url: string): Promise<Buffer | null> {
-    // 将图片 URL 升级为 HTTPS（避免 HTTP 降级被拦截）
     url = url.replace('http://', 'https://')
     const maxRetries = 3
+    let lastError: string | null = null
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -193,16 +199,24 @@ export class WebCrawler {
           return Buffer.from(await resp.arrayBuffer())
         }
 
+        lastError = formatHttpError(resp.status)
+        const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
-          await sleep(1000)
+          await sleep(backoffMs)
         }
-      } catch {
+      } catch (err) {
+        lastError = (err as Error).message
+        const is429 = lastError.includes('429')
+        const backoffMs = is429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
-          await sleep(1000)
+          await sleep(backoffMs)
         }
       }
     }
 
+    if (lastError) {
+      throw new Error(lastError)
+    }
     return null
   }
 
