@@ -11,6 +11,7 @@ export interface ElectronAPI {
   downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
   onCookieProgress: (callback: (data: { step: string; message: string }) => void) => void
   onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => void
+  openFolder: (subdir: string) => Promise<void>
 }
 
 interface SearchResult {

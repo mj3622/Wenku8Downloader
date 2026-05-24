@@ -7,6 +7,12 @@ import StatusAlert from '../components/StatusAlert'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
 
+const tabs: { key: DownloadTab; label: string }[] = [
+  { key: 'full', label: '整本下载' },
+  { key: 'divided', label: '分卷下载' },
+  { key: 'pictures', label: '插图下载' },
+]
+
 export default function BookDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -38,12 +44,6 @@ export default function BookDetailPage() {
     )
     navigate('/download')
   }
-
-  const tabs: { key: DownloadTab; label: string }[] = [
-    { key: 'full', label: '整本下载' },
-    { key: 'divided', label: '分卷下载' },
-    { key: 'pictures', label: '插图下载' },
-  ]
 
   return (
     <div>

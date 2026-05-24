@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => {
     ipcRenderer.on('download:progress', (_event, data) => callback(data))
   },
+  openFolder: (subdir: string) => ipcRenderer.invoke('shell:openFolder', subdir),
 })

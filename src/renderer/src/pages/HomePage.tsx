@@ -66,7 +66,7 @@ export default function HomePage() {
             进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
           </Step>
           <Step index={3} title="下载小说" to="/download">
-            进入「下载」页面，查询到书籍后可以选择「整本下载」导出完整 EPUB，或按卷选择「分卷下载」；也可以单独下载书籍插图。
+            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载进度和已完成文件可在「下载历史」中查看。
           </Step>
         </div>
       </section>
@@ -110,9 +110,7 @@ export default function HomePage() {
             </li>
             <li>· Cookie 有效期为数小时至数天不等，下载失败时可重新获取 Cookie 后再试</li>
             <li>
-              · EPUB 文件默认保存在程序所在目录的{' '}
-              <code className="text-[11px] text-apple-accent bg-apple-accent-light px-1 py-0.5 rounded">downloads</code>{' '}
-              文件夹
+              · EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径
             </li>
           </ul>
         </div>

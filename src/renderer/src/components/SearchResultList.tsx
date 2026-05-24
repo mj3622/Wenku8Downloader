@@ -1,5 +1,4 @@
 import { useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { SearchResult } from '../api/client'
 
 type Props = {
@@ -8,7 +7,6 @@ type Props = {
 }
 
 export default function SearchResultList({ results, onSelect }: Props) {
-  const navigate = useNavigate()
   if (results.length === 0) return null
 
   return (
@@ -40,10 +38,7 @@ export default function SearchResultList({ results, onSelect }: Props) {
             </p>
             <div className="flex-1" />
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onSelect(item.id)
-              }}
+              onClick={() => onSelect(item.id)}
               className="w-full mt-2 py-1.5 text-[11px] bg-apple-accent hover:opacity-90
                          text-white rounded-[8px] font-medium transition-opacity"
             >
