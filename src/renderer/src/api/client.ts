@@ -42,6 +42,7 @@ export const api = {
 
   // 文件
   openFolder: (subdir: string) => window.electronAPI.openFolder(subdir),
+  selectFolder: () => window.electronAPI.selectFolder(),
 }
 
 export type SearchResult = {

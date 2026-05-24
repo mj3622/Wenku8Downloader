@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import logoUrl from '../../../../resources/icon.png'
 
 const navItems = [
   {
@@ -48,8 +49,13 @@ export default function Layout() {
       <aside className="w-[220px] flex-shrink-0 flex flex-col bg-white border-r border-apple-border-medium">
         {/* Brand */}
         <div className="px-5 pt-6 pb-5">
-          <h1 className="text-[17px] font-bold tracking-tight">文库下载器</h1>
-          <p className="mt-0.5 text-[12px] text-apple-tertiary">Wenku8 Downloader</p>
+          <div className="flex items-center gap-3">
+            <img src={logoUrl} alt="文库下载器" className="w-10 h-10" />
+            <div>
+              <h1 className="text-[17px] font-bold tracking-tight">文库下载器</h1>
+              <p className="text-[12px] text-apple-tertiary">Wenku8 Downloader</p>
+            </div>
+          </div>
         </div>
 
         {/* Navigation */}

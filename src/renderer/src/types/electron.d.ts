@@ -12,6 +12,8 @@ export interface ElectronAPI {
   onCookieProgress: (callback: (data: { step: string; message: string }) => void) => void
   onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => void
   openFolder: (subdir: string) => Promise<void>
+  selectFolder: () => Promise<string | null>
+  openExternal: (url: string) => Promise<void>
 }
 
 interface SearchResult {

@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron'
+import { ipcMain, shell, dialog } from 'electron'
 import { join } from 'path'
 import { config } from './config-manager'
 import { WebCrawler } from './crawler'
@@ -102,7 +102,19 @@ export function registerIpcHandlers(): void {
   })
 
   // ---- 文件操作 ----
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    await shell.openExternal(url)
+  })
+
   ipcMain.handle('shell:openFolder', async (_e, subdir: string) => {
     shell.openPath(join(getSavePath(), subdir))
+  })
+
+  ipcMain.handle('dialog:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
   })
 }

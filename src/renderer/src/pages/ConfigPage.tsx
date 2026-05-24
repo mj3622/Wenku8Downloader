@@ -319,13 +319,40 @@ function DownloadTab({
       </div>
       <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
-        <input
-          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
-                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-          placeholder="留空使用默认路径（正式版：~/Downloads/Wenku8Downloader/）"
-          value={downloadPath}
-          onChange={(e) => setDownloadPath(e.target.value)}
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex-1 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading truncate">
+            {downloadPath || (
+              <span className="text-apple-tertiary">
+                {window.electronAPI.platform === 'win32'
+                  ? '%USERPROFILE%\\Downloads\\Wenku8Downloader\\'
+                  : '~/Downloads/Wenku8Downloader/'}
+              </span>
+            )}
+          </div>
+          <button
+            className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light
+                       rounded-[20px] hover:bg-apple-accent/15 transition-colors"
+            onClick={async () => {
+              try {
+                const path = await api.selectFolder()
+                if (path) setDownloadPath(path)
+              } catch {
+                setStatus({ type: 'error', msg: '选择文件夹失败' })
+              }
+            }}
+          >
+            选择文件夹
+          </button>
+          {downloadPath && (
+            <button
+              aria-label="清除文件夹路径"
+              className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
+              onClick={() => setDownloadPath('')}
+            >
+              ×
+            </button>
+          )}
+        </div>
         <p className="text-[12px] text-apple-tertiary mt-1.5">
           留空则使用默认路径。修改后新下载的文件将保存到新路径，已有文件不受影响。
         </p>
