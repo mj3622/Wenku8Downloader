@@ -6,6 +6,9 @@ import type { Wenku8Config } from './types'
 
 function getConfigDir(): string {
   try {
+    if (!app.isPackaged) {
+      return join(process.cwd(), '.dev-user-data', 'config')
+    }
     return join(app.getPath('userData'), 'config')
   } catch {
     return join(process.cwd(), 'config')
@@ -29,6 +32,7 @@ const DEFAULT_CONFIG: Wenku8Config = {
   download: {
     full_title: 'FULL',
     default_cover_index: 0,
+    download_path: '',
   },
 }
 
