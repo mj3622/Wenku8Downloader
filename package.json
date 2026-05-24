@@ -38,13 +38,13 @@
       "target": [
         { "target": "dmg", "arch": ["x64", "arm64"] }
       ],
-      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
+      "artifactName": "Wenku8Downloader-${version}-macOS-${arch}.${ext}"
     },
     "win": {
       "target": [
         { "target": "portable", "arch": ["x64"] }
       ],
-      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+      "artifactName": "Wenku8Downloader-${version}-Windows-${arch}.${ext}"
     }
   },
   "dependencies": {
