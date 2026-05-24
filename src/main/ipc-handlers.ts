@@ -1,9 +1,10 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
+import { join } from 'path'
 import { config } from './config-manager'
 import { WebCrawler } from './crawler'
 import { CookieService } from './cookie-service'
 import { Book } from './book'
-import { Downloader } from './downloader'
+import { Downloader, getSavePath } from './downloader'
 
 let crawler: WebCrawler | null = null
 
@@ -48,7 +49,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('search:title', async (_e, { query }) => {
     const c = getCrawler()
-    const results = await c.search(query, 'articlename')
+    const results = await c.search(query, 'title')
     return { results }
   })
 
@@ -98,5 +99,10 @@ export function registerIpcHandlers(): void {
       }
     }
     return { status: 'ok', message: '下载完成' }
+  })
+
+  // ---- 文件操作 ----
+  ipcMain.handle('shell:openFolder', async (_e, subdir: string) => {
+    shell.openPath(join(getSavePath(), subdir))
   })
 }
