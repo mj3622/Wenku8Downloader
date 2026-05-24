@@ -54,15 +54,8 @@ jobs:
           node-version: 20
           cache: npm
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: 安装 Node.js 依赖
         run: npm ci
-
-      - name: 安装 Python 依赖
-        run: pip install -r requirements.txt
 
       - name: 打包 (${{ matrix.target }})
         run: npm run dist:${{ matrix.target }}
@@ -93,7 +86,7 @@ jobs:
       - name: 整理产物
         run: |
           mkdir -p dist
-          find release -type f -not -name '*.yml' -not -name '*.json' \
+          find release -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' \) \
             -exec mv {} dist/ \; 2>/dev/null || true
           ls -la dist/
 
