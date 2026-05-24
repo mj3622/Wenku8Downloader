@@ -46,5 +46,6 @@ export interface Wenku8Config {
   download: {
     full_title: string
     default_cover_index: number
+    download_path: string
   }
 }

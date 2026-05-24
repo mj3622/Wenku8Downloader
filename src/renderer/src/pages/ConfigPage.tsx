@@ -248,6 +248,7 @@ function DownloadTab({
 }) {
   const [titleFormat, setTitleFormat] = useState('FULL')
   const [coverIndex, setCoverIndex] = useState('0')
+  const [downloadPath, setDownloadPath] = useState('')
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
@@ -255,6 +256,7 @@ function DownloadTab({
     if (config) {
       setTitleFormat(((config.download as Record<string, string>)?.full_title) ?? 'FULL')
       setCoverIndex(((config.download as Record<string, string>)?.default_cover_index) ?? '0')
+      setDownloadPath(((config.download as Record<string, string>)?.download_path) ?? '')
     }
   }, [config])
 
@@ -268,6 +270,7 @@ function DownloadTab({
     try {
       await onSave('download', 'full_title', titleFormat)
       await onSave('download', 'default_cover_index', coverIndex)
+      await onSave('download', 'download_path', downloadPath)
       setStatus({ type: 'success', msg: '下载设置已保存' })
     } catch (e) {
       setStatus({ type: 'error', msg: String(e) })
@@ -318,6 +321,19 @@ function DownloadTab({
           />
           <span className="text-xs text-apple-tertiary">0 表示第一张插图，1 表示第二张，依此类推</span>
         </div>
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
+        <input
+          className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
+                     focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+          placeholder="留空使用默认路径（正式版：~/Downloads/Wenku8Downloader/）"
+          value={downloadPath}
+          onChange={(e) => setDownloadPath(e.target.value)}
+        />
+        <p className="text-[12px] text-apple-tertiary mt-1.5">
+          留空则使用默认路径。修改后新下载的文件将保存到新路径，已有文件不受影响。
+        </p>
       </div>
       <button
         disabled={saving}

@@ -1,14 +1,19 @@
 import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { app } from 'electron'
 import { config } from './config-manager'
 import { EpubBuilder, escapeXml } from './epub-builder'
 import type { Book } from './book'
 import type { WebCrawler } from './crawler'
 import type { EpubChapter, EpubImage } from './epub-builder'
 
-const SAVE_PATH = join(process.cwd(), 'downloads')
-const PIC_PATH = join(SAVE_PATH, 'pics')
-const NOVEL_PATH = join(SAVE_PATH, 'novels')
+function getSavePath(): string {
+  const customPath = config.get('download', 'download_path') as string
+  if (customPath) return customPath
+  return app.isPackaged
+    ? join(app.getPath('downloads'), 'Wenku8Downloader')
+    : join(process.cwd(), 'downloads')
+}
 
 export type DownloadProgress = {
   current: number
@@ -66,8 +71,8 @@ export class Downloader {
 
   constructor(crawler: WebCrawler) {
     this.crawler = crawler
-    mkdirSync(PIC_PATH, { recursive: true })
-    mkdirSync(NOVEL_PATH, { recursive: true })
+    mkdirSync(join(getSavePath(), 'pics'), { recursive: true })
+    mkdirSync(join(getSavePath(), 'novels'), { recursive: true })
   }
 
   setOnProgress(cb: (p: DownloadProgress) => void): void {
@@ -147,7 +152,7 @@ export class Downloader {
     index: number | string = '',
   ): Promise<void> {
     const dirName = index !== '' ? `${index}_${volumeName}` : volumeName
-    const volumePath = join(PIC_PATH, novelName, dirName)
+    const volumePath = join(getSavePath(), 'pics', novelName, dirName)
     mkdirSync(volumePath, { recursive: true })
 
     const retries = this.speed.maxRetries
@@ -257,7 +262,7 @@ export class Downloader {
     for (const img of images) builder.addImage(img)
 
     const epubBuffer = await builder.build()
-    const saveDir = join(NOVEL_PATH, bookTitle)
+    const saveDir = join(getSavePath(), 'novels', bookTitle)
     mkdirSync(saveDir, { recursive: true })
     writeFileSync(join(saveDir, `${volumeName}.epub`), epubBuffer)
   }
@@ -446,7 +451,7 @@ export class Downloader {
     for (const img of images) builder.addImage(img)
 
     const epubBuffer = await builder.build()
-    writeFileSync(join(NOVEL_PATH, `${bookTitle}.epub`), epubBuffer)
+    writeFileSync(join(getSavePath(), 'novels', `${bookTitle}.epub`), epubBuffer)
   }
 }
 
