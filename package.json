@@ -42,13 +42,9 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        { "target": "portable", "arch": ["x64"] }
       ],
       "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
     }
   },
   "dependencies": {
