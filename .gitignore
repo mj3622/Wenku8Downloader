@@ -1,22 +1,13 @@
 # Build & Distribution
 /downloads/
-/dist/
-/build/
-/app.spec
-
-# Virtual Environments
-/.venv/
-/myenv/
+dist/
+build/
 
 # Dev user data (separate from production)
 /.dev-user-data/
 
 # Sensitive Config
 /config/secrets.toml
-
-# Python Cache
-__pycache__/
-*.py[cod]
 
 # IDE
 /.idea/
@@ -37,13 +28,10 @@ electron-vite.config.js
 src/**/*.js
 
 # Electron build
-/release/
-
-dist/
 release/
-build/
 *.zip
-bin/
 
 # superpowers
 /.superpowers/
+
+bin/
