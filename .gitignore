@@ -8,6 +8,9 @@
 /.venv/
 /myenv/
 
+# Dev user data (separate from production)
+/.dev-user-data/
+
 # Sensitive Config
 /config/secrets.toml
 
