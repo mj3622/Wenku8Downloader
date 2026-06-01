@@ -10,8 +10,8 @@
 
 <p align="center">
   <a href="https://github.com/mj3622/Wenku8Downloader/releases"><img src="https://img.shields.io/github/v/release/mj3622/Wenku8Downloader?label=release" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/mj3622/Wenku8Downloader" alt="License" /></a>
-  <a href="https://github.com/mj3622/Wenku8Downloader/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Platform" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
+  <a href="https://github.com/mj3622/Wenku8Downloader/releases"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue" alt="Platform" /></a>
 </p>
 
 <p align="center">
@@ -77,71 +77,3 @@
 git clone https://github.com/mj3622/Wenku8Downloader.git
 cd Wenku8Downloader
 npm install
-
-# 启动开发模式
-npm run dev
-
-# 代码检查与测试
-npm run typecheck
-npm run lint
-npm test
-
-# 构建安装包
-npm run dist:mac     # 构建 macOS DMG
-npm run dist:win     # 构建 Windows 便携版
-npm run dist         # 同时构建 macOS 与 Windows
-```
-
-国内网络环境下，如果 Electron 下载较慢，可以临时设置镜像源：
-
-```bash
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
-ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \
-npm run dist:mac
-```
-
-## 🧩 技术栈
-
-- **桌面端**：Electron 31、electron-vite、electron-builder
-- **前端界面**：React 18、TypeScript、Tailwind CSS、Zustand
-- **内容解析**：cheerio、iconv-lite
-- **文件生成**：JSZip
-- **自动化能力**：puppeteer-core、puppeteer-extra、stealth plugin
-- **测试工具**：Vitest
-
-## 📁 项目结构
-
-```text
-Wenku8Downloader/
-├── resources/          # 应用图标与截图资源
-├── src/
-│   ├── main/           # Electron 主进程
-│   ├── preload/        # 预加载脚本与安全桥接
-│   └── renderer/       # React 渲染进程页面
-├── package.json        # 脚本、依赖与打包配置
-└── README.md
-```
-
-## ❓ 常见问题
-
-### 为什么需要账号？
-
-部分内容需要登录状态才能正常访问。应用会在本地辅助获取并使用登录 Cookie。
-
-### 下载失败怎么办？
-
-可以先在「下载历史」中重试；如果仍然失败，建议稍后再试，或检查当前网络环境与账号登录状态。
-
-### 可以只下载插图吗？
-
-可以。作品详情页支持按卷下载插图，适合单独整理封面和彩插。
-
-## 📜 License
-
-本项目基于 [MIT License](LICENSE) 开源。
-
----
-
-<p align="center">
-  希望它能帮你把想读的故事，稳稳装进口袋里的电子书架。
-</p>
