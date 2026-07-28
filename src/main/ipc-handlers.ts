@@ -1,6 +1,6 @@
 import { ipcMain, shell, dialog } from 'electron'
 import { join } from 'path'
-import { config } from './config-manager'
+import { config, redactProxyUrl } from './config-manager'
 import { WebCrawler } from './crawler'
 import { CookieService } from './cookie-service'
 import { Book } from './book'
@@ -17,7 +17,18 @@ function getCrawler(): WebCrawler {
 
 export function registerIpcHandlers(): void {
   // ---- 配置 ----
-  ipcMain.handle('config:get', async () => config.getAll())
+  ipcMain.handle('config:get', async () => {
+    const current = config.getAll()
+    const publicProxy = redactProxyUrl(current.proxy?.url ?? '')
+    return {
+      ...current,
+      proxy: {
+        enabled: current.proxy?.enabled ?? false,
+        url: publicProxy.url,
+        has_credentials: publicProxy.hasCredentials,
+      },
+    }
+  })
 
   ipcMain.handle('config:set', async (_e, { section, key, value }) => {
     config.set(section, key, value)

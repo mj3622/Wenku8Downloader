@@ -1,5 +1,7 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { Link, useLocation } from 'wouter'
 import logoUrl from '../../../../resources/icon.png'
+import { api } from '../api/client'
 
 const navItems = [
   {
@@ -43,15 +45,18 @@ const navItems = [
   },
 ]
 
-export default function Layout() {
+export default function Layout({ children }: { children: ReactNode }) {
+  const [location] = useLocation()
+  const currentPath = location.split('?')[0]
+
   return (
-    <div className="flex h-screen bg-apple-bg text-apple-heading">
-      <aside className="w-[220px] flex-shrink-0 flex flex-col bg-white border-r border-apple-border-medium">
+    <div className="flex h-screen min-w-0 flex-col bg-apple-bg text-apple-heading md:flex-row">
+      <aside className="flex w-full flex-shrink-0 flex-row items-center bg-white border-b border-apple-border-medium md:h-full md:w-[220px] md:flex-col md:items-stretch md:border-b-0 md:border-r">
         {/* Brand */}
-        <div className="px-5 pt-6 pb-5">
+        <div className="flex-shrink-0 px-3 py-2 md:px-5 md:pt-6 md:pb-5">
           <div className="flex items-center gap-3">
-            <img src={logoUrl} alt="文库下载器" className="w-10 h-10" />
-            <div>
+            <img src={logoUrl} alt="文库下载器" className="w-8 h-8 md:w-10 md:h-10" />
+            <div className="hidden md:block">
               <h1 className="text-[17px] font-bold tracking-tight">文库下载器</h1>
               <p className="text-[12px] text-apple-tertiary">Wenku8 Downloader</p>
             </div>
@@ -59,47 +64,68 @@ export default function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex flex-1 flex-col gap-0.5 px-2">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                `relative flex items-center gap-3 rounded-lg px-3 py-[7px] text-[15px] transition-colors ${
+        <nav className="flex min-w-0 flex-1 flex-row gap-0.5 overflow-x-auto px-1 md:flex-col md:overflow-visible md:px-2">
+          {navItems.map((item) => {
+            const isActive = item.to === '/'
+              ? currentPath === '/'
+              : currentPath.startsWith(item.to)
+            return (
+              <Link
+                key={item.to}
+                href={item.to}
+                className={`relative flex flex-shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] transition-colors md:gap-3 md:px-3 md:py-[7px] md:text-[15px] ${
                   isActive
                     ? 'text-apple-accent font-semibold'
                     : 'text-apple-secondary hover:bg-apple-accent-light hover:text-apple-heading'
-                }`
-              }
-            >
-              {({ isActive }) => (
+                }`}
+              >
                 <>
-                  {/* Left border indicator */}
                   <div
                     className={`absolute left-0 h-4 w-[3px] rounded-full transition-colors ${
                       isActive ? 'bg-apple-accent' : 'bg-transparent'
                     }`}
                   />
-                  {/* Icon */}
                   <span className="flex-shrink-0">{item.icon}</span>
-                  {/* Label */}
-                  <span className="flex-1">{item.label}</span>
-                  {/* Active dot */}
+                  <span className="whitespace-nowrap md:flex-1">{item.label}</span>
                   {isActive && <span className="h-1.5 w-1.5 rounded-full bg-apple-accent" />}
                 </>
-              )}
-            </NavLink>
-          ))}
+              </Link>
+            )
+          })}
         </nav>
 
+        {api.target === 'web' && (
+          <button
+            aria-label="退出管理后台"
+            title="退出管理后台"
+            className="mr-2 flex-shrink-0 rounded-lg px-2 py-2 text-[12px] text-apple-secondary hover:text-red-500 md:hidden"
+            onClick={async () => {
+              await api.logout()
+              window.location.reload()
+            }}
+          >
+            退出
+          </button>
+        )}
+
         {/* Version */}
-        <div className="px-5 py-4">
+        <div className="hidden px-5 py-4 space-y-3 md:block">
+          {api.target === 'web' && (
+            <button
+              className="text-[12px] text-apple-secondary hover:text-red-500 transition-colors"
+              onClick={async () => {
+                await api.logout()
+                window.location.reload()
+              }}
+            >
+              退出管理后台
+            </button>
+          )}
           <p className="text-[12px] text-apple-tertiary">v2.0.0</p>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto p-8">
-        <Outlet />
+      <main className="w-full min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        {children}
       </main>
     </div>
   )

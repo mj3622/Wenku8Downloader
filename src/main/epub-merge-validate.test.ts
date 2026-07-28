@@ -142,7 +142,6 @@ describe('EPUB 合并格式深度测试', () => {
     const oebpsFiles = Object.keys(zip.files).filter(f => f.startsWith('OEBPS/'))
     console.log(`  OEBPS 文件数: ${oebpsFiles.length}`)
     for (const f of oebpsFiles) {
-      const size = zip.file(f)?.name ? '(有)' : '(无)'
       console.log(`    ${f}`)
     }
 

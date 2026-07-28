@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useLocation, useRoute } from 'wouter'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -14,8 +14,9 @@ const tabs: { key: DownloadTab; label: string }[] = [
 ]
 
 export default function BookDetailPage() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
+  const [, params] = useRoute('/book/:id')
+  const id = params?.id
+  const [, navigate] = useLocation()
   const { book, loading, error, fetchBook, clear } = useBookStore()
   const { downloadEpub, downloadImages } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
@@ -46,9 +47,9 @@ export default function BookDetailPage() {
   }
 
   return (
-    <div>
+    <div className="w-full min-w-0">
       <button
-        onClick={() => navigate(-1)}
+        onClick={() => window.history.back()}
         className="text-[13px] text-apple-accent hover:opacity-70 transition-opacity mb-4"
       >
         ← 返回
@@ -60,7 +61,7 @@ export default function BookDetailPage() {
       {book && (
         <>
           {/* 信息区 */}
-          <div className="flex items-start gap-6 mb-6">
+          <div className="flex flex-col items-start gap-4 mb-6 sm:flex-row sm:gap-6">
             {book.basic_info['cover'] && (
               <img
                 src={book.basic_info['cover']}
@@ -82,7 +83,7 @@ export default function BookDetailPage() {
 
           {/* 统计区 */}
           <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {book.basic_info['最新章节'] && (
                 <div>
                   <h4 className="text-[12px] font-semibold text-apple-heading mb-1">最新</h4>
@@ -116,12 +117,12 @@ export default function BookDetailPage() {
 
           {/* 下载区 — 方案 B Tab 切换 */}
           <div className="bg-apple-card rounded-2xl border border-apple-border-subtle shadow-card overflow-hidden">
-            <div className="flex border-b border-apple-border-subtle">
+            <div className="flex overflow-x-auto border-b border-apple-border-subtle">
               {tabs.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setDlTab(t.key)}
-                  className={`flex-1 text-center py-2.5 text-[13px] transition-colors ${
+                  className={`min-w-[110px] flex-1 whitespace-nowrap text-center py-2.5 text-[13px] transition-colors ${
                     dlTab === t.key
                       ? 'border-b-2 border-apple-accent text-apple-accent font-medium'
                       : 'text-apple-secondary hover:text-apple-heading'
@@ -132,7 +133,7 @@ export default function BookDetailPage() {
               ))}
             </div>
 
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {dlTab === 'full' && (
                 <div className="text-center">
                   <p className="text-[13px] text-apple-secondary mb-4">合并全部卷为一个 EPUB 文件，包含封面与目录</p>
@@ -193,7 +194,7 @@ function MultiVolumeSelector({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <span className="text-[13px] font-semibold text-apple-heading">选择卷</span>
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-apple-secondary">已选 {count}/{volumeKeys.length}</span>

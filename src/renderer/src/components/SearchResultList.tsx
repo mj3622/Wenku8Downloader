@@ -10,7 +10,7 @@ export default function SearchResultList({ results, onSelect }: Props) {
   if (results.length === 0) return null
 
   return (
-    <div className="grid grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {results.map((item) => (
         <div
           key={item.id}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { guessType } from './downloader'
+import { guessType, safeFileName } from './downloader'
 
 describe('guessType', () => {
   it('returns jpeg for unknown extensions', () => {
@@ -33,6 +33,22 @@ describe('guessType', () => {
 
   it('returns jpeg for .jpeg', () => {
     expect(guessType('jpeg')).toBe('image/jpeg')
+  })
+})
+
+describe('safeFileName', () => {
+  it('preserves normal book and volume names', () => {
+    expect(safeFileName('第一卷 新的旅程')).toBe('第一卷 新的旅程')
+  })
+
+  it('rejects path traversal and separators', () => {
+    expect(() => safeFileName('../secret')).toThrow('非法的文件名')
+    expect(() => safeFileName('volume/name')).toThrow('非法的文件名')
+    expect(() => safeFileName('volume\\name')).toThrow('非法的文件名')
+  })
+
+  it('replaces unsafe filename characters', () => {
+    expect(safeFileName('标题:测试?')).toBe('标题_测试_')
   })
 })
 

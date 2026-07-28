@@ -17,12 +17,8 @@ export class CookieService {
     this.crawler = crawler
   }
 
-  /**
-   * 通过 net.fetch POST 登录轻小说文库
-   * 已验证该接口不会被 Cloudflare 拦截
-   */
   async acquire(onProgress?: (p: CookieProgress) => void): Promise<CookieResult> {
-    onProgress?.({ step: 'login', message: '正在登录...' })
+    onProgress?.({ step: 'login', message: '正在登录，必要时自动处理 Cloudflare 验证...' })
     const loginCookies = await this.login()
     onProgress?.({ step: 'login', message: '登录成功' })
     onProgress?.({ step: 'done', message: '登录成功，已获取 Cookie' })

@@ -14,6 +14,7 @@ export type DownloadTask = {
   phase?: string
   error?: string
   createdAt: number
+  hasArtifact?: boolean
 }
 
 let nextId = 1
@@ -63,11 +64,12 @@ async function executeNext(): Promise<void> {
 
 // 注册一次进度事件监听（模块加载时）
 let progressRegistered = false
+let webTasksRegistered = false
 
 export const useDownloadStore = create<DownloadState>()(
   persist(
     (set, get) => {
-      if (!progressRegistered) {
+      if (api.target === 'electron' && !progressRegistered) {
         progressRegistered = true
         api.getDownloadProgress((data) => {
           set((s) => ({
@@ -78,6 +80,11 @@ export const useDownloadStore = create<DownloadState>()(
             ),
           }))
         })
+      }
+      if (api.target === 'web' && !webTasksRegistered) {
+        webTasksRegistered = true
+        api.onTasks((tasks) => set({ tasks }))
+        void api.getTasks().then(({ tasks }) => set({ tasks }))
       }
 
       return {
@@ -90,6 +97,17 @@ export const useDownloadStore = create<DownloadState>()(
         },
 
         downloadEpub: (bookId, title, cover, volumeName) => {
+          if (api.target === 'web') {
+            void api.downloadEpub(bookId, volumeName, undefined, title)
+              .then((result) => {
+                if ('task' in result) {
+                  set((state) => ({
+                    tasks: [result.task, ...state.tasks.filter((item) => item.id !== result.task.id)],
+                  }))
+                }
+              })
+            return
+          }
           const task: DownloadTask = {
             id: uid(),
             bookId,
@@ -108,6 +126,17 @@ export const useDownloadStore = create<DownloadState>()(
         },
 
         downloadImages: (bookId, title, cover, volumeName) => {
+          if (api.target === 'web') {
+            void api.downloadImages(bookId, volumeName, undefined, title)
+              .then((result) => {
+                if ('task' in result) {
+                  set((state) => ({
+                    tasks: [result.task, ...state.tasks.filter((item) => item.id !== result.task.id)],
+                  }))
+                }
+              })
+            return
+          }
           const task: DownloadTask = {
             id: uid(),
             bookId,
@@ -126,22 +155,57 @@ export const useDownloadStore = create<DownloadState>()(
         },
 
         removeTask: (id) => {
+          if (api.target === 'web') {
+            void api.removeWebTask(id).then(() => {
+              set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }))
+            })
+            return
+          }
           const idx = pendingQueue.findIndex((t) => t.id === id)
           if (idx >= 0) pendingQueue.splice(idx, 1)
           set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
         },
 
         clearCompleted: () => {
+          if (api.target === 'web') {
+            const completedIds = get().tasks
+              .filter((task) => task.status === 'completed')
+              .map((task) => task.id)
+            void Promise.all(completedIds.map((id) => api.removeWebTask(id))).then(() => {
+              set((state) => ({
+                tasks: state.tasks.filter((task) => task.status !== 'completed'),
+              }))
+            })
+            return
+          }
           set((s) => ({ tasks: s.tasks.filter((t) => t.status !== 'completed') }))
         },
 
         clearHistory: () => {
+          if (api.target === 'web') {
+            void api.clearWebTasks().then(() => {
+              set((state) => ({
+                tasks: state.tasks.filter(
+                  (task) => task.status === 'pending' || task.status === 'downloading',
+                ),
+              }))
+            })
+            return
+          }
           set((s) => ({ tasks: s.tasks.filter((t) => t.status === 'downloading') }))
         },
 
         retryTask: (id) => {
           const task = get().tasks.find((t) => t.id === id)
           if (!task || task.status !== 'failed') return
+          if (api.target === 'web') {
+            void api.retryTask(id).then(({ task: nextTask }) => {
+              set((state) => ({
+                tasks: state.tasks.map((item) => item.id === id ? nextTask : item),
+              }))
+            })
+            return
+          }
           set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
           if (task.type === 'images') {
             get().downloadImages(task.bookId, task.title, task.cover, task.volume)

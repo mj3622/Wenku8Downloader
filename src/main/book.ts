@@ -1,4 +1,5 @@
 import type { WebCrawler } from './crawler'
+import { filterWenku8ImageUrls, normalizeWenku8ImageUrl } from './crawler'
 import type { BasicInfo, Chapter } from './types'
 
 export class Book {
@@ -143,7 +144,8 @@ export class Book {
 
     // 封面
     const imgs = contentDiv.find('img')
-    const cover = imgs.length > 0 ? imgs.eq(0).attr('src') || null : null
+    const rawCover = imgs.length > 0 ? imgs.eq(0).attr('src') || null : null
+    const cover = rawCover ? normalizeWenku8ImageUrl(rawCover) : null
 
     return {
       '标题': title,
@@ -165,13 +167,14 @@ export class Book {
 
     const url = `${this.baseChapterUrl}${pictureUrl}`
     const $ = await this.crawler.fetch(url)
-    const urls: string[] = []
+    const rawUrls: string[] = []
 
     $('img').each((_i, img) => {
       const src = $(img).attr('src')
-      if (src) urls.push(src)
+      if (src) rawUrls.push(src)
     })
 
+    const urls = filterWenku8ImageUrls(rawUrls)
     return urls.length > 0 ? urls : null
   }
 

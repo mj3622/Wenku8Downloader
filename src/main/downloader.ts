@@ -1,6 +1,5 @@
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, readdirSync, statSync } from 'fs'
 import { join, dirname } from 'path'
-import { app } from 'electron'
 import { config } from './config-manager'
 import { EpubBuilder, escapeXml, guessMediaType } from './epub-builder'
 import type { Book } from './book'
@@ -9,11 +8,19 @@ import type { EpubChapter, EpubImage } from './epub-builder'
 import { sleep } from './utils'
 
 export function getSavePath(): string {
+  const webDataDir = process.env.WEB_DATA_DIR
+  if (webDataDir) return join(webDataDir, 'library')
+
   const customPath = config.get('download', 'download_path') as string
   if (customPath) return customPath
-  return app.isPackaged
-    ? join(app.getPath('downloads'), 'Wenku8Downloader')
-    : join(process.cwd(), 'downloads')
+  try {
+    const { app } = require('electron') as typeof import('electron')
+    return app.isPackaged
+      ? join(app.getPath('downloads'), 'Wenku8Downloader')
+      : join(process.cwd(), 'downloads')
+  } catch {
+    return join(process.cwd(), 'downloads')
+  }
 }
 
 export type DownloadProgress = {
@@ -27,6 +34,7 @@ const SPEED_TIERS = [
   { level: 1, name: '中等', chapterConcurrency: 3, imageConcurrency: 2, delayMs: 500, maxRetries: 2 },
   { level: 2, name: '保守', chapterConcurrency: 2, imageConcurrency: 1, delayMs: 1000, maxRetries: 3 },
   { level: 3, name: '兜底', chapterConcurrency: 1, imageConcurrency: 1, delayMs: 2000, maxRetries: 3 },
+  { level: 4, name: '网页安全', chapterConcurrency: 1, imageConcurrency: 1, delayMs: 5000, maxRetries: 3 },
 ] as const
 
 const SUCCESS_RESET_THRESHOLD = 10
@@ -35,11 +43,20 @@ const SUCCESS_RESET_THRESHOLD = 10
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 小时后缓存自动失效
 
-function safeVolName(name: string): string {
+export function safeFileName(name: string): string {
   if (name.includes('..') || name.includes('/') || name.includes('\\')) {
-    throw new Error(`非法的卷名: ${name}`)
+    throw new Error(`非法的文件名: ${name}`)
   }
-  return name.replace(/[^a-zA-Z0-9一-鿿぀-ヿ_-]/g, '_')
+  const sanitized = name
+    .replace(/[\u0000-\u001f<>:"|?*]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim()
+  if (!sanitized) throw new Error('文件名不能为空')
+  return sanitized
+}
+
+function safeVolName(name: string): string {
+  return safeFileName(name).replace(/[^a-zA-Z0-9一-鿿぀-ヿ_-]/g, '_')
 }
 
 function cacheRoot(): string {
@@ -118,13 +135,16 @@ async function asyncPool<T, R>(
 
 export class Downloader {
   private crawler: WebCrawler
-  private speedTier = 0
+  private speedTier: number
+  private minimumSpeedTier: number
   private consecutiveSuccess = 0
   private tierLock = false
   private onProgress: ((p: DownloadProgress) => void) | null = null
 
   constructor(crawler: WebCrawler) {
     this.crawler = crawler
+    this.minimumSpeedTier = process.env.FLARESOLVERR_URL ? SPEED_TIERS.length - 1 : 0
+    this.speedTier = this.minimumSpeedTier
     mkdirSync(join(getSavePath(), 'pics'), { recursive: true })
     mkdirSync(join(getSavePath(), 'novels'), { recursive: true })
   }
@@ -163,9 +183,13 @@ export class Downloader {
       console.warn('[下载] 检测到 403，Cookie 可能已过期')
     } else if (status === 200) {
       this.consecutiveSuccess++
-      if (!this.tierLock && this.consecutiveSuccess >= SUCCESS_RESET_THRESHOLD && this.speedTier > 0) {
+      if (
+        !this.tierLock &&
+        this.consecutiveSuccess >= SUCCESS_RESET_THRESHOLD &&
+        this.speedTier > this.minimumSpeedTier
+      ) {
         this.tierLock = true
-        this.speedTier--
+        this.speedTier = Math.max(this.minimumSpeedTier, this.speedTier - 1)
         this.consecutiveSuccess = 0
         console.log(`[下载] 连续成功 ${SUCCESS_RESET_THRESHOLD} 次，升级至「${this.speed.name}」等级`)
         setTimeout(() => { this.tierLock = false }, 5000)
@@ -229,6 +253,7 @@ export class Downloader {
     const retries = this.speed.maxRetries
     const total = urls.length
     let completed = 0
+    let failed = 0
 
     if (this.speed.imageConcurrency === 1) {
       for (let i = 0; i < urls.length; i++) {
@@ -236,7 +261,7 @@ export class Downloader {
         if (content) {
           const ext = urls[i].split('.').pop() || 'jpg'
           onImage(content, ext, i)
-        }
+        } else failed++
         completed++
         onProgress(completed, total)
       }
@@ -251,13 +276,17 @@ export class Downloader {
             if (content) {
               const ext = url.split('.').pop() || 'jpg'
               onImage(content, ext, idx)
-            }
+            } else failed++
           })
         )
         completed += batch.length
         onProgress(completed, total)
         if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
       }
+    }
+
+    if (failed > 0) {
+      throw new Error(`${failed} 张图片下载失败，请检查网络、代理或 Cookie 后重试`)
     }
   }
 
@@ -266,9 +295,10 @@ export class Downloader {
     volumeName: string,
     novelName: string,
     index: number | string = '',
-  ): Promise<void> {
-    const dirName = index !== '' ? `${index}_${volumeName}` : volumeName
-    const volumePath = join(getSavePath(), 'pics', novelName, dirName)
+  ): Promise<string> {
+    const safeVolume = safeFileName(volumeName)
+    const dirName = index !== '' ? `${index}_${safeVolume}` : safeVolume
+    const volumePath = join(getSavePath(), 'pics', safeFileName(novelName), dirName)
     mkdirSync(volumePath, { recursive: true })
 
     // 检查已有文件，跳过已下载的图片
@@ -289,7 +319,7 @@ export class Downloader {
 
     if (toFetch.length === 0) {
       this.emitProgress(urls.length, urls.length, `图片已全部下载，跳过 (${volumeName})`)
-      return
+      return volumePath
     }
 
     await this.downloadImagesWithConcurrency(
@@ -299,7 +329,7 @@ export class Downloader {
         const filePath = join(volumePath, `${i + 1}.${ext}`)
         writeFileSync(filePath, content)
       },
-      (completed, total) => {
+      (completed, _total) => {
         this.emitProgress(
           existingIndices.size + completed,
           urls.length,
@@ -307,23 +337,23 @@ export class Downloader {
         )
       },
     )
+    return volumePath
   }
 
-  async downloadNovel(book: Book, volumeName?: string): Promise<void> {
+  async downloadNovel(book: Book, volumeName?: string): Promise<string> {
     if (volumeName) {
-      await this.downloadSingleVolume(book, volumeName)
-    } else {
-      await this.downloadFullBook(book)
+      return this.downloadSingleVolume(book, volumeName)
     }
+    return this.downloadFullBook(book)
   }
 
-  private async downloadSingleVolume(book: Book, volumeName: string): Promise<void> {
+  private async downloadSingleVolume(book: Book, volumeName: string): Promise<string> {
     const builder = new EpubBuilder()
     builder.setLanguage('zh')
     builder.setAuthor(book.basicInfo['作者'])
 
     const bookTitle = book.getFormattedTitle(
-      (config.get('download', 'full_title') as string) || 'FULL',
+      (config.get('download', 'full_title') as 'FULL' | 'OUT' | 'IN') || 'FULL',
     )
     builder.setTitle(`${bookTitle} ${volumeName}`)
 
@@ -350,7 +380,7 @@ export class Downloader {
         chapters.push({
           title: '插图',
           content: imgResults.html,
-          fileName: `illustrations_${volumeName}.xhtml`,
+          fileName: `illustrations_${safeVolName(volumeName)}.xhtml`,
         })
       }
     }
@@ -368,10 +398,12 @@ export class Downloader {
     for (const img of images) builder.addImage(img)
 
     const epubBuffer = await builder.build()
-    const saveDir = join(getSavePath(), 'novels', bookTitle)
+    const saveDir = join(getSavePath(), 'novels', safeFileName(bookTitle))
     mkdirSync(saveDir, { recursive: true })
-    writeFileSync(join(saveDir, `${volumeName}.epub`), epubBuffer)
+    const outputPath = join(saveDir, `${safeFileName(volumeName)}.epub`)
+    writeFileSync(outputPath, epubBuffer)
     clearBookCache(bookId)
+    return outputPath
   }
 
   private async downloadVolumeImagesCached(
@@ -395,13 +427,13 @@ export class Downloader {
 
     // 从缓存恢复图片
     for (const img of cachedImgs) {
-      const imgName = `images/${volumeName}_${img.idx + 1}.${img.ext}`
+      const imgName = `images/${safeVolName(volumeName)}_${img.idx + 1}.${img.ext}`
       images.push({ fileName: imgName, data: img.data, mediaType: guessMediaType(img.ext) })
       htmlParts += `<img src="${imgName}"/>`
       if (setCover) {
         const coverIndex = config.get('download', 'default_cover_index') as number
         if (coverIndex === img.idx) {
-          builder.setCover(`${volumeName}_${img.idx + 1}.${img.ext}`, img.data)
+          builder.setCover(`${safeVolName(volumeName)}_${img.idx + 1}.${img.ext}`, img.data)
         }
       }
     }
@@ -417,17 +449,17 @@ export class Downloader {
         (data, ext, batchIdx) => {
           const idx = toFetch[batchIdx].idx
           saveImageCache(bookId, volumeName, idx, data, ext)
-          const imgName = `images/${volumeName}_${idx + 1}.${ext}`
+          const imgName = `images/${safeVolName(volumeName)}_${idx + 1}.${ext}`
           images.push({ fileName: imgName, data, mediaType: guessMediaType(ext) })
           htmlParts += `<img src="${imgName}"/>`
           if (setCover) {
             const coverIndex = config.get('download', 'default_cover_index') as number
             if (coverIndex === idx) {
-              builder.setCover(`${volumeName}_${idx + 1}.${ext}`, data)
+              builder.setCover(`${safeVolName(volumeName)}_${idx + 1}.${ext}`, data)
             }
           }
         },
-        (completed, totalUrls) => {
+        (completed, _totalUrls) => {
           this.emitProgress(
             itemIdx + 1, total,
             `正在下载图片 ${cachedImgs.length + completed}/${urls.length}`,
@@ -495,13 +527,13 @@ export class Downloader {
     }
   }
 
-  private async downloadFullBook(book: Book): Promise<void> {
+  private async downloadFullBook(book: Book): Promise<string> {
     const builder = new EpubBuilder()
     builder.setLanguage('zh')
     builder.setAuthor(book.basicInfo['作者'])
 
     const bookTitle = book.getFormattedTitle(
-      (config.get('download', 'full_title') as string) || 'FULL',
+      (config.get('download', 'full_title') as 'FULL' | 'OUT' | 'IN') || 'FULL',
     )
     builder.setTitle(bookTitle)
 
@@ -559,7 +591,7 @@ export class Downloader {
       chapters.push({
         title: volName,
         content: htmlParts,
-        fileName: `${volName}.xhtml`,
+        fileName: `${safeVolName(volName)}.xhtml`,
       })
     }
 
@@ -567,10 +599,12 @@ export class Downloader {
     for (const img of images) builder.addImage(img)
 
     const epubBuffer = await builder.build()
-    writeFileSync(join(getSavePath(), 'novels', `${bookTitle}.epub`), epubBuffer)
+    const outputPath = join(getSavePath(), 'novels', `${safeFileName(bookTitle)}.epub`)
+    writeFileSync(outputPath, epubBuffer)
 
     // 下载成功，清理缓存
     clearBookCache(bookId)
+    return outputPath
   }
 }
 

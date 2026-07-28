@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useLocation } from 'wouter'
 import { useSearchStore } from '../stores/searchStore'
 import BookQueryInput from '../components/BookQueryInput'
 import SearchResultList from '../components/SearchResultList'
@@ -17,14 +17,14 @@ const tabs: { key: Tab; label: string }[] = [
 export default function SearchPage() {
   const [tab, setTab] = useState<Tab>('id')
   const { results, loading: searchLoading, error: searchError, search, clear: clearSearch } = useSearchStore()
-  const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [location, navigate] = useLocation()
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(location.split('?')[1] || '')
     const t = searchParams.get('tab') as Tab | null
     if (t && tabs.some((tb) => tb.key === t)) {
       setTab(t)
-      setSearchParams({}, { replace: true })
+      navigate('/search', { replace: true })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -38,10 +38,10 @@ export default function SearchPage() {
   }
 
   return (
-    <div>
+    <div className="w-full min-w-0">
       <h2 className="text-2xl font-bold text-apple-heading mb-2">检索</h2>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-      <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
+      <div className="flex gap-1 mb-6 border-b border-apple-border-subtle overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -121,7 +121,7 @@ function SearchTab({
 
   return (
     <div>
-      <div className="flex items-end gap-2 mb-6">
+      <div className="flex flex-col gap-2 mb-6 sm:flex-row sm:items-end">
         <div className="flex-1">
           <label className="block text-sm text-apple-secondary mb-1">{label}</label>
           <input
@@ -136,7 +136,7 @@ function SearchTab({
         </div>
         <button
           disabled={loading}
-          className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+          className="w-full sm:w-auto px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                      rounded-[24px] text-[13px] font-medium text-white transition-opacity"
           onClick={() => {
             if (inputRef.current?.value.trim()) onSearch(inputRef.current.value.trim())

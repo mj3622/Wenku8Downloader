@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   getConfig: () => ipcRenderer.invoke('config:get'),
-  setConfig: (section: string, key: string, value: string) =>
+  setConfig: (section: string, key: string, value: unknown) =>
     ipcRenderer.invoke('config:set', { section, key, value }),
   autoGetCookie: () => ipcRenderer.invoke('cookie:auto'),
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),

@@ -5,7 +5,7 @@ type ConfigState = {
   config: Record<string, unknown> | null
   loading: boolean
   fetchConfig: () => Promise<void>
-  setConfig: (section: string, key: string, value: string) => Promise<void>
+  setConfig: (section: string, key: string, value: unknown) => Promise<void>
 }
 
 export const useConfigStore = create<ConfigState>((set) => ({
@@ -22,16 +22,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   },
   setConfig: async (section, key, value) => {
     await api.setConfig(section, key, value)
-    set((state) => ({
-      config: state.config
-        ? {
-            ...state.config,
-            [section]: {
-              ...(state.config[section] as Record<string, unknown>),
-              [key]: value,
-            },
-          }
-        : null,
-    }))
+    const config = await api.getConfig()
+    set({ config })
   },
 }))

@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { registerIpcHandlers } from './ipc-handlers'
+import { proxyRuntime } from './proxy-runtime'
 
 function getIconPath(): string {
   // 开发环境：相对于 out/main/ 目录的路径
@@ -44,4 +45,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   app.quit()
+})
+
+app.on('before-quit', () => {
+  void proxyRuntime.dispose()
 })

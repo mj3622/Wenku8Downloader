@@ -1,7 +1,7 @@
 export interface ElectronAPI {
   platform: NodeJS.Platform
   getConfig: () => Promise<Record<string, unknown>>
-  setConfig: (section: string, key: string, value: string) => Promise<{ status: string }>
+  setConfig: (section: string, key: string, value: unknown) => Promise<{ status: string }>
   autoGetCookie: () => Promise<{ status: string; message: string }>
   searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>

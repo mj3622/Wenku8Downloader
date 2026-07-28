@@ -19,7 +19,7 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
   }
 
   return (
-    <div className="flex items-end gap-3 mb-6">
+    <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-end">
       <div className="flex-1">
         <label className="block text-[12px] text-apple-secondary mb-1">{label}</label>
         <input
@@ -35,7 +35,7 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
       </div>
       <button
         disabled={loading}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+        className="w-full sm:w-auto px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                    rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleSubmit}
       >

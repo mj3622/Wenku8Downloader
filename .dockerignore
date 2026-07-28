@@ -1,0 +1,16 @@
+.git
+.dev-user-data
+.web-data
+config
+downloads
+dist
+node_modules
+out
+release
+secrets
+.env
+.env.*
+*.secret
+*.pem
+*.key
+*.log

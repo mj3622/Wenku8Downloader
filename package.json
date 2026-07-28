@@ -6,11 +6,18 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:web": "concurrently -k \"cross-env PUBLIC_ORIGIN=http://127.0.0.1:5173 tsx watch src/server/index.ts\" \"vite --config vite.config.web.ts\"",
     "build": "electron-vite build",
+    "build:web": "vite build --config vite.config.web.ts",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:docker": "npm run build:web && npm run build:server",
+    "build:all": "npm run build && npm run build:docker",
+    "start:web": "node dist/server/server/index.js",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "vitest run",
+    "test": "vitest run --exclude src/main/epub-integration.test.ts --exclude src/main/epub-merge-validate.test.ts",
+    "test:integration": "vitest run src/main/epub-integration.test.ts src/main/epub-merge-validate.test.ts",
     "test:watch": "vitest",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
@@ -36,43 +43,69 @@
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "artifactName": "Wenku8Downloader-${version}-macOS-${arch}.${ext}"
     },
     "win": {
       "target": [
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Wenku8Downloader-${version}-Windows-${arch}.${ext}"
     }
   },
   "dependencies": {
+    "archiver": "8.0.0",
     "cheerio": "^1.0.0-rc.12",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
     "iconv-lite": "^0.7.2",
     "jszip": "^3.10.1",
-    "puppeteer-core": "^25.0.4",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "proxy-chain": "2.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
     "smol-toml": "^1.6.1",
+    "undici": "6.28.0",
+    "wouter": "3.10.0",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.4",
     "@types/cheerio": "^0.22.35",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/supertest": "^6.0.3",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
+    "concurrently": "^9.2.4",
+    "cross-env": "^7.0.3",
     "electron": "^31.3.1",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "postcss": "^8.4.40",
+    "supertest": "^7.2.2",
     "tailwindcss": "^3.4.7",
+    "tsx": "4.20.3",
     "typescript": "^5.5.4",
     "vite": "^5.3.5",
-    "vitest": "^4.1.7"
+    "vitest": "2.1.9"
   }
 }

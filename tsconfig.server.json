@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "dist/server",
+    "sourceMap": true
+  },
+  "include": [
+    "src/server/**/*.ts",
+    "src/main/book.ts",
+    "src/main/config-manager.ts",
+    "src/main/cookie-service.ts",
+    "src/main/crawler.ts",
+    "src/main/downloader.ts",
+    "src/main/epub-builder.ts",
+    "src/main/proxy-runtime.ts",
+    "src/main/types.ts",
+    "src/main/utils.ts"
+  ],
+  "exclude": ["src/**/*.test.ts"]
+}

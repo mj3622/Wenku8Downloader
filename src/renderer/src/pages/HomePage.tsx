@@ -1,15 +1,16 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'wouter'
+import { api } from '../api/client'
 
 export default function HomePage() {
   return (
-    <div className="max-w-2xl">
+    <div className="w-full max-w-6xl">
       {/* 版本号 + GitHub */}
       <div className="flex items-center gap-2 mb-4">
         <span className="inline-block px-2.5 py-0.5 rounded-full bg-apple-accent-light text-apple-accent text-[11px] font-medium">
           v2.0.0
         </span>
         <a
-          onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://github.com/mj3622/Wenku8Downloader') }}
+          onClick={(e) => { e.preventDefault(); void api.openExternal('https://github.com/mj3622/Wenku8Downloader') }}
           href="https://github.com/mj3622/Wenku8Downloader"
           className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors cursor-pointer"
         >
@@ -26,27 +27,27 @@ export default function HomePage() {
           轻小说文库下载器
         </h1>
         <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-        <p className="text-[14px] text-apple-body whitespace-nowrap">
-          一款桌面端轻小说下载工具，支持按编号、作者、书名检索作品，并导出为 EPUB 格式，同时支持插图下载。
+        <p className="max-w-3xl text-[14px] leading-relaxed text-apple-body">
+          一款轻小说下载工具，支持按编号、作者、书名检索作品，并导出为 EPUB 格式，同时支持插图下载。
         </p>
       </div>
 
       {/* 操作按钮 */}
-      <div className="flex gap-3 mb-10">
+      <div className="grid grid-cols-1 gap-3 mb-10 sm:grid-cols-3">
         <Link
-          to="/search"
+          href="/search"
           className="flex-1 px-4 py-2.5 rounded-lg bg-apple-accent text-white text-[13px] font-semibold text-center hover:opacity-90 transition-opacity"
         >
           检索作品
         </Link>
         <Link
-          to="/download"
+          href="/download"
           className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
         >
           下载历史
         </Link>
         <Link
-          to="/config"
+          href="/config"
           className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
         >
           配置
@@ -59,13 +60,13 @@ export default function HomePage() {
         <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="space-y-3">
           <Step index={1} title="配置账号与 Cookie" to="/config">
-            首次使用请先在「配置」页面填写文库账号密码，保存后自动登录获取 Cookie。可在「下载设置」中自定义文件保存路径。
+            首次使用请先在「配置」页面填写文库账号密码，保存后自动登录获取 Cookie。
           </Step>
           <Step index={2} title="检索作品" to="/search">
             进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
           </Step>
           <Step index={3} title="下载小说" to="/download">
-            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载完成后可在「下载历史」中点击文件夹图标打开文件所在目录。
+            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载完成后可在「下载历史」中获取文件。
           </Step>
         </div>
       </section>
@@ -74,7 +75,7 @@ export default function HomePage() {
       <section className="mb-10">
         <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">功能概览</h3>
         <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <FeatureCard
             title="EPUB 整本下载"
             desc="将所有卷合并导出为一个 EPUB 文件，包含封面、插图与目录"
@@ -103,13 +104,15 @@ export default function HomePage() {
             <li>
               · 本工具仅支持{' '}
               <strong className="text-apple-heading">
-                轻小说文库 (<a onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://www.wenku8.net') }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
+                轻小说文库 (<a onClick={(e) => { e.preventDefault(); void api.openExternal('https://www.wenku8.net') }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
               </strong>{' '}
               的内容下载
             </li>
             <li>· Cookie 有效期为数小时至数天不等，下载失败时可重新获取 Cookie 后再试</li>
             <li>
-              · EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径
+              · {api.target === 'web'
+                ? '生成文件保存在服务器数据卷中，可在「下载历史」页面下载'
+                : 'EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径'}
             </li>
           </ul>
         </div>
@@ -126,7 +129,7 @@ function Step({ index, title, to, children }: {
 }) {
   return (
     <Link
-      to={to}
+      href={to}
       className="block p-4 rounded-xl border border-apple-border-subtle bg-apple-card
                  hover:border-apple-accent/20 transition-all"
     >

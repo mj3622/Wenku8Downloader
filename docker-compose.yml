@@ -1,0 +1,62 @@
+services:
+  wenku8-web:
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to the browser-facing origin}
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      APP_SECRET_FILE: /run/secrets/app_secret
+      FLARESOLVERR_URL: http://flaresolverr:8191/v1
+      PROXY_BRIDGE_BIND: 0.0.0.0
+      PROXY_BRIDGE_ADVERTISE_HOST: wenku8-web
+      TRUST_PROXY: loopback, linklocal, uniquelocal
+    depends_on:
+      flaresolverr:
+        condition: service_healthy
+    secrets:
+      - admin_password
+      - app_secret
+    volumes:
+      - wenku8-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr@sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: error
+      LOG_HTML: "false"
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /app/.config:size=128m,mode=0700,uid=1000,gid=1000
+      - /app/.cache:size=128m,mode=0700,uid=1000,gid=1000
+      - /app/.local:size=128m,mode=0700,uid=1000,gid=1000
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8191/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  wenku8-data:
+
+secrets:
+  admin_password:
+    file: ${ADMIN_PASSWORD_SECRET_FILE:-./secrets/admin_password.txt}
+  app_secret:
+    file: ${APP_SECRET_SECRET_FILE:-./secrets/app_secret.txt}

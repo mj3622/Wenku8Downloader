@@ -13,21 +13,22 @@ const TITLE_FORMATS = [
 const CONFIG_TABS = [
   { key: 'login' as const, label: '登录' },
   { key: 'download' as const, label: '下载设置' },
+  { key: 'proxy' as const, label: '网络代理' },
 ]
 
 export default function ConfigPage() {
   const { config, fetchConfig, setConfig } = useConfigStore()
-  const [tab, setTab] = useState<'login' | 'download'>('login')
+  const [tab, setTab] = useState<'login' | 'download' | 'proxy'>('login')
 
   useEffect(() => {
     fetchConfig()
   }, [fetchConfig])
 
   return (
-    <div>
+    <div className="min-w-0">
       <h2 className="text-2xl font-bold text-apple-heading mb-1">配置</h2>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-      <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
+      <div className="flex gap-1 mb-6 border-b border-apple-border-subtle overflow-x-auto">
         {CONFIG_TABS.map((t) => (
           <button
             key={t.key}
@@ -44,6 +45,7 @@ export default function ConfigPage() {
       </div>
       {tab === 'login' && <LoginTab />}
       {tab === 'download' && <DownloadTab config={config} onSave={setConfig} />}
+      {tab === 'proxy' && <ProxyTab config={config} onSave={setConfig} />}
     </div>
   )
 }
@@ -82,8 +84,8 @@ function CookieStatusCard({
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cs.dot}`} />
         <h3 className="text-sm font-semibold text-apple-heading">Cookie 状态</h3>
       </div>
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             {cs.showSpinner && (
               <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
@@ -177,14 +179,14 @@ function LoginTab() {
   const timeAgo = lastRefresh ? formatTimeAgo(lastRefresh) : null
 
   return (
-    <div className="space-y-4 max-w-lg">
+    <div className="space-y-4 w-full max-w-4xl">
       {/* 账号凭证 */}
       <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-5">
         <div className="flex items-center gap-2 mb-4">
           <span className="w-1.5 h-1.5 rounded-full bg-apple-accent flex-shrink-0" />
           <h3 className="text-sm font-semibold text-apple-heading">账号凭证</h3>
         </div>
-        <div className="grid grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <div>
             <label className="block text-[12px] font-medium text-apple-secondary mb-1.5">用户名</label>
             <input
@@ -239,7 +241,7 @@ function DownloadTab({
   onSave,
 }: {
   config: Record<string, unknown> | null
-  onSave: (section: string, key: string, value: string) => Promise<void>
+  onSave: (section: string, key: string, value: unknown) => Promise<void>
 }) {
   const [titleFormat, setTitleFormat] = useState('FULL')
   const [coverIndex, setCoverIndex] = useState('0')
@@ -265,7 +267,9 @@ function DownloadTab({
     try {
       await onSave('download', 'full_title', titleFormat)
       await onSave('download', 'default_cover_index', coverIndex)
-      await onSave('download', 'download_path', downloadPath)
+      if (api.target === 'electron') {
+        await onSave('download', 'download_path', downloadPath)
+      }
       setStatus({ type: 'success', msg: '下载设置已保存' })
     } catch (e) {
       setStatus({ type: 'error', msg: String(e) })
@@ -275,9 +279,9 @@ function DownloadTab({
   }
 
   return (
-    <div className="space-y-4 max-w-lg">
+    <div className="space-y-5 w-full max-w-4xl">
       <h3 className="text-lg font-semibold text-apple-heading">书名格式</h3>
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         {TITLE_FORMATS.map((fmt) => {
           const examples: Record<string, string> = {
             FULL: '败北女角太多了！(败犬女主太多了！)',
@@ -307,7 +311,7 @@ function DownloadTab({
       </div>
       <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">封面图片索引</h3>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
                        focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
@@ -319,52 +323,199 @@ function DownloadTab({
       </div>
       <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading truncate">
-            {downloadPath || (
-              <span className="text-apple-tertiary">
-                {window.electronAPI.platform === 'win32'
-                  ? '%USERPROFILE%\\Downloads\\Wenku8Downloader\\'
-                  : '~/Downloads/Wenku8Downloader/'}
-              </span>
-            )}
+        {api.target === 'web' ? (
+          <div className="px-4 py-3 bg-apple-card border border-apple-border-subtle rounded-xl text-[12px] text-apple-secondary">
+            文件由服务器数据卷持久化保存，下载完成后可在「下载历史」页面获取。
           </div>
-          <button
-            className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light
-                       rounded-[20px] hover:bg-apple-accent/15 transition-colors"
-            onClick={async () => {
-              try {
-                const path = await api.selectFolder()
-                if (path) setDownloadPath(path)
-              } catch {
-                setStatus({ type: 'error', msg: '选择文件夹失败' })
-              }
-            }}
-          >
-            选择文件夹
-          </button>
-          {downloadPath && (
-            <button
-              aria-label="清除文件夹路径"
-              className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
-              onClick={() => setDownloadPath('')}
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <p className="text-[12px] text-apple-tertiary mt-1.5">
-          留空则使用默认路径。修改后新下载的文件将保存到新路径，已有文件不受影响。
-        </p>
+        ) : (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex-1 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading truncate">
+                {downloadPath || (
+                  <span className="text-apple-tertiary">
+                    {window.electronAPI.platform === 'win32'
+                      ? '%USERPROFILE%\\Downloads\\Wenku8Downloader\\'
+                      : '~/Downloads/Wenku8Downloader/'}
+                  </span>
+                )}
+              </div>
+              <button
+                className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light
+                           rounded-[20px] hover:bg-apple-accent/15 transition-colors"
+                onClick={async () => {
+                  try {
+                    const path = await api.selectFolder()
+                    if (path) setDownloadPath(path)
+                  } catch {
+                    setStatus({ type: 'error', msg: '选择文件夹失败' })
+                  }
+                }}
+              >
+                选择文件夹
+              </button>
+              {downloadPath && (
+                <button
+                  aria-label="清除文件夹路径"
+                  className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
+                  onClick={() => setDownloadPath('')}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <p className="text-[12px] text-apple-tertiary mt-1.5">
+              留空则使用默认路径。修改后新下载的文件将保存到新路径，已有文件不受影响。
+            </p>
+          </>
+        )}
       </div>
       <button
         disabled={saving}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
+        className="w-full sm:w-auto px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
                    rounded-[24px] text-[13px] font-medium text-white transition-opacity"
         onClick={handleSave}
       >
         {saving ? '保存中...' : '保存下载设置'}
       </button>
+      {status && <StatusAlert type={status.type} message={status.msg} onDismiss={() => setStatus(null)} />}
+    </div>
+  )
+}
+
+function ProxyTab({
+  config,
+  onSave,
+}: {
+  config: Record<string, unknown> | null
+  onSave: (section: string, key: string, value: unknown) => Promise<void>
+}) {
+  const [enabled, setEnabled] = useState(false)
+  const [currentUrl, setCurrentUrl] = useState('')
+  const [hasCredentials, setHasCredentials] = useState(false)
+  const [replacementUrl, setReplacementUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
+
+  useEffect(() => {
+    const proxy = config?.proxy as Record<string, unknown> | undefined
+    setEnabled(proxy?.enabled === true)
+    setCurrentUrl(typeof proxy?.url === 'string' ? proxy.url : '')
+    setHasCredentials(proxy?.has_credentials === true)
+  }, [config])
+
+  const handleSave = async () => {
+    const nextUrl = replacementUrl.trim()
+    if (enabled && !nextUrl && !currentUrl) {
+      setStatus({ type: 'error', msg: '启用代理前请填写代理地址' })
+      return
+    }
+
+    setSaving(true)
+    setStatus(null)
+    try {
+      if (nextUrl) await onSave('proxy', 'url', nextUrl)
+      await onSave('proxy', 'enabled', enabled)
+      setReplacementUrl('')
+      setStatus({ type: 'success', msg: '代理设置已保存，新请求将使用该代理' })
+    } catch (error) {
+      setStatus({ type: 'error', msg: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const clearProxy = async () => {
+    setSaving(true)
+    setStatus(null)
+    try {
+      await onSave('proxy', 'url', '')
+      setEnabled(false)
+      setCurrentUrl('')
+      setHasCredentials(false)
+      setReplacementUrl('')
+      setStatus({ type: 'success', msg: '代理已清除' })
+    } catch (error) {
+      setStatus({ type: 'error', msg: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5 w-full max-w-4xl">
+      <div className="rounded-2xl border border-apple-border-subtle bg-apple-card p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-apple-heading">出站代理</h3>
+            <p className="mt-1 text-[12px] leading-relaxed text-apple-secondary">
+              搜索、登录、章节与图片请求都会通过代理访问轻小说文库。
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 cursor-pointer self-start sm:self-auto">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+              className="w-4 h-4 accent-[#0071e3]"
+            />
+            <span className="text-[13px] font-medium text-apple-heading">启用代理</span>
+          </label>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] gap-4">
+          <div className="rounded-xl bg-apple-bg px-4 py-3 min-w-0">
+            <p className="text-[11px] text-apple-tertiary mb-1">当前代理</p>
+            <p className="text-[13px] text-apple-heading break-all">
+              {currentUrl || '尚未配置'}
+            </p>
+            {hasCredentials && (
+              <span className="mt-2 inline-flex rounded-full bg-green-50 px-2 py-0.5 text-[11px] text-green-700">
+                已保存认证信息
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0">
+            <label className="block text-[12px] font-medium text-apple-secondary mb-1.5">
+              新代理地址
+            </label>
+            <input
+              value={replacementUrl}
+              onChange={(event) => setReplacementUrl(event.target.value)}
+              placeholder="socks5://127.0.0.1:1080"
+              autoComplete="off"
+              className="w-full min-w-0 px-3 py-2.5 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading
+                         focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+            />
+            <p className="mt-1.5 text-[11px] leading-relaxed text-apple-tertiary">
+              支持 http://、https://、socks5://、socks5h://，可使用 user:password@host:port。
+              留空表示保留当前地址。
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+          {currentUrl && (
+            <button
+              disabled={saving}
+              onClick={() => void clearProxy()}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-[22px] border border-red-200 text-[13px] font-medium text-red-500
+                         hover:bg-red-50 disabled:opacity-40 transition-colors"
+            >
+              清除代理
+            </button>
+          )}
+          <button
+            disabled={saving}
+            onClick={() => void handleSave()}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-[22px] bg-apple-accent text-[13px] font-medium text-white
+                       hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            {saving ? '保存中...' : '保存代理设置'}
+          </button>
+        </div>
+      </div>
+
       {status && <StatusAlert type={status.type} message={status.msg} onDismiss={() => setStatus(null)} />}
     </div>
   )
