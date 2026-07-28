@@ -99,32 +99,29 @@ Compose 会启动：
 
 FlareSolverr 不会向宿主机发布端口。Web 服务默认也只绑定到 `127.0.0.1`，请通过 Nginx、OpenResty、Caddy 等反向代理提供 HTTPS 访问。
 
-### 1. 创建部署密钥
+### 1. 创建环境文件
 
 ```bash
-mkdir -p secrets
 umask 077
-openssl rand -base64 24 > secrets/admin_password.txt
-openssl rand -hex 32 > secrets/app_secret.txt
-```
-
-- `admin_password.txt`：Web 管理员登录密码
-- `app_secret.txt`：用于加密文库账号、Cookie 和代理凭据
-
-这两个文件已被 `.gitignore` 和 `.dockerignore` 排除，请勿提交或分享。
-
-### 2. 创建环境文件
-
-```bash
-cat > .env <<'EOF'
+ADMIN_PASSWORD="$(openssl rand -base64 24)"
+APP_SECRET="$(openssl rand -hex 32)"
+cat > .env <<EOF
 PUBLIC_ORIGIN=https://novel.example.com
 WEB_PORT=3000
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+APP_SECRET=${APP_SECRET}
 EOF
+unset ADMIN_PASSWORD APP_SECRET
 ```
 
-`PUBLIC_ORIGIN` 必须与浏览器实际访问的协议和域名完全一致。`WEB_PORT` 是宿主机回环地址上的监听端口。
+- `PUBLIC_ORIGIN`：浏览器实际访问的协议和域名，必须完全一致
+- `WEB_PORT`：宿主机回环地址上的监听端口
+- `ADMIN_PASSWORD`：Web 管理员登录密码，至少 12 个字符
+- `APP_SECRET`：用于加密文库账号、Cookie 和代理凭据，至少 32 个字符
 
-### 3. 启动服务
+`.env` 已被 `.gitignore` 和 `.dockerignore` 排除，命令中的 `umask 077` 会将文件限制为仅当前用户可读写。请勿提交或分享该文件。环境变量可由宿主机管理员通过容器配置查看，因此此部署方式只适合受信任的私有服务器。
+
+### 2. 启动服务
 
 ```bash
 docker compose up -d --build
@@ -152,7 +149,7 @@ docker compose down
 
 命名数据卷 `wenku8-data` 会保留加密配置、任务历史、下载缓存和生成文件。不要使用 `docker compose down -v`，除非确定需要删除全部数据。
 
-### 4. 配置反向代理
+### 3. 配置反向代理
 
 Nginx 或 OpenResty 示例：
 
@@ -174,12 +171,12 @@ location / {
 
 必须使用 HTTPS，并确保代理上游端口与 `.env` 中的 `WEB_PORT` 一致。禁用缓冲可以保证下载进度事件及时到达浏览器。
 
-### 5. 登录
+### 4. 登录
 
-浏览器打开 `PUBLIC_ORIGIN` 对应的网址，管理员密码可从本地密钥文件查看：
+浏览器打开 `PUBLIC_ORIGIN` 对应的网址，管理员密码可从本地环境文件查看：
 
 ```bash
-cat secrets/admin_password.txt
+grep '^ADMIN_PASSWORD=' .env | cut -d= -f2-
 ```
 
 登录管理界面后，再到「配置」页面填写轻小说文库账号。
@@ -191,6 +188,7 @@ cat secrets/admin_password.txt
 - 文库账号、Cookie 和代理凭据使用 AES-256-GCM 加密保存
 - 配置接口不会返回密码、Cookie 或代理认证信息
 - Web 容器使用非 root 用户、只读根文件系统、能力删除和本地回环端口
+- 部署凭据保存在权限为 `0600` 的 `.env` 中，并由 Compose 注入容器
 - 图片和文库请求限制到明确允许的目标主机
 - 下载文件使用任务专属路径，避免任务之间覆盖
 

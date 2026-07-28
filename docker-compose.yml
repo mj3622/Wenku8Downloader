@@ -7,8 +7,8 @@ services:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN to the browser-facing origin}
-      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-      APP_SECRET_FILE: /run/secrets/app_secret
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env}
       FLARESOLVERR_URL: http://flaresolverr:8191/v1
       PROXY_BRIDGE_BIND: 0.0.0.0
       PROXY_BRIDGE_ADVERTISE_HOST: wenku8-web
@@ -16,9 +16,6 @@ services:
     depends_on:
       flaresolverr:
         condition: service_healthy
-    secrets:
-      - admin_password
-      - app_secret
     volumes:
       - wenku8-data:/data
     read_only: true
@@ -54,9 +51,3 @@ services:
 
 volumes:
   wenku8-data:
-
-secrets:
-  admin_password:
-    file: ${ADMIN_PASSWORD_SECRET_FILE:-./secrets/admin_password.txt}
-  app_secret:
-    file: ${APP_SECRET_SECRET_FILE:-./secrets/app_secret.txt}
