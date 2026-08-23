@@ -1,4 +1,5 @@
 import type { WebCrawler } from './crawler'
+import type { TitleFormat } from '../shared/config-types'
 import type { BasicInfo, Chapter } from './types'
 
 export class Book {
@@ -183,7 +184,7 @@ export class Book {
     return content
   }
 
-  getFormattedTitle(format: 'FULL' | 'OUT' | 'IN'): string {
+  getFormattedTitle(format: TitleFormat): string {
     const title = this.basicInfo['标题']
     if (format === 'FULL') return title
 

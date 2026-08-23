@@ -1,37 +1,65 @@
 # Build & Distribution
 /downloads/
-dist/
-build/
+/dist/
+/build/
+/out/
+/release/
+*.zip
+*.tsbuildinfo
+
+# Dependencies & package manager caches
+/node_modules/
+/.npm/
+/.pnpm-store/
 
 # Dev user data (separate from production)
 /.dev-user-data/
 
-# Sensitive Config
-/config/secrets.toml
+# Sensitive config and local environment
+/config/
+**/settings.toml.invalid-*
+**/secrets.enc.invalid-*
+**/secrets.toml.invalid-*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# Test output
+/coverage/
+/.vitest/
 
 # IDE
 /.idea/
 /.vscode/
+*.swp
+*.swo
+*~
 
-# macOS
+# Operating system files
 .DS_Store
+Thumbs.db
+Desktop.ini
 
 # Claude Code
 /.claude/
 
-# Node.js
-/node_modules/
-/out/
-*.tsbuildinfo
+# Generated JavaScript
 electron-vite.config.js
-# Generated JS from electron-vite/esbuild transform
 src/**/*.js
-
-# Electron build
-release/
-*.zip
 
 # superpowers
 /.superpowers/
 
-bin/
+/bin/
+
+.codegraph/

@@ -1,5 +1,4 @@
-import { config } from './config-manager'
-import type { WebCrawler } from './crawler'
+import type { CrawlerConfig, WebCrawler } from './crawler'
 
 export type CookieProgress = {
   step: 'login' | 'done'
@@ -11,11 +10,10 @@ export type CookieResult = {
 }
 
 export class CookieService {
-  private crawler: WebCrawler
-
-  constructor(crawler: WebCrawler) {
-    this.crawler = crawler
-  }
+  constructor(
+    private readonly crawler: Pick<WebCrawler, 'getCookie'>,
+    private readonly config: Pick<CrawlerConfig, 'getCredentials' | 'getCookies'>,
+  ) {}
 
   /**
    * 通过 net.fetch POST 登录轻小说文库
@@ -30,9 +28,7 @@ export class CookieService {
   }
 
   private async login(): Promise<Record<string, string>> {
-    const loginCfg = config.getAll().login
-    const username = loginCfg?.username
-    const password = loginCfg?.password
+    const { username, password } = this.config.getCredentials()
 
     if (!username || !password) {
       throw new Error('请先配置登录账号和密码')
@@ -40,11 +36,11 @@ export class CookieService {
 
     await this.crawler.getCookie()
 
-    const cfg = config.getAll()
+    const cookies = this.config.getCookies()
     return {
-      PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
-      jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
-      jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
+      PHPSESSID: cookies.PHPSESSID,
+      jieqiUserInfo: cookies.jieqiUserInfo,
+      jieqiVisitInfo: cookies.jieqiVisitInfo,
     }
   }
 }

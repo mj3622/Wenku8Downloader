@@ -1,37 +1,64 @@
 import { create } from 'zustand'
+import type {
+  DownloadConfig,
+  PublicConfigSnapshot,
+  UpdateCredentialsInput,
+} from '../../../shared/config-types'
 import { api } from '../api/client'
 
-type ConfigState = {
-  config: Record<string, unknown> | null
-  loading: boolean
-  fetchConfig: () => Promise<void>
-  setConfig: (section: string, key: string, value: string) => Promise<void>
+export type ConfigLoadState = 'idle' | 'loading' | 'ready' | 'error'
+
+export interface ConfigState {
+  snapshot: PublicConfigSnapshot | null
+  loadState: ConfigLoadState
+  error: string | null
+  fetchConfig(): Promise<void>
+  updateDownloadConfig(input: DownloadConfig): Promise<void>
+  updateCredentials(input: UpdateCredentialsInput): Promise<void>
+  resetCorruptConfig(): Promise<void>
 }
 
-export const useConfigStore = create<ConfigState>((set) => ({
-  config: null,
-  loading: false,
-  fetchConfig: async () => {
-    set({ loading: true })
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export const useConfigStore = create<ConfigState>((set) => {
+  const runMutation = async (
+    request: () => Promise<PublicConfigSnapshot>,
+  ): Promise<void> => {
+    set({ error: null })
     try {
-      const config = await api.getConfig()
-      set({ config, loading: false })
-    } catch {
-      set({ loading: false })
+      const snapshot = await request()
+      set({ snapshot, loadState: 'ready', error: null })
+    } catch (error) {
+      const message = errorMessage(error)
+      try {
+        const snapshot = await api.getConfig()
+        set({ snapshot, loadState: 'ready', error: message })
+      } catch {
+        set({ error: message })
+      }
+      throw error
     }
-  },
-  setConfig: async (section, key, value) => {
-    await api.setConfig(section, key, value)
-    set((state) => ({
-      config: state.config
-        ? {
-            ...state.config,
-            [section]: {
-              ...(state.config[section] as Record<string, unknown>),
-              [key]: value,
-            },
-          }
-        : null,
-    }))
-  },
-}))
+  }
+
+  return {
+    snapshot: null,
+    loadState: 'idle',
+    error: null,
+
+    fetchConfig: async () => {
+      set({ loadState: 'loading', error: null })
+      try {
+        const snapshot = await api.getConfig()
+        set({ snapshot, loadState: 'ready', error: null })
+      } catch (error) {
+        set({ loadState: 'error', error: errorMessage(error) })
+      }
+    },
+
+    updateDownloadConfig: (input) => runMutation(() => api.updateDownloadConfig(input)),
+    updateCredentials: (input) => runMutation(() => api.updateCredentials(input)),
+    resetCorruptConfig: () => runMutation(() => api.resetCorruptConfig()),
+  }
+})
