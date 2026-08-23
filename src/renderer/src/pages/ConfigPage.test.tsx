@@ -16,11 +16,13 @@ import {
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateDownloadConfig: vi.fn(),
+  updateLogConfig: vi.fn(),
   updateCredentials: vi.fn(),
   resetCorruptConfig: vi.fn(),
   autoGetCookie: vi.fn(),
   getCookieProgress: vi.fn(() => () => undefined),
   openFolder: vi.fn(),
+  openLogFolder: vi.fn(),
   selectFolder: vi.fn(),
 }))
 
@@ -43,6 +45,11 @@ const snapshot: PublicConfigSnapshot = {
     fullTitle: 'FULL',
     defaultCoverIndex: 0,
     downloadPath: '',
+  },
+  logging: {
+    retentionDays: 30,
+    maxFileSizeMb: 100,
+    maxTotalSizeMb: 200,
   },
   account: {
     username: 'tester',
@@ -134,11 +141,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.getConfig.mockResolvedValue(structuredClone(snapshot))
   mocks.updateDownloadConfig.mockResolvedValue(structuredClone(snapshot))
+  mocks.updateLogConfig.mockResolvedValue(structuredClone(snapshot))
   mocks.updateCredentials.mockResolvedValue(structuredClone(snapshot))
   mocks.resetCorruptConfig.mockResolvedValue(structuredClone(snapshot))
   mocks.autoGetCookie.mockResolvedValue({ status: 'ok', message: 'ok' })
   mocks.getCookieProgress.mockReturnValue(() => undefined)
   mocks.openFolder.mockResolvedValue(undefined)
+  mocks.openLogFolder.mockResolvedValue(undefined)
   mocks.selectFolder.mockResolvedValue(null)
   useConfigStore.setState({
     snapshot: null,
@@ -248,6 +257,52 @@ describe('ConfigPage', () => {
     await click(button('打开目录'))
 
     expect(mocks.openFolder).toHaveBeenCalledWith('root')
+  })
+
+  it('saves validated logging settings', async () => {
+    await renderPage()
+    await click(button('日志'))
+    const retentionDays = container.querySelector(
+      'input[aria-label="保留天数"]',
+    ) as HTMLInputElement
+    const maxFileSize = container.querySelector(
+      'input[aria-label="单文件上限（MB）"]',
+    ) as HTMLInputElement
+    const maxTotalSize = container.querySelector(
+      'input[aria-label="目录总上限（MB）"]',
+    ) as HTMLInputElement
+    await change(retentionDays, '14')
+    await change(maxFileSize, '64')
+    await change(maxTotalSize, '256')
+
+    await click(button('保存日志设置'))
+
+    expect(mocks.updateLogConfig).toHaveBeenCalledWith({
+      retentionDays: 14,
+      maxFileSizeMb: 64,
+      maxTotalSizeMb: 256,
+    })
+  })
+
+  it('rejects a total limit below twice the file limit', async () => {
+    await renderPage()
+    await click(button('日志'))
+    const maxTotalSize = container.querySelector(
+      'input[aria-label="目录总上限（MB）"]',
+    ) as HTMLInputElement
+    await change(maxTotalSize, '150')
+
+    expect(container.textContent).toContain('目录总上限必须至少为单文件上限的两倍')
+    expect(button('保存日志设置').disabled).toBe(true)
+    expect(mocks.updateLogConfig).not.toHaveBeenCalled()
+  })
+
+  it('opens the log directory through the fixed API', async () => {
+    await renderPage()
+    await click(button('日志'))
+    await click(button('打开日志目录'))
+
+    expect(mocks.openLogFolder).toHaveBeenCalledWith()
   })
 
   it('renders load failures and retries explicitly', async () => {

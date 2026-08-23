@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   updateDownloadConfig: vi.fn(),
+  updateLogConfig: vi.fn(),
   updateCredentials: vi.fn(),
   resetCorruptConfig: vi.fn(),
 }))
@@ -19,6 +20,11 @@ const snapshot: PublicConfigSnapshot = {
     fullTitle: 'FULL',
     defaultCoverIndex: 0,
     downloadPath: '',
+  },
+  logging: {
+    retentionDays: 30,
+    maxFileSizeMb: 100,
+    maxTotalSizeMb: 200,
   },
   account: {
     username: 'tester',
@@ -98,6 +104,18 @@ describe('configStore', () => {
       downloadPath: 'D:\\Requested',
     })
 
+    expect(useConfigStore.getState().snapshot).toBe(canonical)
+  })
+
+  it('uses the canonical server response after a logging update', async () => {
+    useConfigStore.setState({ snapshot, loadState: 'ready', error: null })
+    const logging = { retentionDays: 14, maxFileSizeMb: 64, maxTotalSizeMb: 256 }
+    const canonical: PublicConfigSnapshot = { ...snapshot, logging }
+    mocks.updateLogConfig.mockResolvedValue(canonical)
+
+    await useConfigStore.getState().updateLogConfig(logging)
+
+    expect(mocks.updateLogConfig).toHaveBeenCalledWith(logging)
     expect(useConfigStore.getState().snapshot).toBe(canonical)
   })
 

@@ -3,6 +3,7 @@ import {
   validateBookId,
   validateExternalUrl,
   validateOpenFolder,
+  validateRendererErrorReport,
   validateSearchQuery,
 } from './ipc-validation'
 
@@ -31,5 +32,52 @@ describe('IPC validation', () => {
     expect(validateOpenFolder('pics')).toBe('pics')
     expect(validateOpenFolder('novels')).toBe('novels')
     expect(() => validateOpenFolder('../')).toThrow('下载文件夹')
+  })
+
+  it('accepts bounded renderer error reports', () => {
+    expect(validateRendererErrorReport({
+      kind: 'error',
+      message: 'render failed',
+      stack: 'Error: render failed',
+      source: 'file:///app.js',
+      line: 12,
+      column: 3,
+    })).toEqual({
+      kind: 'error',
+      message: 'render failed',
+      stack: 'Error: render failed',
+      source: 'file:///app.js',
+      line: 12,
+      column: 3,
+    })
+  })
+
+  it('ignores unknown renderer error fields', () => {
+    expect(validateRendererErrorReport({
+      kind: 'error',
+      message: 'render failed',
+      futureMetadata: { retryable: true },
+    })).toEqual({
+      kind: 'error',
+      message: 'render failed',
+    })
+  })
+
+  it('rejects oversized renderer reports even when the excess is in unknown fields', () => {
+    expect(() => validateRendererErrorReport({
+      kind: 'error',
+      message: 'render failed',
+      futureMetadata: 'x'.repeat(65 * 1024),
+    })).toThrow('渲染进程错误报告')
+  })
+
+  it.each([
+    [{ kind: 'other', message: 'failed' }],
+    [{ kind: 'error', message: '' }],
+    [{ kind: 'error', message: 'x'.repeat(8 * 1024 + 1) }],
+    [{ kind: 'error', message: 'failed', line: -1 }],
+    [{ kind: 'error', message: 'failed', stack: 'x'.repeat(65 * 1024) }],
+  ])('rejects malformed renderer reports %#', (input) => {
+    expect(() => validateRendererErrorReport(input)).toThrow('渲染进程错误报告')
   })
 })

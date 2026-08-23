@@ -2,6 +2,16 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
+
+const logMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}))
+
+vi.mock('./logging/logger', () => ({ logger: logMocks }))
+
 import { DownloadRateLimiter } from './download-rate-limiter'
 import {
   asyncPool,
@@ -65,6 +75,7 @@ function createBookFixture(overrides: DownloaderBookOverrides = {}): DownloaderB
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.clearAllMocks()
 })
 
 describe('buildBookKey', () => {
@@ -114,6 +125,19 @@ describe('Downloader.downloadPictures', () => {
       await expect(readFile(join(root, 'pics', '200_同名作品', '1_第一卷', '1.jpg'), 'utf-8'))
         .resolves.toBe('current-book-image')
       await expect(readFile(join(legacyDir, '1.jpg'), 'utf-8')).resolves.toBe('legacy-image')
+      expect(logMocks.info).toHaveBeenCalledWith(
+        'download.pictures.volume-completed',
+        expect.any(String),
+        expect.objectContaining({
+          bookId: '200',
+          volumeName: '第一卷',
+          total: 1,
+          skipped: 0,
+          outputPath: expect.any(String),
+        }),
+      )
+      expect(logMocks.info.mock.calls.filter(([event]) => event === 'download.image.completed'))
+        .toHaveLength(0)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -152,6 +176,13 @@ describe('Downloader.downloadPictures', () => {
       const warningText = warn.mock.calls.flat().join(' ')
       expect(warningText).not.toContain('password')
       expect(warningText).not.toContain('secret-token')
+      const logged = JSON.stringify([
+        ...logMocks.warn.mock.calls,
+        ...logMocks.error.mock.calls,
+        ...logMocks.info.mock.calls,
+      ])
+      expect(logged).not.toContain('password')
+      expect(logged).not.toContain('secret-token')
     } finally {
       await rm(root, { recursive: true, force: true })
     }

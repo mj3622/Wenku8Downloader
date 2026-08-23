@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => ({
   setCookie: vi.fn(async () => undefined),
   removeCookie: vi.fn(async () => undefined),
   sleep: vi.fn(async (): Promise<void> => undefined),
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }))
 
 vi.mock('electron', () => ({
@@ -22,6 +28,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('./utils', () => ({ sleep: mocks.sleep }))
+vi.mock('./logging/logger', () => ({ logger: mocks.logger }))
 
 import { WebCrawler, type CrawlerConfig } from './crawler'
 import {
@@ -78,6 +85,60 @@ afterEach(() => {
   mocks.setCookie.mockClear()
   mocks.removeCookie.mockClear()
   mocks.sleep.mockClear()
+  mocks.logger.debug.mockClear()
+  mocks.logger.info.mockClear()
+  mocks.logger.warn.mockClear()
+  mocks.logger.error.mockClear()
+})
+
+describe('WebCrawler.fetch logging', () => {
+  it('logs retry context without headers or URL credentials', async () => {
+    mocks.fetch
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/book/3057.htm?searchkey=败犬&token=secret',
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await crawler.fetch(
+      'https://reader:password@www.wenku8.net/book/3057.htm?searchkey=败犬&token=secret',
+    )
+
+    const context = mocks.logger.warn.mock.calls[0]?.[2]
+    const serialized = JSON.stringify(context)
+    expect(serialized).toContain('searchkey=败犬')
+    expect(serialized).not.toContain('password')
+    expect(serialized).not.toContain('secret')
+    expect(serialized).not.toContain('Cookie')
+  })
+
+  it('continues retrying when the network rejects with a non-Error value', async () => {
+    mocks.fetch
+      .mockRejectedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/book/3057.htm',
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.fetch('https://www.wenku8.net/book/3057.htm')).resolves.toBeDefined()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.sleep).toHaveBeenCalledWith(8000)
+  })
+
+  it('preserves the final request failure as the retry error cause', async () => {
+    const cause = new Error('socket closed')
+    mocks.fetch.mockRejectedValue(cause)
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.fetch('https://www.wenku8.net/book/3057.htm'))
+      .rejects.toMatchObject({ cause })
+  })
 })
 
 describe('WebCrawler.getImageContent response reporting', () => {
@@ -121,6 +182,30 @@ describe('WebCrawler.getImageContent response reporting', () => {
     ).rejects.toThrow('response stream failed')
     expect(statuses).toEqual([])
   })
+
+  it('continues image retries after a non-Error rejection', async () => {
+    mocks.fetch
+      .mockRejectedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        arrayBuffer: vi.fn(async () => Uint8Array.from([1, 2, 3]).buffer),
+      })
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.getImageContent('https://example.com/image.jpg', 2))
+      .resolves.toEqual(Buffer.from([1, 2, 3]))
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves the final image failure as the retry error cause', async () => {
+    const cause = new Error('image socket closed')
+    mocks.fetch.mockRejectedValue(cause)
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.getImageContent('https://example.com/image.jpg', 2))
+      .rejects.toMatchObject({ cause })
+  })
 })
 
 describe('WebCrawler.syncCookies', () => {
@@ -147,6 +232,26 @@ describe('WebCrawler.syncCookies', () => {
 })
 
 describe('WebCrawler.getCookie credential consistency', () => {
+  it('continues login retries after a non-Error rejection', async () => {
+    const fixture = createMutableLoginConfig()
+    mocks.fetch
+      .mockRejectedValueOnce(undefined)
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    const crawler = new WebCrawler(fixture.config, {})
+
+    await expect(crawler.getCookie()).resolves.toBeUndefined()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.sleep).toHaveBeenCalledWith(5000)
+  })
+
+  it('preserves the final login failure as the retry error cause', async () => {
+    const cause = new Error('login socket closed')
+    mocks.fetch.mockRejectedValue(cause)
+    const crawler = new WebCrawler(createMutableLoginConfig().config, {})
+
+    await expect(crawler.getCookie()).rejects.toMatchObject({ cause })
+  })
+
   it('rejects an old login result and restores the current Cookie snapshot', async () => {
     const fixture = createMutableLoginConfig()
     const currentCookies = {

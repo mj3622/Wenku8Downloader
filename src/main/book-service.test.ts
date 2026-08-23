@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Book } from './book'
+
+const logMocks = vi.hoisted(() => ({ info: vi.fn(), debug: vi.fn() }))
+
+vi.mock('./logging/logger', () => ({
+  logger: { debug: logMocks.debug, info: logMocks.info, warn: vi.fn(), error: vi.fn() },
+}))
+
 import { BookService } from './book-service'
 
 function fakeBook(bookId: string): Book {
@@ -20,6 +27,38 @@ describe('BookService', () => {
 
     await expect(first).resolves.toBe(await second)
     expect(loader).toHaveBeenCalledTimes(1)
+    expect(logMocks.debug).toHaveBeenCalledWith(
+      'book.cache.hit',
+      expect.any(String),
+      { bookId: '123' },
+    )
+  })
+
+  it('logs cache misses and loaded book summaries', async () => {
+    const book = {
+      bookId: '3057',
+      basicInfo: { '标题': '测试作品' },
+      volumes: { '第一卷': [] },
+    } as unknown as Book
+    const service = new BookService(async () => book)
+
+    await service.get('3057')
+
+    expect(logMocks.info).toHaveBeenCalledWith(
+      'book.cache.miss',
+      expect.any(String),
+      { bookId: '3057' },
+    )
+    expect(logMocks.info).toHaveBeenCalledWith(
+      'book.loaded',
+      expect.any(String),
+      expect.objectContaining({
+        bookId: '3057',
+        title: '测试作品',
+        volumeCount: 1,
+        durationMs: expect.any(Number),
+      }),
+    )
   })
 
   it('reloads books after the cache expires', async () => {

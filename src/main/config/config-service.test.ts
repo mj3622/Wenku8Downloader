@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import type { DownloadConfig } from '../../shared/config-types'
+import type { DownloadConfig, LogConfig } from '../../shared/config-types'
 import {
   ConfigService,
   type SecretStorePort,
@@ -16,6 +16,11 @@ import {
   type SecretPayloadV1,
 } from './secret-store'
 import { SettingsStore, type SettingsLoadResult } from './settings-store'
+import {
+  DEFAULT_LOG_CONFIG,
+  DEFAULT_SETTINGS_CONFIG,
+  type SettingsConfig,
+} from './config-schema'
 
 const initialDownload: DownloadConfig = {
   fullTitle: 'FULL',
@@ -54,15 +59,25 @@ function cloneSecrets(value: SecretPayloadV1): SecretPayloadV1 {
   return { login: { ...value.login }, cookies: { ...value.cookies } }
 }
 
+function cloneSettings(value: SettingsConfig): SettingsConfig {
+  return {
+    download: { ...value.download },
+    logging: { ...value.logging },
+  }
+}
+
 function createStores(secretValue: SecretPayloadV1 = emptySecretPayload()) {
-  let download = { ...initialDownload }
+  let settings: SettingsConfig = {
+    download: { ...initialDownload },
+    logging: { ...DEFAULT_LOG_CONFIG },
+  }
   let secrets = cloneSecrets(secretValue)
   const settingsStore: SettingsStorePort = {
-    load: vi.fn((): SettingsLoadResult => ({ state: 'ok', value: { ...download } })),
-    initializeDefaults: vi.fn(() => ({ ...initialDownload })),
+    load: vi.fn((): SettingsLoadResult => ({ state: 'ok', value: cloneSettings(settings) })),
+    initializeDefaults: vi.fn(() => cloneSettings(DEFAULT_SETTINGS_CONFIG)),
     save: vi.fn((next) => {
-      download = { ...next }
-      return { ...download }
+      settings = cloneSettings(next)
+      return cloneSettings(settings)
     }),
     backupCorrupt: vi.fn(() => null),
   }
@@ -99,7 +114,29 @@ describe('ConfigService', () => {
 
     expect(service.updateDownload(next).download).toEqual(next)
     expect(settingsStore.save).toHaveBeenCalledTimes(1)
-    expect(settingsStore.save).toHaveBeenCalledWith(next)
+    expect(settingsStore.save).toHaveBeenCalledWith({
+      download: next,
+      logging: DEFAULT_LOG_CONFIG,
+    })
+  })
+
+  it('updates logging settings without changing download settings', () => {
+    const { settingsStore, secretStore } = createStores()
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+    const beforeDownload = service.getDownloadSnapshot()
+
+    const snapshot = service.updateLogging({
+      retentionDays: 7,
+      maxFileSizeMb: 50,
+      maxTotalSizeMb: 100,
+    })
+
+    expect(snapshot.logging).toEqual({
+      retentionDays: 7,
+      maxFileSizeMb: 50,
+      maxTotalSizeMb: 100,
+    })
+    expect(snapshot.download).toEqual(beforeDownload)
   })
 
   it('preserves the old memory snapshot when secret persistence fails', () => {
@@ -263,12 +300,54 @@ describe('ConfigService', () => {
     const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
 
     const download = service.getDownloadSnapshot() as DownloadConfig
+    const logging = service.getLogSnapshot() as LogConfig
     const credentials = service.getCredentials() as SecretPayloadV1['login']
     download.downloadPath = 'mutated'
+    logging.retentionDays = 1
     credentials.username = 'mutated'
 
     expect(service.getDownloadSnapshot().downloadPath).toBe('')
+    expect(service.getLogSnapshot().retentionDays).toBe(30)
     expect(service.getCredentials().username).toBe('user')
+  })
+
+  it('reports a settings schema migration through internal load diagnostics', () => {
+    const { settingsStore, secretStore } = createStores()
+    vi.mocked(settingsStore.load).mockReturnValue({
+      state: 'ok',
+      value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
+      migrated: true,
+    })
+
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+
+    expect(service.getLoadDiagnostics()).toMatchObject({
+      settingsState: 'ok',
+      settingsMigrated: true,
+      secretState: 'ok',
+      legacyMigrationState: 'not-needed',
+    })
+  })
+
+  it('retains the raw settings load error without exposing it publicly', () => {
+    const { settingsStore, secretStore } = createStores()
+    const loadError = new Error('invalid TOML at line 2')
+    vi.mocked(settingsStore.load).mockReturnValue({
+      state: 'recovery-required',
+      value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
+      message: 'settings corrupt',
+      error: loadError,
+    })
+
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+
+    expect(service.getLoadDiagnostics()).toMatchObject({
+      settingsState: 'recovery-required',
+      settingsMigrated: false,
+      settingsMessage: 'settings corrupt',
+      settingsError: loadError,
+    })
+    expect(service.getPublicSnapshot()).not.toHaveProperty('settingsError')
   })
 
   it('restores valid legacy credentials after backing up a corrupt new secret store', async () => {
@@ -371,7 +450,7 @@ describe('ConfigService', () => {
     })
     vi.mocked(settingsStore.load).mockReturnValue({
       state: 'recovery-required',
-      value: { ...initialDownload },
+      value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
       message: 'settings corrupt',
     })
     const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
@@ -393,7 +472,13 @@ describe('ConfigService', () => {
       defaultCoverIndex: 4,
       downloadPath: 'D:\\Books',
     }
-    vi.mocked(settingsStore.load).mockReturnValue({ state: 'ok', value: customDownload })
+    vi.mocked(settingsStore.load).mockReturnValue({
+      state: 'ok',
+      value: {
+        download: customDownload,
+        logging: { ...DEFAULT_LOG_CONFIG },
+      },
+    })
     vi.mocked(secretStore.load).mockReturnValue({
       state: 'recovery-required',
       value: emptySecretPayload(),
@@ -417,7 +502,7 @@ describe('ConfigService', () => {
     const { settingsStore, secretStore } = createStores()
     vi.mocked(settingsStore.load).mockReturnValue({
       state: 'recovery-required',
-      value: { ...initialDownload },
+      value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
       message: 'settings corrupt',
     })
     vi.mocked(secretStore.load).mockReturnValue({

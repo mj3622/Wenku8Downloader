@@ -4,20 +4,34 @@ import type { IpcBook, IpcServices } from './ipc-handlers'
 
 const mocks = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const listeners = new Map<string, (...args: unknown[]) => unknown>()
   return {
     handlers,
+    listeners,
     downloadsPath: process.cwd(),
+    logsPath: `${process.cwd()}\\logs`,
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
     }),
+    on: vi.fn((channel: string, listener: (...args: unknown[]) => unknown) => {
+      listeners.set(channel, listener)
+    }),
     openExternal: vi.fn(async () => undefined),
     openPath: vi.fn(async () => ''),
+    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     mkdir: vi.fn(async () => undefined),
     setOnProgress: vi.fn(),
     downloadNovel: vi.fn(async () => undefined),
     downloadPictures: vi.fn(async () => undefined),
     downloaderConfigs: [] as unknown[],
     acquireCookie: vi.fn(async () => ({ loginCookies: {} })),
+    configureLogger: vi.fn(),
+    logger: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
   }
 })
 
@@ -26,9 +40,15 @@ vi.mock('electron', () => ({
     isPackaged: true,
     getPath: vi.fn((name: string) => name === 'downloads' ? mocks.downloadsPath : 'unused'),
   },
-  ipcMain: { handle: mocks.handle },
+  ipcMain: { handle: mocks.handle, on: mocks.on },
   shell: { openExternal: mocks.openExternal, openPath: mocks.openPath },
-  dialog: { showOpenDialog: vi.fn() },
+  dialog: { showOpenDialog: mocks.showOpenDialog },
+}))
+
+vi.mock('./logging/logger', () => ({
+  configureLogger: mocks.configureLogger,
+  getLogDirectory: () => mocks.logsPath,
+  logger: mocks.logger,
 }))
 
 vi.mock('fs/promises', () => ({
@@ -66,6 +86,11 @@ const publicSnapshot = {
     fullTitle: 'FULL' as const,
     defaultCoverIndex: 0,
     downloadPath: '',
+  },
+  logging: {
+    retentionDays: 30,
+    maxFileSizeMb: 100,
+    maxTotalSizeMb: 200,
   },
   account: {
     username: 'tester',
@@ -107,7 +132,9 @@ function createServices(
     config: {
       getPublicSnapshot: vi.fn(() => structuredClone(publicSnapshot)),
       getDownloadSnapshot: vi.fn(() => ({ ...publicSnapshot.download })),
+      getLogSnapshot: vi.fn(() => ({ ...publicSnapshot.logging })),
       updateDownload: vi.fn(() => structuredClone(publicSnapshot)),
+      updateLogging: vi.fn(() => structuredClone(publicSnapshot)),
       updateCredentials: vi.fn(() => structuredClone(publicSnapshot)),
       resetCorruptConfig: vi.fn(() => structuredClone(publicSnapshot)),
       getCredentials: vi.fn(() => ({ username: 'tester', password: 'hidden' })),
@@ -142,6 +169,7 @@ let services: IpcServices
 
 beforeEach(() => {
   mocks.handlers.clear()
+  mocks.listeners.clear()
   mocks.downloaderConfigs.length = 0
   vi.clearAllMocks()
   services = createServices()
@@ -170,6 +198,21 @@ describe('registerIpcHandlers configuration boundary', () => {
 
     expect(services.config.updateDownload).toHaveBeenCalledTimes(1)
     expect(services.config.updateDownload).toHaveBeenCalledWith(input)
+  })
+
+  it('persists logging settings before applying them to the active logger', async () => {
+    const input = { retentionDays: 14, maxFileSizeMb: 64, maxTotalSizeMb: 256 }
+    vi.mocked(services.config.updateLogging).mockReturnValue({
+      ...structuredClone(publicSnapshot),
+      logging: input,
+    })
+
+    await invoke('config:update-logging', {}, input)
+
+    expect(services.config.updateLogging).toHaveBeenCalledWith(input)
+    expect(mocks.configureLogger).toHaveBeenCalledWith(input)
+    expect(vi.mocked(services.config.updateLogging).mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.configureLogger.mock.invocationCallOrder[0])
   })
 
   it('rejects malformed configuration input before persistence', async () => {
@@ -290,6 +333,77 @@ describe('registerIpcHandlers configuration boundary', () => {
 })
 
 describe('registerIpcHandlers application operations', () => {
+  it('logs the selected folder path', async () => {
+    mocks.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['D:\\Books'],
+    })
+
+    await expect(invoke('dialog:selectFolder', {})).resolves.toBe('D:\\Books')
+    expect(mocks.logger.info).toHaveBeenCalledWith(
+      'dialog.select-folder.completed',
+      expect.any(String),
+      expect.objectContaining({
+        canceled: false,
+        folderPath: 'D:\\Books',
+      }),
+    )
+  })
+
+  it('logs when folder selection is canceled', async () => {
+    mocks.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+
+    await expect(invoke('dialog:selectFolder', {})).resolves.toBeNull()
+    expect(mocks.logger.info).toHaveBeenCalledWith(
+      'dialog.select-folder.completed',
+      expect.any(String),
+      expect.objectContaining({ canceled: true }),
+    )
+  })
+
+  it('opens only the main-process log directory', async () => {
+    await invoke('logs:open-directory', {}, 'D:\\attacker-controlled')
+
+    expect(mocks.mkdir).toHaveBeenCalledWith(mocks.logsPath, { recursive: true })
+    expect(mocks.openPath).toHaveBeenCalledWith(mocks.logsPath)
+    expect(mocks.openPath).not.toHaveBeenCalledWith('D:\\attacker-controlled')
+  })
+
+  it('logs failed operations with safe context and duration', async () => {
+    vi.mocked(services.crawler.search).mockRejectedValueOnce(new Error('HTTP 503'))
+
+    await expect(invoke('search:title', {}, { query: '败犬女主' })).rejects.toThrow('HTTP 503')
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      'search.title.failed',
+      expect.any(String),
+      expect.any(Error),
+      expect.objectContaining({
+        query: '败犬女主',
+        operationId: expect.any(String),
+        durationMs: expect.any(Number),
+      }),
+    )
+  })
+
+  it('accepts renderer error reports through a one-way channel', () => {
+    const listener = mocks.listeners.get('log:renderer-error')
+    expect(listener).toBeDefined()
+
+    listener?.(
+      { sender: { id: 7 } },
+      { kind: 'error', message: 'render failed', source: 'file:///app.js' },
+    )
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      'renderer.error',
+      expect.any(String),
+      expect.any(Error),
+      expect.objectContaining({ senderId: 7, source: 'file:///app.js' }),
+      'renderer',
+    )
+  })
+
   it('rejects invalid payloads before external side effects', async () => {
     await expect(invoke('search:title', {}, { query: '' })).rejects.toThrow('搜索内容长度')
     await expect(invoke('book:get', {}, { bookId: '../3057' })).rejects.toThrow('作品编号')
@@ -302,6 +416,29 @@ describe('registerIpcHandlers application operations', () => {
     expect(mocks.openExternal).not.toHaveBeenCalled()
     expect(mocks.openPath).not.toHaveBeenCalled()
     expect(mocks.downloadNovel).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['download:epub', null, 'download.novel.failed'],
+    ['download:images', { bookId: '3057', taskId: 'invalid-task' }, 'download.pictures.failed'],
+  ] as const)('logs malformed download payloads for %s without starting work', async (
+    channel,
+    payload,
+    failedEvent,
+  ) => {
+    await expect(invoke(channel, { sender: { send: vi.fn() } }, payload)).rejects.toThrow()
+
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      failedEvent,
+      expect.any(String),
+      expect.any(Error),
+      expect.objectContaining({
+        operationId: expect.any(String),
+        durationMs: expect.any(Number),
+      }),
+    )
+    expect(mocks.downloadNovel).not.toHaveBeenCalled()
+    expect(mocks.downloadPictures).not.toHaveBeenCalled()
   })
 
   it('passes a stable runtime snapshot and task progress into downloads', async () => {
@@ -331,6 +468,16 @@ describe('registerIpcHandlers application operations', () => {
       total: 2,
       phase: '正在下载',
     })
+    expect(mocks.logger.info).toHaveBeenCalledWith(
+      'download.novel.started',
+      expect.any(String),
+      expect.objectContaining({
+        taskId: 'dl-123-1',
+        operationId: 'dl-123-1',
+        bookId: '3057',
+        volumeName: '第一卷',
+      }),
+    )
   })
 
   it.each([
