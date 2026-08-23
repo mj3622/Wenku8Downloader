@@ -1,5 +1,5 @@
 import type { ConfigApi } from '../../../shared/config-types'
-import type { OpenFolderTarget } from '../../../shared/ipc-types'
+import type { OpenFolderTarget, RendererErrorReport } from '../../../shared/ipc-types'
 
 export interface ElectronAPI extends ConfigApi {
   platform: NodeJS.Platform
@@ -13,6 +13,8 @@ export interface ElectronAPI extends ConfigApi {
   onCookieProgress: (callback: (data: { step: string; message: string }) => void) => () => void
   onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => () => void
   openFolder: (target: OpenFolderTarget) => Promise<void>
+  openLogFolder: () => Promise<void>
+  reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
 }

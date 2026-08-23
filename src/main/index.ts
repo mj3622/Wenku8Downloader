@@ -3,6 +3,34 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { initializeAppServices } from './app-services'
 import { registerIpcHandlers } from './ipc-handlers'
+import { DEFAULT_LOG_CONFIG } from './config/config-schema'
+import { registerAppLogging, registerProcessLogging, registerWebContentsLogging } from './logging/electron-events'
+import { initializeLogger, logger } from './logging/logger'
+import { sanitizeLogLine } from './logging/redaction'
+
+try {
+  app.setAppLogsPath()
+  initializeLogger({
+    directory: app.getPath('logs'),
+    config: DEFAULT_LOG_CONFIG,
+    source: 'main',
+    development: process.env.NODE_ENV === 'development',
+  })
+} catch (error) {
+  try {
+    process.stderr.write(`日志系统初始化失败: ${sanitizeLogLine(error)}\n`)
+  } catch {
+    // Startup must continue even when both logging paths are unavailable.
+  }
+}
+
+logger.info('app.starting', '应用开始启动', {
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+  platform: process.platform,
+})
+registerProcessLogging(process)
+registerAppLogging(app)
 
 function getIconPath(): string {
   // 开发环境：相对于 out/main/ 目录的路径
@@ -32,6 +60,7 @@ function createWindow(): void {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
+  registerWebContentsLogging(mainWindow.webContents, mainWindow.id)
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL!)
@@ -47,7 +76,8 @@ app.whenReady().then(async () => {
   const services = await initializeAppServices()
   registerIpcHandlers(services)
   createWindow()
-}).catch(() => {
+}).catch((error) => {
+  logger.error('app.startup-failed', '应用启动失败', error)
   dialog.showErrorBox('启动失败', 'Cookie 会话同步失败，请重启应用')
   app.quit()
 })

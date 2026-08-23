@@ -4,24 +4,33 @@ import {
   rmSync,
 } from 'fs'
 import { parse, stringify } from 'smol-toml'
-import type { DownloadConfig } from '../../shared/config-types'
 import { atomicWriteFile, backupInvalidFile } from './atomic-file'
 import {
-  DEFAULT_DOWNLOAD_CONFIG,
+  DEFAULT_SETTINGS_CONFIG,
   parseSettingsDocument,
   toSettingsDocument,
   validateDownloadConfig,
+  validateLogConfig,
+  type SettingsConfig,
   type SettingsDocument,
 } from './config-schema'
 
 export type SettingsLoadResult =
-  | { state: 'ok'; value: DownloadConfig }
-  | { state: 'missing'; value: DownloadConfig }
-  | { state: 'recovery-required'; value: DownloadConfig; message: string }
-  | { state: 'read-only-newer-version'; value: DownloadConfig; message: string }
+  | { state: 'ok'; value: SettingsConfig; migrated?: boolean }
+  | { state: 'missing'; value: SettingsConfig }
+  | {
+      state: 'recovery-required'
+      value: SettingsConfig
+      message: string
+      error?: unknown
+    }
+  | { state: 'read-only-newer-version'; value: SettingsConfig; message: string }
 
-function cloneDownload(value: DownloadConfig): DownloadConfig {
-  return { ...value }
+function cloneSettings(value: SettingsConfig): SettingsConfig {
+  return {
+    download: { ...value.download },
+    logging: { ...value.logging },
+  }
 }
 
 function serialize(document: SettingsDocument): string {
@@ -38,7 +47,7 @@ export class SettingsStore {
     if (!existsSync(this.path)) {
       this.rawDocument = {}
       this.readOnly = false
-      return { state: 'missing', value: cloneDownload(DEFAULT_DOWNLOAD_CONFIG) }
+      return { state: 'missing', value: cloneSettings(DEFAULT_SETTINGS_CONFIG) }
     }
 
     try {
@@ -48,40 +57,44 @@ export class SettingsStore {
         this.readOnly = true
         return {
           state: 'read-only-newer-version',
-          value: cloneDownload(result.value),
+          value: cloneSettings(result.value),
           message: '设置文件由更新版本创建，当前版本不会覆盖该文件',
         }
       }
 
       this.readOnly = false
       if (result.state === 'migrated') {
-        return { state: 'ok', value: this.save(result.value) }
+        return { state: 'ok', value: this.save(result.value), migrated: true }
       }
-      return { state: 'ok', value: cloneDownload(result.value) }
-    } catch {
+      return { state: 'ok', value: cloneSettings(result.value) }
+    } catch (error) {
       return {
         state: 'recovery-required',
-        value: cloneDownload(DEFAULT_DOWNLOAD_CONFIG),
+        value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
         message: '下载设置无法读取，原文件已保留',
+        error,
       }
     }
   }
 
-  initializeDefaults(): DownloadConfig {
+  initializeDefaults(): SettingsConfig {
     this.rawDocument = {}
     this.readOnly = false
-    return this.save(DEFAULT_DOWNLOAD_CONFIG)
+    return this.save(DEFAULT_SETTINGS_CONFIG)
   }
 
   save(
-    next: DownloadConfig,
+    next: SettingsConfig,
     preservedDownload?: Readonly<Record<string, unknown>>,
-  ): DownloadConfig {
+  ): SettingsConfig {
     if (this.readOnly) {
       throw new Error('设置文件由更新版本创建，当前版本不能修改')
     }
 
-    const value = validateDownloadConfig(next)
+    const value: SettingsConfig = {
+      download: validateDownloadConfig(next.download),
+      logging: validateLogConfig(next.logging),
+    }
     const currentRaw = preservedDownload === undefined
       ? this.rawDocument
       : { download: structuredClone(preservedDownload) }
@@ -98,7 +111,7 @@ export class SettingsStore {
         throw new Error('设置写入验证失败')
       }
       this.rawDocument = structuredClone(verified.raw)
-      return cloneDownload(verified.value)
+      return cloneSettings(verified.value)
     } catch (error) {
       try {
         if (previous) atomicWriteFile(this.path, previous)

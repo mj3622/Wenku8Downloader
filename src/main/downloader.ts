@@ -9,9 +9,15 @@ import { imageExtensionFromUrl, resolveWithin, safePathSegment } from './path-sa
 import { DownloadRateLimiter, sharedDownloadRateLimiter } from './download-rate-limiter'
 import { migrateLegacyVolumeCache } from './legacy-cache-migration'
 import type { DownloadConfig } from '../shared/config-types'
+import { logger } from './logging/logger'
 
 export interface DownloadRuntimeConfig extends DownloadConfig {
   rootPath: string
+}
+
+export interface DownloaderLogContext {
+  operationId?: string
+  taskId?: string
 }
 
 export type DownloaderCrawler = Pick<WebCrawler, 'fetch' | 'getImageContent'>
@@ -210,15 +216,25 @@ export async function downloadImageBatch(
 export class Downloader {
   private crawler: DownloaderCrawler
   private readonly runtimeConfig: Readonly<DownloadRuntimeConfig>
+  private readonly rateLimiter: DownloadRateLimiter
+  private readonly logContext: DownloaderLogContext
   private onProgress: ((p: DownloadProgress) => void) | null = null
 
   constructor(
     crawler: DownloaderCrawler,
     runtimeConfig: DownloadRuntimeConfig,
-    private readonly rateLimiter: DownloadRateLimiter = sharedDownloadRateLimiter,
+    rateLimiterOrLogContext: DownloadRateLimiter | DownloaderLogContext = sharedDownloadRateLimiter,
+    logContext: DownloaderLogContext = {},
   ) {
     this.crawler = crawler
     this.runtimeConfig = Object.freeze({ ...runtimeConfig })
+    if (rateLimiterOrLogContext instanceof DownloadRateLimiter) {
+      this.rateLimiter = rateLimiterOrLogContext
+      this.logContext = { ...logContext }
+    } else {
+      this.rateLimiter = sharedDownloadRateLimiter
+      this.logContext = { ...rateLimiterOrLogContext }
+    }
   }
 
   setOnProgress(cb: (p: DownloadProgress) => void): void {
@@ -346,17 +362,31 @@ export class Downloader {
       }
     }
 
+    const skipped = urls.length - toFetch.length
+    const summaryContext = {
+      ...this.logContext,
+      bookId,
+      title: novelName,
+      volumeName,
+      total: urls.length,
+      skipped,
+      outputPath: volumePath,
+    }
+
     if (toFetch.length === 0) {
       this.emitProgress(urls.length, urls.length, `图片已全部下载，跳过 (${volumeName})`)
+      logger.info('download.pictures.volume-completed', '插图卷下载完成', summaryContext)
       return
     }
 
+    let writtenBytes = 0
     await this.downloadImagesWithConcurrency(
       toFetch.map(x => x.url),
       async (content, ext, batchIdx) => {
         const i = toFetch[batchIdx].idx
         const filePath = resolveWithin(volumePath, `${i + 1}.${ext}`)
         await writeFile(filePath, content)
+        writtenBytes += content.byteLength
       },
       (completed, _total) => {
         this.emitProgress(
@@ -366,6 +396,12 @@ export class Downloader {
         )
       },
     )
+    logger.info('download.output.written', '插图文件已写入', {
+      ...summaryContext,
+      itemCount: toFetch.length,
+      byteCount: writtenBytes,
+    })
+    logger.info('download.pictures.volume-completed', '插图卷下载完成', summaryContext)
   }
 
   async downloadNovel(book: DownloaderBook, volumeName?: string): Promise<void> {
@@ -407,6 +443,8 @@ export class Downloader {
     const chapterItems = volume.filter(item => item.name !== '插图')
     const totalChapters = chapterItems.length
     let completedChapters = 0
+    let imageCache = { hits: 0, total: 0 }
+    let chapterCache = { hits: 0, total: chapterItems.length }
 
     // 插图下载（带缓存）
     if (illustItem) {
@@ -416,6 +454,7 @@ export class Downloader {
         const imgResults = await this.downloadVolumeImagesCached(
           urls, volumeKey, 0, totalChapters, images, builder, bookId,
         )
+        imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
         chapters.push({
           title: '插图',
           content: imgResults.html,
@@ -430,8 +469,11 @@ export class Downloader {
         book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
       )
       completedChapters = chapterResults.completed
+      chapterCache = { hits: chapterResults.cacheHits, total: chapterResults.total }
       chapters.push(...chapterResults.chapters)
     }
+
+    this.logCacheSummary(bookId, volumeName, imageCache, chapterCache)
 
     for (const ch of chapters) builder.addChapter(ch)
     for (const img of images) builder.addImage(img)
@@ -441,7 +483,16 @@ export class Downloader {
     const saveDir = resolveWithin(savePath, 'novels', bookKey)
     const outputFileName = `${volumeKey}.epub`
     await mkdir(saveDir, { recursive: true })
-    await writeFile(resolveWithin(saveDir, outputFileName), epubBuffer)
+    const outputPath = resolveWithin(saveDir, outputFileName)
+    await writeFile(outputPath, epubBuffer)
+    logger.info('download.output.written', 'EPUB 文件已写入', {
+      ...this.logContext,
+      bookId,
+      title: bookTitle,
+      volumeName,
+      outputPath,
+      byteCount: epubBuffer.byteLength,
+    })
     await clearBookCache(this.runtimeConfig.rootPath, bookId)
   }
 
@@ -454,7 +505,7 @@ export class Downloader {
     builder: EpubBuilder,
     bookId: string,
     setCover = true,
-  ): Promise<{ html: string }> {
+  ): Promise<{ html: string; cacheHits: number; total: number }> {
     let htmlParts = ''
 
     // 加载已缓存的图片
@@ -507,7 +558,7 @@ export class Downloader {
       )
     }
 
-    return { html: htmlParts }
+    return { html: htmlParts, cacheHits: cachedImgs.length, total: urls.length }
   }
 
   /** 下载章节列表，优先使用缓存。startCompleted 为跨卷累计的已完成章节数 */
@@ -518,7 +569,7 @@ export class Downloader {
     volumeKey: string,
     totalChapters: number,
     startCompleted: number,
-  ): Promise<{ chapters: EpubChapter[]; completed: number }> {
+  ): Promise<{ chapters: EpubChapter[]; completed: number; cacheHits: number; total: number }> {
     const results: { title: string; content: string; idx: number }[] = []
     let completed = startCompleted
 
@@ -569,7 +620,26 @@ export class Downloader {
         fileName: `${ch.idx}.xhtml`,
       })),
       completed,
+      cacheHits: results.length - toFetch.length,
+      total: chapterItems.length,
     }
+  }
+
+  private logCacheSummary(
+    bookId: string,
+    volumeName: string,
+    images: { hits: number; total: number },
+    chapters: { hits: number; total: number },
+  ): void {
+    logger.info('download.cache.summary', '下载缓存统计', {
+      ...this.logContext,
+      bookId,
+      volumeName,
+      chapterTotal: chapters.total,
+      chapterCacheHits: chapters.hits,
+      imageTotal: images.total,
+      imageCacheHits: images.hits,
+    })
   }
 
   private async downloadFullBook(book: DownloaderBook): Promise<void> {
@@ -617,6 +687,8 @@ export class Downloader {
 
       const illustItem = volume.find(item => item.name === '插图')
       const chapterItems = volume.filter(item => item.name !== '插图')
+      let imageCache = { hits: 0, total: 0 }
+      let chapterCache = { hits: 0, total: chapterItems.length }
 
       // 插图下载（带缓存）
       if (illustItem) {
@@ -627,6 +699,7 @@ export class Downloader {
             urls, volumeKey, completedChapters, totalChapters, images, builder, bookId,
             false, // 整本下载不从卷插图设置封面（封面已在前面通过 book.getCoverContent() 设置）
           )
+          imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
           htmlParts += imgResults.html + '<br/>'
         }
       }
@@ -637,6 +710,7 @@ export class Downloader {
           book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
         )
         completedChapters = result.completed
+        chapterCache = { hits: result.cacheHits, total: result.total }
         for (const ch of result.chapters) {
           htmlParts += `<h2>${escapeXml(ch.title)}</h2><div>${ch.content}</div><br/>`
         }
@@ -647,6 +721,7 @@ export class Downloader {
         content: htmlParts,
         fileName: `${volumeKey}.xhtml`,
       })
+      this.logCacheSummary(bookId, volName, imageCache, chapterCache)
     }
 
     for (const ch of chapters) builder.addChapter(ch)
@@ -657,7 +732,15 @@ export class Downloader {
     const novelsDir = resolveWithin(savePath, 'novels')
     const outputFileName = `${bookKey}.epub`
     await mkdir(novelsDir, { recursive: true })
-    await writeFile(resolveWithin(novelsDir, outputFileName), epubBuffer)
+    const outputPath = resolveWithin(novelsDir, outputFileName)
+    await writeFile(outputPath, epubBuffer)
+    logger.info('download.output.written', 'EPUB 文件已写入', {
+      ...this.logContext,
+      bookId,
+      title: bookTitle,
+      outputPath,
+      byteCount: epubBuffer.byteLength,
+    })
 
     // 下载成功，清理缓存
     await clearBookCache(this.runtimeConfig.rootPath, bookId)

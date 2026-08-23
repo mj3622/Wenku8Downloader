@@ -1,5 +1,6 @@
 import type {
   DownloadConfig,
+  LogConfig,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
 import type { OpenFolderTarget } from '../../../shared/ipc-types'
@@ -21,6 +22,7 @@ export const api = {
   getConfig: () => window.electronAPI.getConfig(),
   updateDownloadConfig: (input: DownloadConfig) =>
     window.electronAPI.updateDownloadConfig(input),
+  updateLogConfig: (input: LogConfig) => window.electronAPI.updateLogConfig(input),
   updateCredentials: (input: UpdateCredentialsInput) =>
     window.electronAPI.updateCredentials(input),
   resetCorruptConfig: () => window.electronAPI.resetCorruptConfig(),
@@ -50,6 +52,7 @@ export const api = {
 
   // 文件
   openFolder: (target: OpenFolderTarget) => window.electronAPI.openFolder(target),
+  openLogFolder: () => window.electronAPI.openLogFolder(),
   selectFolder: () => window.electronAPI.selectFolder(),
 }
 

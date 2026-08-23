@@ -1,4 +1,5 @@
 import type { Book } from './book'
+import { logger } from './logging/logger'
 
 type BookLoader = (bookId: string) => Promise<Book>
 
@@ -27,8 +28,12 @@ export class BookService {
     this.removeExpired(now)
     const cached = this.cache.get(bookId)
     if (cached) {
+      logger.debug('book.cache.hit', '命中作品缓存', { bookId })
       return cached.promise
     }
+
+    logger.info('book.cache.miss', '未命中作品缓存，开始加载', { bookId })
+    const startedAt = this.now()
 
     const entry: CacheEntry = {
       promise: this.loader(bookId),
@@ -37,8 +42,14 @@ export class BookService {
     this.cache.set(bookId, entry)
 
     entry.promise.then(
-      () => {
+      (book) => {
         entry.expiresAt = this.now() + this.ttlMs
+        logger.info('book.loaded', '作品信息加载完成', {
+          bookId,
+          title: book.basicInfo?.['标题'],
+          volumeCount: Object.keys(book.volumes ?? {}).length,
+          durationMs: Math.max(0, this.now() - startedAt),
+        })
       },
       () => {
         if (this.cache.get(bookId) === entry) this.cache.delete(bookId)

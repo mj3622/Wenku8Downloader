@@ -2,6 +2,7 @@ import { rmSync } from 'fs'
 import type {
   ConfigHealth,
   DownloadConfig,
+  LogConfig,
   PublicConfigSnapshot,
   UpdateCredentialsInput,
 } from '../../shared/config-types'
@@ -23,9 +24,10 @@ import {
 } from './secret-types'
 import type { SettingsLoadResult } from './settings-store'
 import { backupInvalidFile } from './atomic-file'
+import type { SettingsConfig } from './config-schema'
 
 export interface SettingsStorePort extends LegacySettingsStorePort {
-  initializeDefaults(): DownloadConfig
+  initializeDefaults(): SettingsConfig
   backupCorrupt(): string | null
 }
 
@@ -33,8 +35,20 @@ export interface SecretStorePort extends LegacySecretStorePort {
   backupCorrupt(): string | null
 }
 
-function cloneDownload(value: DownloadConfig): DownloadConfig {
-  return { ...value }
+export interface ConfigLoadDiagnostics {
+  settingsState: SettingsLoadResult['state']
+  settingsMigrated: boolean
+  settingsMessage?: string
+  settingsError?: unknown
+  secretState: SecretLoadResult['state']
+  legacyMigrationState: LegacyMigrationResult['state']
+}
+
+function cloneSettings(value: SettingsConfig): SettingsConfig {
+  return {
+    download: { ...value.download },
+    logging: { ...value.logging },
+  }
 }
 
 function cloneSecrets(value: SecretPayloadV1): SecretPayloadV1 {
@@ -133,7 +147,7 @@ export class ConfigService {
     private readonly settingsStore: SettingsStorePort,
     private readonly secretStore: SecretStorePort,
     private readonly legacyPath: string,
-    private download: DownloadConfig,
+    private settings: SettingsConfig,
     private secrets: SecretPayloadV1,
     private settingsLoad: SettingsLoadResult,
     private secretLoad: SecretLoadResult,
@@ -146,7 +160,7 @@ export class ConfigService {
     migration: LegacyMigrationResult,
   ): void {
     const previousCredentials = this.secrets.login
-    this.download = cloneDownload(settingsLoad.value)
+    this.settings = cloneSettings(settingsLoad.value)
     this.secrets = cloneSecrets(secretLoad.value)
     this.settingsLoad = settingsLoad
     this.secretLoad = secretLoad
@@ -177,11 +191,12 @@ export class ConfigService {
       try {
         const value = input.settingsStore.initializeDefaults()
         settingsLoad = { state: 'ok', value }
-      } catch {
+      } catch (error) {
         settingsLoad = {
           state: 'recovery-required',
           value: settingsLoad.value,
           message: '默认设置无法写入',
+          error,
         }
       }
     }
@@ -206,7 +221,7 @@ export class ConfigService {
       input.settingsStore,
       input.secretStore,
       input.legacyPath,
-      cloneDownload(settingsLoad.value),
+      cloneSettings(settingsLoad.value),
       cloneSecrets(secretLoad.value),
       settingsLoad,
       secretLoad,
@@ -216,7 +231,8 @@ export class ConfigService {
 
   getPublicSnapshot(): PublicConfigSnapshot {
     return {
-      download: cloneDownload(this.download),
+      download: { ...this.settings.download },
+      logging: { ...this.settings.logging },
       account: {
         username: this.secrets.login.username,
         hasPassword: this.secrets.login.password.length > 0,
@@ -227,7 +243,29 @@ export class ConfigService {
   }
 
   getDownloadSnapshot(): Readonly<DownloadConfig> {
-    return cloneDownload(this.download)
+    return { ...this.settings.download }
+  }
+
+  getLogSnapshot(): Readonly<LogConfig> {
+    return { ...this.settings.logging }
+  }
+
+  getLoadDiagnostics(): ConfigLoadDiagnostics {
+    const settingsMessage = 'message' in this.settingsLoad
+      ? this.settingsLoad.message
+      : undefined
+    const settingsError = this.settingsLoad.state === 'recovery-required'
+      ? this.settingsLoad.error
+      : undefined
+    return {
+      settingsState: this.settingsLoad.state,
+      settingsMigrated: this.settingsLoad.state === 'ok'
+        && this.settingsLoad.migrated === true,
+      settingsMessage,
+      settingsError,
+      secretState: this.secretLoad.state,
+      legacyMigrationState: this.migration.state,
+    }
   }
 
   getCredentials(): Readonly<Credentials> {
@@ -249,14 +287,38 @@ export class ConfigService {
     ) {
       throw new Error('下载设置当前不可修改，请先恢复配置')
     }
-    let saved: DownloadConfig
+    let saved: SettingsConfig
     try {
-      saved = this.settingsStore.save(input)
+      saved = this.settingsStore.save({
+        download: { ...input },
+        logging: { ...this.settings.logging },
+      })
     } catch (error) {
       throw new Error('下载设置保存失败', { cause: error })
     }
-    this.download = cloneDownload(saved)
-    this.settingsLoad = { state: 'ok', value: cloneDownload(saved) }
+    this.settings = cloneSettings(saved)
+    this.settingsLoad = { state: 'ok', value: cloneSettings(saved) }
+    return this.getPublicSnapshot()
+  }
+
+  updateLogging(input: LogConfig): PublicConfigSnapshot {
+    if (
+      this.settingsLoad.state === 'recovery-required'
+      || this.settingsLoad.state === 'read-only-newer-version'
+    ) {
+      throw new Error('日志设置当前不可修改，请先恢复配置')
+    }
+    let saved: SettingsConfig
+    try {
+      saved = this.settingsStore.save({
+        download: { ...this.settings.download },
+        logging: { ...input },
+      })
+    } catch (error) {
+      throw new Error('日志设置保存失败', { cause: error })
+    }
+    this.settings = cloneSettings(saved)
+    this.settingsLoad = { state: 'ok', value: cloneSettings(saved) }
     return this.getPublicSnapshot()
   }
 
@@ -328,7 +390,7 @@ export class ConfigService {
       throw new Error('系统安全存储不可用，无法重置敏感配置')
     }
 
-    let download = cloneDownload(this.download)
+    let settings = cloneSettings(this.settings)
     let secrets = cloneSecrets(this.secrets)
     try {
       if (
@@ -376,14 +438,14 @@ export class ConfigService {
       if (this.migration.state === 'cleanup-required') {
         rmSync(this.legacyPath, { force: true })
       }
-      if (resetSettings) download = this.settingsStore.initializeDefaults()
+      if (resetSettings) settings = this.settingsStore.initializeDefaults()
       if (resetSecrets) secrets = this.secretStore.save(emptySecretPayload())
     } catch (error) {
       throw new Error('配置重置失败，恢复备份已保留', { cause: error })
     }
 
     const nextSettingsLoad: SettingsLoadResult = resetSettings
-      ? { state: 'ok', value: cloneDownload(download) }
+      ? { state: 'ok', value: cloneSettings(settings) }
       : this.settingsLoad
     const nextSecretLoad: SecretLoadResult = resetSecrets
       ? { state: 'ok', value: cloneSecrets(secrets) }

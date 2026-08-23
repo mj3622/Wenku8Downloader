@@ -6,6 +6,12 @@ export interface DownloadConfig {
   downloadPath: string
 }
 
+export interface LogConfig {
+  retentionDays: number
+  maxFileSizeMb: number
+  maxTotalSizeMb: number
+}
+
 export type ConfigHealth =
   | { state: 'ok' }
   | { state: 'recovery-required'; message: string }
@@ -14,6 +20,7 @@ export type ConfigHealth =
 
 export interface PublicConfigSnapshot {
   download: DownloadConfig
+  logging: LogConfig
   account: {
     username: string
     hasPassword: boolean
@@ -30,6 +37,7 @@ export interface UpdateCredentialsInput {
 export interface ConfigApi {
   getConfig: () => Promise<PublicConfigSnapshot>
   updateDownloadConfig: (input: DownloadConfig) => Promise<PublicConfigSnapshot>
+  updateLogConfig: (input: LogConfig) => Promise<PublicConfigSnapshot>
   updateCredentials: (input: UpdateCredentialsInput) => Promise<PublicConfigSnapshot>
   resetCorruptConfig: () => Promise<PublicConfigSnapshot>
 }
