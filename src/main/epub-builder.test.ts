@@ -107,6 +107,25 @@ describe('EpubBuilder', () => {
     expect(xhtml).not.toContain('&hellip;')
   })
 
+  it('converts HTML entity names containing digits', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('数字实体测试')
+    builder.setAuthor('作者')
+    builder.addChapter({
+      title: '第一章',
+      content: '<p>&sup2; &frac12; &frac34;</p>',
+      fileName: 'ch1.xhtml',
+    })
+
+    const result = await builder.build()
+    const xhtml = await readTextFromZip(result, 'OEBPS/ch1.xhtml')
+
+    expect(xhtml).toContain('&#178;')
+    expect(xhtml).toContain('&#189;')
+    expect(xhtml).toContain('&#190;')
+    expect(xhtml).not.toContain('&amp;frac12;')
+  })
+
   it('preserves XML predefined entities in content', async () => {
     const builder = new EpubBuilder()
     builder.setTitle('预定义实体')
@@ -125,6 +144,48 @@ describe('EpubBuilder', () => {
     expect(xhtml).toContain('&gt;')
     expect(xhtml).toContain('&quot;')
     expect(xhtml).toContain('&apos;')
+  })
+
+  it('escapes bare ampersands in chapter content', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('裸字符测试')
+    builder.setAuthor('作者')
+    builder.addChapter({
+      title: '第一章',
+      content: '<p>A & B &unknown;</p>',
+      fileName: 'ch1.xhtml',
+    })
+
+    const result = await builder.build()
+    const xhtml = await readTextFromZip(result, 'OEBPS/ch1.xhtml')
+
+    expect(xhtml).toContain('A &amp; B &amp;unknown;')
+  })
+
+  it('escapes resource paths in XML attributes', async () => {
+    const builder = new EpubBuilder()
+    builder.setTitle('路径测试')
+    builder.setAuthor('作者')
+    builder.addChapter({
+      title: '第一章',
+      content: '<p>内容</p>',
+      fileName: 'chapter&one.xhtml',
+    })
+    builder.addImage({
+      fileName: 'images/a&b.jpg',
+      data: Buffer.from('image'),
+      mediaType: 'image/jpeg',
+    })
+
+    const result = await builder.build()
+    const opf = await readTextFromZip(result, 'OEBPS/content.opf')
+    const nav = await readTextFromZip(result, 'OEBPS/nav.xhtml')
+    const ncx = await readTextFromZip(result, 'OEBPS/toc.ncx')
+
+    expect(opf).toContain('href="chapter&amp;one.xhtml"')
+    expect(opf).toContain('href="images/a&amp;b.jpg"')
+    expect(nav).toContain('href="chapter&amp;one.xhtml"')
+    expect(ncx).toContain('src="chapter&amp;one.xhtml"')
   })
 
   it('generates nav and ncx with correct chapter entries', async () => {
