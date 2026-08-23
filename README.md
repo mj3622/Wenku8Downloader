@@ -71,9 +71,35 @@
 
 登录状态过期时，回到配置页点击「刷新 Cookie」即可重新获取。
 
+## 🔐 配置与凭证存储
+
+- 打包应用把配置保存在 Electron 的 `userData/config` 目录；开发环境使用仓库下的 `.dev-user-data/config`，不会读写仓库根目录的 `config`。
+- `settings.toml` 只保存书名格式、封面索引和下载路径等非敏感偏好。
+- 账号、密码和 Cookie 保存在 `secrets.enc`，由 Electron `safeStorage` 绑定当前操作系统用户加密。该文件不是可跨设备复制的凭证备份。
+- 旧版明文 `secrets.toml` 只会在系统加密可用、且新文件写入后重新验证成功时自动迁移和删除；迁移失败会保留原文件。
+- 损坏配置或由更新版本创建的配置不会被自动覆盖。配置页确认重置后，损坏文件会保留为唯一的 `.invalid-*` 备份；该备份可能包含敏感信息，请勿上传或公开。
+- 如果新配置已经验证、但旧明文文件暂时无法删除，配置页只会重试清理旧文件，不会把已迁移的明文凭证另存为长期备份。
+
 ## 🧪 开发与构建
 
 ```bash
 git clone https://github.com/mj3622/Wenku8Downloader.git
 cd Wenku8Downloader
 npm install
+npm run dev
+```
+
+项目要求 Node.js 20.9 或更高版本。提交改动前可运行：
+
+```bash
+npm test
+npm run lint
+npm run typecheck
+npm run build
+```
+
+确定性 EPUB 与生产链路集成测试不访问外网，可单独执行：
+
+```bash
+npm run test:integration
+```
