@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+
+const logMocks = vi.hoisted(() => ({ warn: vi.fn(), info: vi.fn() }))
+
+vi.mock('./logging/logger', () => ({
+  logger: { debug: vi.fn(), info: logMocks.info, warn: logMocks.warn, error: vi.fn() },
+}))
+
 import { DownloadRateLimiter } from './download-rate-limiter'
 
 describe('DownloadRateLimiter', () => {
@@ -10,6 +17,11 @@ describe('DownloadRateLimiter', () => {
 
     expect(limiter.speed.level).toBe(2)
     expect(schedule).toHaveBeenCalledWith(expect.any(Function), 30000)
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      'download.rate-limit.changed',
+      expect.any(String),
+      expect.objectContaining({ status: 429, tier: '保守', cooldownMs: 30000 }),
+    )
   })
 
   it('keeps degraded state for later consumers', () => {
@@ -36,6 +48,11 @@ describe('DownloadRateLimiter', () => {
 
     expect(limiter.speed.level).toBe(1)
     expect(delays).toEqual([30000, 5000])
+    expect(logMocks.info).toHaveBeenCalledWith(
+      'download.rate-limit.recovered',
+      expect.any(String),
+      expect.objectContaining({ tier: '中等', cooldownMs: 5000 }),
+    )
   })
 
   it('uses a ten-second cooldown after HTTP 503', () => {

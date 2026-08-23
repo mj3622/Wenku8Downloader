@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, stat } from 'fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,14 @@ const mocks = vi.hoisted(() => ({
   getCookies: vi.fn(async (): Promise<Array<{ name: string; value: string }>> => []),
   setCookie: vi.fn(async (): Promise<void> => undefined),
   removeCookie: vi.fn(async (): Promise<void> => undefined),
+  configureLogger: vi.fn(),
+  logInfo: vi.fn(),
+  logError: vi.fn(),
+}))
+
+vi.mock('./logging/logger', () => ({
+  configureLogger: mocks.configureLogger,
+  logger: { info: mocks.logInfo, error: mocks.logError },
 }))
 
 vi.mock('electron', () => ({
@@ -41,6 +49,9 @@ afterEach(() => {
   mocks.setCookie.mockResolvedValue(undefined)
   mocks.removeCookie.mockReset()
   mocks.removeCookie.mockResolvedValue(undefined)
+  mocks.configureLogger.mockReset()
+  mocks.logInfo.mockReset()
+  mocks.logError.mockReset()
 })
 
 describe('createAppServices', () => {
@@ -85,7 +96,11 @@ describe('createAppServices', () => {
       expect(initialized).toBe(false)
 
       releaseFirstRemoval()
-      await initialization
+      const services = await initialization
+
+      expect(mocks.configureLogger).toHaveBeenCalledWith(services.config.getLogSnapshot())
+      expect(mocks.configureLogger.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.removeCookie.mock.invocationCallOrder[0])
 
       expect(mocks.removeCookie.mock.calls).toEqual([
         ['https://www.wenku8.net', 'PHPSESSID'],
@@ -94,6 +109,57 @@ describe('createAppServices', () => {
         ['https://www.wenku8.net', 'cf_clearance'],
       ])
       expect(mocks.setCookie).not.toHaveBeenCalled()
+    } finally {
+      process.chdir(originalCwd)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records settings schema migration after the configured logger is active', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-app-services-'))
+    process.chdir(root)
+    const configDir = join(root, '.dev-user-data', 'config')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(
+      join(configDir, 'settings.toml'),
+      '[download]\nfull_title = "OUT"\ndefault_cover_index = "3"\ndownload_path = ""\n',
+      'utf-8',
+    )
+
+    try {
+      const { initializeAppServices } = await import('./app-services')
+      await initializeAppServices()
+
+      expect(mocks.logInfo).toHaveBeenCalledWith(
+        'config.settings-migrated',
+        expect.any(String),
+        expect.objectContaining({ settingsState: 'ok' }),
+      )
+      expect(mocks.configureLogger.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.logInfo.mock.invocationCallOrder[0])
+    } finally {
+      process.chdir(originalCwd)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('records the original settings parse error without blocking startup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-app-services-'))
+    process.chdir(root)
+    const configDir = join(root, '.dev-user-data', 'config')
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, 'settings.toml'), '[download\ninvalid', 'utf-8')
+
+    try {
+      const { initializeAppServices } = await import('./app-services')
+
+      await expect(initializeAppServices()).resolves.toBeDefined()
+      expect(mocks.logError).toHaveBeenCalledWith(
+        'config.settings-load-failed',
+        expect.any(String),
+        expect.any(Error),
+        expect.objectContaining({ settingsState: 'recovery-required' }),
+      )
     } finally {
       process.chdir(originalCwd)
       await rm(root, { recursive: true, force: true })

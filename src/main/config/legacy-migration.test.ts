@@ -6,6 +6,7 @@ import type { SecretCodec } from './secret-codec'
 import { SecretStore } from './secret-store'
 import { SettingsStore } from './settings-store'
 import { migrateLegacyConfig } from './legacy-migration'
+import { DEFAULT_LOG_CONFIG } from './config-schema'
 
 const availableCodec: SecretCodec = {
   isAvailable: () => true,
@@ -77,7 +78,10 @@ describe('migrateLegacyConfig', () => {
     expect(settingsRaw).not.toContain('legacy-cookie-sentinel')
     expect(settingsStore.load()).toMatchObject({
       state: 'ok',
-      value: { fullTitle: 'OUT', defaultCoverIndex: 2, downloadPath: booksPath },
+      value: {
+        download: { fullTitle: 'OUT', defaultCoverIndex: 2, downloadPath: booksPath },
+        logging: DEFAULT_LOG_CONFIG,
+      },
     })
     expect(secretStore.load()).toMatchObject({
       state: 'ok',
@@ -91,13 +95,19 @@ describe('migrateLegacyConfig', () => {
   it('retries safely when settings exist but encrypted secrets are missing', async () => {
     await writeFile(legacyPath, legacyToml, 'utf-8')
     const settingsStore = new SettingsStore(settingsPath)
-    settingsStore.initializeDefaults()
-    settingsStore.save({ fullTitle: 'IN', defaultCoverIndex: 4, downloadPath: '' })
+    const initial = settingsStore.initializeDefaults()
+    settingsStore.save({
+      ...initial,
+      download: { fullTitle: 'IN', defaultCoverIndex: 4, downloadPath: '' },
+    })
     const secretStore = new SecretStore(secretsPath, availableCodec)
 
     expect(migrateLegacyConfig({ legacyPath, settingsStore, secretStore }).state).toBe('migrated')
     expect(settingsStore.load()).toMatchObject({
-      value: { fullTitle: 'IN', defaultCoverIndex: 4, downloadPath: '' },
+      value: {
+        download: { fullTitle: 'IN', defaultCoverIndex: 4, downloadPath: '' },
+        logging: DEFAULT_LOG_CONFIG,
+      },
     })
     expect(secretStore.load()).toMatchObject({
       value: { login: { username: 'legacy-user' } },
@@ -137,7 +147,10 @@ describe('migrateLegacyConfig', () => {
     await expect(readFile(legacyPath, 'utf-8')).resolves.toBe(legacyToml)
     expect(new SettingsStore(settingsPath).load()).toMatchObject({
       state: 'ok',
-      value: { fullTitle: 'OUT', defaultCoverIndex: 2, downloadPath: booksPath },
+      value: {
+        download: { fullTitle: 'OUT', defaultCoverIndex: 2, downloadPath: booksPath },
+        logging: DEFAULT_LOG_CONFIG,
+      },
     })
     await expect(stat(secretsPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
