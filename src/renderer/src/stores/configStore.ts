@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   DownloadConfig,
+  LogConfig,
   PublicConfigSnapshot,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
@@ -14,6 +15,7 @@ export interface ConfigState {
   error: string | null
   fetchConfig(): Promise<void>
   updateDownloadConfig(input: DownloadConfig): Promise<void>
+  updateLogConfig(input: LogConfig): Promise<void>
   updateCredentials(input: UpdateCredentialsInput): Promise<void>
   resetCorruptConfig(): Promise<void>
 }
@@ -58,6 +60,7 @@ export const useConfigStore = create<ConfigState>((set) => {
     },
 
     updateDownloadConfig: (input) => runMutation(() => api.updateDownloadConfig(input)),
+    updateLogConfig: (input) => runMutation(() => api.updateLogConfig(input)),
     updateCredentials: (input) => runMutation(() => api.updateCredentials(input)),
     resetCorruptConfig: () => runMutation(() => api.resetCorruptConfig()),
   }

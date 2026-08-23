@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
   DownloadConfig,
+  LogConfig,
   TitleFormat,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
@@ -18,6 +19,7 @@ const TITLE_FORMATS = [
 const CONFIG_TABS = [
   { key: 'login' as const, label: '登录' },
   { key: 'download' as const, label: '下载设置' },
+  { key: 'logging' as const, label: '日志' },
 ]
 
 const RECOVERY_CONFIRMATION =
@@ -29,6 +31,41 @@ function messageFrom(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function validateLogConfigFields(
+  retentionDays: string,
+  maxFileSizeMb: string,
+  maxTotalSizeMb: string,
+): { value?: LogConfig; error?: string } {
+  const fields = [
+    { value: retentionDays, minimum: 1, maximum: 365, label: '保留天数' },
+    { value: maxFileSizeMb, minimum: 1, maximum: 1024, label: '单文件上限（MB）' },
+    { value: maxTotalSizeMb, minimum: 2, maximum: 10240, label: '目录总上限（MB）' },
+  ] as const
+  const parsed: number[] = []
+  for (const field of fields) {
+    if (!/^\d+$/.test(field.value)) {
+      return { error: `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数` }
+    }
+    const value = Number(field.value)
+    if (value < field.minimum || value > field.maximum) {
+      return { error: `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数` }
+    }
+    parsed.push(value)
+  }
+
+  const [days, fileSize, totalSize] = parsed
+  if (totalSize < fileSize * 2) {
+    return { error: '目录总上限必须至少为单文件上限的两倍' }
+  }
+  return {
+    value: {
+      retentionDays: days,
+      maxFileSizeMb: fileSize,
+      maxTotalSizeMb: totalSize,
+    },
+  }
+}
+
 export default function ConfigPage() {
   const {
     snapshot,
@@ -37,7 +74,7 @@ export default function ConfigPage() {
     fetchConfig,
     resetCorruptConfig,
   } = useConfigStore()
-  const [tab, setTab] = useState<'login' | 'download'>('login')
+  const [tab, setTab] = useState<'login' | 'download' | 'logging'>('login')
   const [resetting, setResetting] = useState(false)
   const resetInFlight = useRef(false)
   const [resetStatus, setResetStatus] = useState<{
@@ -132,6 +169,7 @@ export default function ConfigPage() {
           </div>
           {tab === 'login' && <LoginTab />}
           {tab === 'download' && <DownloadTab />}
+          {tab === 'logging' && <LogTab />}
         </>
       )}
     </div>
@@ -557,6 +595,137 @@ function DownloadTab() {
       >
         {saving ? '保存中...' : '保存下载设置'}
       </button>
+      {status && (
+        <StatusAlert
+          type={status.type}
+          message={status.msg}
+          onDismiss={() => setStatus(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function LogTab() {
+  const { snapshot, updateLogConfig } = useConfigStore()
+  const [retentionDays, setRetentionDays] = useState('30')
+  const [maxFileSizeMb, setMaxFileSizeMb] = useState('100')
+  const [maxTotalSizeMb, setMaxTotalSizeMb] = useState('200')
+  const [edited, setEdited] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<{
+    type: 'success' | 'error'
+    msg: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!snapshot) return
+    setRetentionDays(String(snapshot.logging.retentionDays))
+    setMaxFileSizeMb(String(snapshot.logging.maxFileSizeMb))
+    setMaxTotalSizeMb(String(snapshot.logging.maxTotalSizeMb))
+    setEdited(false)
+  }, [snapshot])
+
+  const validation = validateLogConfigFields(
+    retentionDays,
+    maxFileSizeMb,
+    maxTotalSizeMb,
+  )
+
+  const handleSave = async () => {
+    setStatus(null)
+    if (!validation.value) return
+    setSaving(true)
+    try {
+      await updateLogConfig(validation.value)
+      setStatus({ type: 'success', msg: '日志设置已保存并立即生效' })
+    } catch (saveError) {
+      setStatus({ type: 'error', msg: messageFrom(saveError) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleOpenDirectory = async () => {
+    setStatus(null)
+    try {
+      await api.openLogFolder()
+    } catch (openError) {
+      setStatus({ type: 'error', msg: messageFrom(openError) })
+    }
+  }
+
+  const fields = [
+    {
+      label: '保留天数',
+      value: retentionDays,
+      setValue: setRetentionDays,
+      hint: '超过该天数的历史日志会自动删除，范围 1–365 天。',
+    },
+    {
+      label: '单文件上限（MB）',
+      value: maxFileSizeMb,
+      setValue: setMaxFileSizeMb,
+      hint: '单个日志文件达到上限后会在当天创建新的分段文件，范围 1–1024 MB。',
+    },
+    {
+      label: '目录总上限（MB）',
+      value: maxTotalSizeMb,
+      setValue: setMaxTotalSizeMb,
+      hint: '按最旧优先清理日志；必须至少为单文件上限的两倍，范围 2–10240 MB。',
+    },
+  ]
+
+  return (
+    <div className="space-y-4 max-w-lg">
+      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-4">
+        <h3 className="text-sm font-semibold text-apple-heading">本地日志</h3>
+        <p className="text-[12px] text-apple-tertiary mt-1">
+          日志按天保存，错误会额外写入独立文件。日志只保存在本机，不会自动上传。
+        </p>
+        <button
+          type="button"
+          className="mt-3 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light rounded-[20px] hover:bg-apple-accent/15 transition-colors"
+          onClick={() => void handleOpenDirectory()}
+        >
+          打开日志目录
+        </button>
+      </div>
+
+      {fields.map((field) => (
+        <label key={field.label} className="block">
+          <span className="block text-sm font-semibold text-apple-heading mb-2">
+            {field.label}
+          </span>
+          <input
+            aria-label={field.label}
+            inputMode="numeric"
+            className="w-40 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+            value={field.value}
+            onChange={(event) => {
+              field.setValue(event.target.value)
+              setEdited(true)
+              setStatus(null)
+            }}
+          />
+          <span className="block text-[12px] text-apple-tertiary mt-1.5">
+            {field.hint}
+          </span>
+        </label>
+      ))}
+
+      <button
+        disabled={saving || validation.value === undefined}
+        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40 rounded-[24px] text-[13px] font-medium text-white transition-opacity"
+        onClick={() => void handleSave()}
+      >
+        {saving ? '保存中...' : '保存日志设置'}
+      </button>
+      {edited && validation.error && (
+        <p role="alert" className="text-sm text-red-600">
+          {validation.error}
+        </p>
+      )}
       {status && (
         <StatusAlert
           type={status.type}

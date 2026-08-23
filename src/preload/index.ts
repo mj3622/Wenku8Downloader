@@ -2,14 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ConfigApi,
   DownloadConfig,
+  LogConfig,
   UpdateCredentialsInput,
 } from '../shared/config-types'
-import type { OpenFolderTarget } from '../shared/ipc-types'
+import type { OpenFolderTarget, RendererErrorReport } from '../shared/ipc-types'
 
 const configApi: ConfigApi = {
   getConfig: () => ipcRenderer.invoke('config:get'),
   updateDownloadConfig: (input: DownloadConfig) =>
     ipcRenderer.invoke('config:update-download', input),
+  updateLogConfig: (input: LogConfig) =>
+    ipcRenderer.invoke('config:update-logging', input),
   updateCredentials: (input: UpdateCredentialsInput) =>
     ipcRenderer.invoke('config:update-credentials', input),
   resetCorruptConfig: () => ipcRenderer.invoke('config:reset-corrupt'),
@@ -39,6 +42,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('download:progress', listener)
   },
   openFolder: (target: OpenFolderTarget) => ipcRenderer.invoke('shell:openFolder', target),
+  openLogFolder: () => ipcRenderer.invoke('logs:open-directory'),
+  reportRendererError: (report: RendererErrorReport) =>
+    ipcRenderer.send('log:renderer-error', report),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 })

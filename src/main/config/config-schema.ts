@@ -1,7 +1,11 @@
 import { isAbsolute } from 'path'
-import type { DownloadConfig, TitleFormat } from '../../shared/config-types'
+import type {
+  DownloadConfig,
+  LogConfig,
+  TitleFormat,
+} from '../../shared/config-types'
 
-export const CURRENT_CONFIG_VERSION = 1 as const
+export const CURRENT_CONFIG_VERSION = 2 as const
 
 export const DEFAULT_DOWNLOAD_CONFIG: DownloadConfig = Object.freeze({
   fullTitle: 'FULL',
@@ -9,20 +13,37 @@ export const DEFAULT_DOWNLOAD_CONFIG: DownloadConfig = Object.freeze({
   downloadPath: '',
 })
 
+export const DEFAULT_LOG_CONFIG: LogConfig = Object.freeze({
+  retentionDays: 30,
+  maxFileSizeMb: 100,
+  maxTotalSizeMb: 200,
+})
+
+export interface SettingsConfig {
+  download: DownloadConfig
+  logging: LogConfig
+}
+
+export const DEFAULT_SETTINGS_CONFIG: Readonly<SettingsConfig> = Object.freeze({
+  download: DEFAULT_DOWNLOAD_CONFIG,
+  logging: DEFAULT_LOG_CONFIG,
+})
+
 export type SettingsDocument = Record<string, unknown> & {
   config_version: number
   download: Record<string, unknown>
+  logging: Record<string, unknown>
 }
 
 export type SettingsParseResult =
   | {
       state: 'ok' | 'migrated'
-      value: DownloadConfig
+      value: SettingsConfig
       raw: SettingsDocument
     }
   | {
       state: 'read-only-newer-version'
-      value: DownloadConfig
+      value: SettingsConfig
       raw: Record<string, unknown>
     }
 
@@ -35,6 +56,17 @@ function requireRecord(value: unknown, message = '配置格式无效'): Record<s
 
 function cloneDownload(value: DownloadConfig): DownloadConfig {
   return { ...value }
+}
+
+function cloneLogging(value: LogConfig): LogConfig {
+  return { ...value }
+}
+
+function cloneSettings(value: SettingsConfig): SettingsConfig {
+  return {
+    download: cloneDownload(value.download),
+    logging: cloneLogging(value.logging),
+  }
 }
 
 function parseTitleFormat(value: unknown): TitleFormat {
@@ -86,6 +118,48 @@ export function validateDownloadConfig(value: unknown): DownloadConfig {
   }
 }
 
+function requireIntegerInRange(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new Error(`${label}必须为 ${minimum}–${maximum} 的整数`)
+  }
+  return value as number
+}
+
+export function validateLogConfig(value: unknown): LogConfig {
+  const record = requireRecord(value, '日志设置格式无效')
+  const allowedKeys = new Set(['retentionDays', 'maxFileSizeMb', 'maxTotalSizeMb'])
+  const unknownKey = Object.keys(record).find((key) => !allowedKeys.has(key))
+  if (unknownKey) throw new Error(`未知日志设置: ${unknownKey}`)
+
+  const retentionDays = requireIntegerInRange(
+    record.retentionDays,
+    1,
+    365,
+    '日志保留天数',
+  )
+  const maxFileSizeMb = requireIntegerInRange(
+    record.maxFileSizeMb,
+    1,
+    1024,
+    '日志单文件上限',
+  )
+  const maxTotalSizeMb = requireIntegerInRange(
+    record.maxTotalSizeMb,
+    2,
+    10240,
+    '日志目录总上限',
+  )
+  if (maxTotalSizeMb < maxFileSizeMb * 2) {
+    throw new Error('日志目录总上限必须至少为单文件上限的两倍')
+  }
+  return { retentionDays, maxFileSizeMb, maxTotalSizeMb }
+}
+
 function normalizeLegacyDownload(record: Record<string, unknown>): DownloadConfig {
   const fullTitle: TitleFormat = record.full_title === 'IN' || record.full_title === 'OUT'
     ? record.full_title
@@ -106,12 +180,15 @@ function normalizeLegacyDownload(record: Record<string, unknown>): DownloadConfi
 }
 
 export function toSettingsDocument(
-  value: DownloadConfig,
+  value: SettingsConfig,
   currentRaw: Record<string, unknown> = {},
 ): SettingsDocument {
   const root = structuredClone(currentRaw)
   const existingDownload = root.download && typeof root.download === 'object' && !Array.isArray(root.download)
     ? root.download as Record<string, unknown>
+    : {}
+  const existingLogging = root.logging && typeof root.logging === 'object' && !Array.isArray(root.logging)
+    ? root.logging as Record<string, unknown>
     : {}
 
   return {
@@ -119,9 +196,15 @@ export function toSettingsDocument(
     config_version: CURRENT_CONFIG_VERSION,
     download: {
       ...existingDownload,
-      full_title: value.fullTitle,
-      default_cover_index: value.defaultCoverIndex,
-      download_path: value.downloadPath,
+      full_title: value.download.fullTitle,
+      default_cover_index: value.download.defaultCoverIndex,
+      download_path: value.download.downloadPath,
+    },
+    logging: {
+      ...existingLogging,
+      retention_days: value.logging.retentionDays,
+      max_file_size_mb: value.logging.maxFileSizeMb,
+      max_total_size_mb: value.logging.maxTotalSizeMb,
     },
   }
 }
@@ -133,7 +216,7 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
   if (typeof version === 'number' && version > CURRENT_CONFIG_VERSION) {
     return {
       state: 'read-only-newer-version',
-      value: cloneDownload(DEFAULT_DOWNLOAD_CONFIG),
+      value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
       raw: structuredClone(root),
     }
   }
@@ -143,7 +226,26 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
     : requireRecord(root.download, '下载设置格式无效')
 
   if (version === undefined || version === 0) {
-    const normalized = normalizeLegacyDownload(download)
+    const normalized: SettingsConfig = {
+      download: normalizeLegacyDownload(download),
+      logging: cloneLogging(DEFAULT_LOG_CONFIG),
+    }
+    return {
+      state: 'migrated',
+      value: normalized,
+      raw: toSettingsDocument(normalized, root),
+    }
+  }
+
+  if (version === 1) {
+    const normalized: SettingsConfig = {
+      download: validateDownloadConfig({
+        fullTitle: download.full_title,
+        defaultCoverIndex: download.default_cover_index,
+        downloadPath: download.download_path,
+      }),
+      logging: cloneLogging(DEFAULT_LOG_CONFIG),
+    }
     return {
       state: 'migrated',
       value: normalized,
@@ -155,11 +257,19 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
     throw new Error('配置版本格式无效')
   }
 
-  const normalized = validateDownloadConfig({
-    fullTitle: download.full_title,
-    defaultCoverIndex: download.default_cover_index,
-    downloadPath: download.download_path,
-  })
+  const logging = requireRecord(root.logging, '日志设置格式无效')
+  const normalized: SettingsConfig = {
+    download: validateDownloadConfig({
+      fullTitle: download.full_title,
+      defaultCoverIndex: download.default_cover_index,
+      downloadPath: download.download_path,
+    }),
+    logging: validateLogConfig({
+      retentionDays: logging.retention_days,
+      maxFileSizeMb: logging.max_file_size_mb,
+      maxTotalSizeMb: logging.max_total_size_mb,
+    }),
+  }
   return {
     state: 'ok',
     value: normalized,

@@ -8,6 +8,8 @@ import {
 } from './config/secret-types'
 import type { SearchResult } from './types'
 import { sleep } from './utils'
+import { logger } from './logging/logger'
+import { sanitizeLogText } from './logging/redaction'
 
 type CheerioDocument = ReturnType<typeof cheerio.load>
 
@@ -38,6 +40,19 @@ function formatHttpError(status: number): string {
   if (status === 429) return '访问过于频繁（HTTP 429），服务器限制了请求频率，请稍后重试'
   if (status === 403) return '访问被拒绝（HTTP 403），Cookie 可能已过期，请尝试刷新 Cookie'
   return `HTTP ${status}`
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  try {
+    return String(error)
+  } catch {
+    return 'Unknown error'
+  }
+}
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(errorMessage(error))
 }
 
 function encodeKey(key: string): string {
@@ -109,6 +124,15 @@ export class WebCrawler {
     }
     const maxRetries = 3
     let lastError: Error | null = null
+    let lastStatus: number | undefined
+    const startedAt = performance.now()
+    if (parse) {
+      logger.debug('network.request.started', '开始网页请求', {
+        method: 'GET',
+        url: sanitizeLogText(url),
+        maxAttempts: maxRetries,
+      })
+    }
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -123,6 +147,7 @@ export class WebCrawler {
           redirect: 'follow',
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
+        lastStatus = resp.status
 
         if (!resp.ok) {
           throw new Error(formatHttpError(resp.status))
@@ -135,13 +160,29 @@ export class WebCrawler {
           const $ = cheerio.load(html)
           // Attach final URL for redirect detection (like Python's soup.my_url)
           ;($ as unknown as Record<string, unknown>).myUrl = resp.url
+          logger.debug('network.request.completed', '网页请求完成', {
+            method: 'GET',
+            url: sanitizeLogText(resp.url || url),
+            status: resp.status,
+            attempt: attempt + 1,
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          })
           return $
         } else {
           return Buffer.from(await resp.arrayBuffer())
         }
       } catch (err) {
-        lastError = err as Error
+        lastError = normalizeError(err)
         if (attempt < maxRetries - 1) {
+          logger.warn('network.request.retry', '网页请求失败，准备重试', {
+            method: 'GET',
+            url: sanitizeLogText(url),
+            status: lastStatus,
+            attempt: attempt + 1,
+            maxAttempts: maxRetries,
+            backoffMs: 8000,
+            error: sanitizeLogText(lastError.message),
+          })
           await sleep(8000)
           // Re-inject cookies on retry
           await this.injectCookies()
@@ -149,19 +190,37 @@ export class WebCrawler {
       }
     }
 
-    throw new Error(`请求失败（已重试 ${maxRetries} 次）: ${lastError?.message}`)
+    const finalError = new Error(
+      `请求失败（已重试 ${maxRetries} 次）: ${lastError?.message}`,
+      { cause: lastError ?? undefined },
+    )
+    logger.error('network.request.failed', '网页请求在重试后仍然失败', finalError, {
+      method: 'GET',
+      url: sanitizeLogText(url),
+      status: lastStatus,
+      maxAttempts: maxRetries,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    })
+    throw finalError
   }
 
   async getCookie(): Promise<void> {
     const credentialRevision = this.config.getCredentialRevision()
     const { username, password } = this.config.getCredentials()
+    const startedAt = performance.now()
+    const maxRetries = 3
+    logger.info('login.started', '开始刷新登录 Cookie', { maxAttempts: maxRetries })
 
     if (!username || !password) {
-      throw new Error('请先配置登录账号和密码')
+      const error = new Error('请先配置登录账号和密码')
+      logger.error('login.failed', '登录 Cookie 刷新失败', error, {
+        maxAttempts: maxRetries,
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      })
+      throw error
     }
 
     const loginUrl = `${BASE_URL}/login.php?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php`
-    const maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (this.config.getCredentialRevision() !== credentialRevision) {
@@ -212,13 +271,37 @@ export class WebCrawler {
         })
         await this.syncCookies()
         await this.rejectIfCredentialsChanged(credentialRevision)
+        logger.info('login.completed', '登录 Cookie 刷新完成', {
+          attempt: attempt + 1,
+          durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        })
         return
       } catch (err) {
-        if (err instanceof CredentialsChangedDuringLoginError) throw err
-        await this.rejectIfCredentialsChanged(credentialRevision)
-        if (attempt >= maxRetries - 1) {
-          throw new Error(`登录失败: ${(err as Error).message}`)
+        if (err instanceof CredentialsChangedDuringLoginError) {
+          logger.error('login.failed', '登录期间账号配置发生变化', err, {
+            attempt: attempt + 1,
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          })
+          throw err
         }
+        await this.rejectIfCredentialsChanged(credentialRevision)
+        const cause = normalizeError(err)
+        const message = cause.message
+        if (attempt >= maxRetries - 1) {
+          const finalError = new Error(`登录失败: ${message}`, { cause })
+          logger.error('login.failed', '登录 Cookie 刷新失败', finalError, {
+            attempt: attempt + 1,
+            maxAttempts: maxRetries,
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          })
+          throw finalError
+        }
+        logger.warn('login.retry', '登录请求失败，准备重试', {
+          attempt: attempt + 1,
+          maxAttempts: maxRetries,
+          backoffMs: 5000,
+          error: sanitizeLogText(message),
+        })
         await sleep(5000)
       }
     }
@@ -231,6 +314,7 @@ export class WebCrawler {
   ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
     let lastError: string | null = null
+    let lastCause: Error | null = null
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -249,23 +333,47 @@ export class WebCrawler {
         }
 
         onResponseStatus?.(resp.status)
-        lastError = formatHttpError(resp.status)
+        lastCause = new Error(formatHttpError(resp.status))
+        lastError = lastCause.message
         const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
+          logger.warn('network.image.retry', '图片请求失败，准备重试', {
+            method: 'GET',
+            url: sanitizeLogText(url),
+            status: resp.status,
+            attempt: attempt + 1,
+            maxAttempts: maxRetries,
+            backoffMs,
+          })
           await sleep(backoffMs)
         }
       } catch (err) {
-        lastError = (err as Error).message
+        lastCause = normalizeError(err)
+        lastError = lastCause.message
         const is429 = lastError.includes('429')
         const backoffMs = is429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
+          logger.warn('network.image.retry', '图片请求异常，准备重试', {
+            method: 'GET',
+            url: sanitizeLogText(url),
+            attempt: attempt + 1,
+            maxAttempts: maxRetries,
+            backoffMs,
+            error: sanitizeLogText(lastError),
+          })
           await sleep(backoffMs)
         }
       }
     }
 
     if (lastError) {
-      throw new Error(lastError)
+      const error = new Error(lastError, { cause: lastCause ?? undefined })
+      logger.error('network.image.failed', '图片请求在重试后仍然失败', error, {
+        method: 'GET',
+        url: sanitizeLogText(url),
+        maxAttempts: maxRetries,
+      })
+      throw error
     }
     return null
   }
