@@ -1,9 +1,15 @@
 import { net, session } from 'electron'
 import * as cheerio from 'cheerio'
 import iconv from 'iconv-lite'
-import { config } from './config-manager'
+import {
+  COOKIE_NAMES,
+  type CookieSnapshot,
+  type Credentials,
+} from './config/secret-types'
 import type { SearchResult } from './types'
 import { sleep } from './utils'
+
+type CheerioDocument = ReturnType<typeof cheerio.load>
 
 const COMMON_HEADERS: Record<string, string> = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -13,6 +19,20 @@ const COMMON_HEADERS: Record<string, string> = {
 }
 
 const BASE_URL = 'https://www.wenku8.net'
+const REQUEST_TIMEOUT_MS = 30_000
+export interface CrawlerConfig {
+  getCredentialRevision(): number
+  getCredentials(): Readonly<Credentials>
+  getCookies(): Readonly<CookieSnapshot>
+  replaceCookies(input: CookieSnapshot): void
+}
+
+class CredentialsChangedDuringLoginError extends Error {
+  constructor() {
+    super('登录期间账号已变更，请重新刷新 Cookie')
+    this.name = 'CredentialsChangedDuringLoginError'
+  }
+}
 
 function formatHttpError(status: number): string {
   if (status === 429) return '访问过于频繁（HTTP 429），服务器限制了请求频率，请稍后重试'
@@ -32,29 +52,41 @@ function encodeKey(key: string): string {
 
 export class WebCrawler {
   private cookies: Record<string, string>
-  constructor(cookie?: Record<string, string>) {
+  constructor(
+    private readonly config: CrawlerConfig,
+    cookie?: Record<string, string>,
+  ) {
     this.cookies = cookie ?? this.getCookieDefaults()
-
-    void this.injectCookies()
   }
 
-  syncCookies(): void {
+  async syncCookies(): Promise<void> {
     this.cookies = this.getCookieDefaults()
-    this.injectCookies()
+    await this.injectCookies(true)
   }
 
   private getCookieDefaults(): Record<string, string> {
-    const cfg = config.getAll()
+    const cookies = this.config.getCookies()
     return {
-      PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
-      jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
-      jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
-      cf_clearance: cfg.cookie?.cf_clearance ?? '',
+      PHPSESSID: cookies.PHPSESSID,
+      jieqiUserInfo: cookies.jieqiUserInfo,
+      jieqiVisitInfo: cookies.jieqiVisitInfo,
+      cf_clearance: cookies.cf_clearance,
     }
   }
 
-  private async injectCookies(): Promise<void> {
+  private async rejectIfCredentialsChanged(expectedRevision: number): Promise<void> {
+    if (this.config.getCredentialRevision() === expectedRevision) return
+    await this.syncCookies()
+    throw new CredentialsChangedDuringLoginError()
+  }
+
+  private async injectCookies(clearExisting = false): Promise<void> {
     const ses = session.defaultSession
+    if (clearExisting) {
+      for (const name of COOKIE_NAMES) {
+        await ses.cookies.remove(BASE_URL, name)
+      }
+    }
     for (const [name, value] of Object.entries(this.cookies)) {
       if (value) {
         await ses.cookies.set({
@@ -68,9 +100,9 @@ export class WebCrawler {
     }
   }
 
-  async fetch(url: string): Promise<cheerio.CheerioAPI>
+  async fetch(url: string): Promise<CheerioDocument>
   async fetch(url: string, parse: false): Promise<Buffer>
-  async fetch(url: string, parse: boolean = true): Promise<cheerio.CheerioAPI | Buffer> {
+  async fetch(url: string, parse: boolean = true): Promise<CheerioDocument | Buffer> {
     // Resolve relative URLs against base
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
@@ -89,6 +121,7 @@ export class WebCrawler {
           method: 'GET',
           headers,
           redirect: 'follow',
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
 
         if (!resp.ok) {
@@ -116,13 +149,12 @@ export class WebCrawler {
       }
     }
 
-    throw new Error(`请求失败（已重试 3 次）: ${lastError?.message}`)
+    throw new Error(`请求失败（已重试 ${maxRetries} 次）: ${lastError?.message}`)
   }
 
   async getCookie(): Promise<void> {
-    const loginCfg = config.getAll().login
-    const username = loginCfg?.username
-    const password = loginCfg?.password
+    const credentialRevision = this.config.getCredentialRevision()
+    const { username, password } = this.config.getCredentials()
 
     if (!username || !password) {
       throw new Error('请先配置登录账号和密码')
@@ -132,6 +164,9 @@ export class WebCrawler {
     const maxRetries = 3
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (this.config.getCredentialRevision() !== credentialRevision) {
+        await this.rejectIfCredentialsChanged(credentialRevision)
+      }
       try {
         const body = new URLSearchParams({
           username,
@@ -150,7 +185,10 @@ export class WebCrawler {
           },
           body: body.toString(),
           redirect: 'follow',
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
+
+        await this.rejectIfCredentialsChanged(credentialRevision)
 
         if (!resp.ok) {
           throw new Error(formatHttpError(resp.status))
@@ -159,19 +197,25 @@ export class WebCrawler {
         // Extract cookies from response
         const ses = session.defaultSession
         const cookies = await ses.cookies.get({ url: BASE_URL })
+        await this.rejectIfCredentialsChanged(credentialRevision)
         const cookieMap: Record<string, string> = {}
         for (const c of cookies) {
           cookieMap[c.name] = c.value
         }
 
-        const cfg = config.getAll()
-        config.set('cookie', 'PHPSESSID', cookieMap['PHPSESSID'] ?? cfg.cookie?.PHPSESSID ?? '')
-        config.set('cookie', 'jieqiUserInfo', cookieMap['jieqiUserInfo'] ?? cfg.cookie?.jieqiUserInfo ?? '')
-        config.set('cookie', 'jieqiVisitInfo', cookieMap['jieqiVisitInfo'] ?? cfg.cookie?.jieqiVisitInfo ?? '')
-        config.set('cookie', 'cf_clearance', cookieMap['cf_clearance'] ?? cfg.cookie?.cf_clearance ?? '')
-        this.syncCookies()
+        const current = this.config.getCookies()
+        this.config.replaceCookies({
+          PHPSESSID: cookieMap.PHPSESSID ?? current.PHPSESSID,
+          jieqiUserInfo: cookieMap.jieqiUserInfo ?? current.jieqiUserInfo,
+          jieqiVisitInfo: cookieMap.jieqiVisitInfo ?? current.jieqiVisitInfo,
+          cf_clearance: cookieMap.cf_clearance ?? current.cf_clearance,
+        })
+        await this.syncCookies()
+        await this.rejectIfCredentialsChanged(credentialRevision)
         return
       } catch (err) {
+        if (err instanceof CredentialsChangedDuringLoginError) throw err
+        await this.rejectIfCredentialsChanged(credentialRevision)
         if (attempt >= maxRetries - 1) {
           throw new Error(`登录失败: ${(err as Error).message}`)
         }
@@ -180,9 +224,12 @@ export class WebCrawler {
     }
   }
 
-  async getImageContent(url: string): Promise<Buffer | null> {
+  async getImageContent(
+    url: string,
+    maxRetries = 3,
+    onResponseStatus?: (status: number) => void,
+  ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
-    const maxRetries = 3
     let lastError: string | null = null
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -193,12 +240,15 @@ export class WebCrawler {
             ...COMMON_HEADERS,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
-
         if (resp.ok) {
-          return Buffer.from(await resp.arrayBuffer())
+          const content = Buffer.from(await resp.arrayBuffer())
+          onResponseStatus?.(resp.status)
+          return content
         }
 
+        onResponseStatus?.(resp.status)
         lastError = formatHttpError(resp.status)
         const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
@@ -238,12 +288,12 @@ export class WebCrawler {
     }
 
     if ($('#content table.grid').length > 0) {
-      return this.searchMultiResult($, keyword)
+      return this.searchMultiResult($)
     }
-    return this.searchSingleResult($, keyword)
+    return this.searchSingleResult($)
   }
 
-  private searchMultiResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+  private searchMultiResult($: CheerioDocument): SearchResult[] {
     const results: SearchResult[] = []
     const td = $('#content table tr td')
     td.children('div').each((_i, div) => {
@@ -279,7 +329,7 @@ export class WebCrawler {
     return results
   }
 
-  private searchSingleResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+  private searchSingleResult($: CheerioDocument): SearchResult[] {
     const results: SearchResult[] = []
     const title = $('title').text()
     const pageTitle = title.split('-')[0]?.trim() || ''
@@ -312,6 +362,7 @@ export class WebCrawler {
         id: bookId,
         author,
         status,
+        updateTime: '',
         tags: '',
         desc,
       })
