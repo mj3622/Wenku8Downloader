@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it, vi } from 'vitest'
-import type { DownloadFolder } from '../../../shared/ipc-types'
+import type { OpenFolderTarget } from '../../../shared/ipc-types'
 import { api } from '../api/client'
 
 const mocks = vi.hoisted(() => ({
@@ -44,9 +44,9 @@ afterEach(async () => {
 })
 
 describe('DownloadHistoryPage', () => {
-  it('keeps the renderer API folder parameter aligned with the IPC whitelist', () => {
+  it('keeps the renderer API folder target aligned with the IPC whitelist', () => {
     expectTypeOf(api.openFolder).toEqualTypeOf<
-      (subdir: DownloadFolder) => Promise<void>
+      (target: OpenFolderTarget) => Promise<void>
     >()
   })
 

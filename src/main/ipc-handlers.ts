@@ -1,4 +1,5 @@
 import { app, dialog, ipcMain, shell } from 'electron'
+import { mkdir } from 'fs/promises'
 import type { Book } from './book'
 import { CookieService } from './cookie-service'
 import {
@@ -200,11 +201,22 @@ export function registerIpcHandlers(services: IpcServices): void {
     await shell.openExternal(validateExternalUrl(url))
   })
 
-  ipcMain.handle('shell:openFolder', async (_event, rawSubdir: unknown) => {
-    const subdir = validateOpenFolder(rawSubdir)
-    const error = await shell.openPath(
-      resolveWithin(getDownloadRuntimeConfig(services).rootPath, subdir),
-    )
+  ipcMain.handle('shell:openFolder', async (_event, rawTarget: unknown) => {
+    const target = validateOpenFolder(rawTarget)
+    const rootPath = getDownloadRuntimeConfig(services).rootPath
+    const folderPath = target === 'root'
+      ? rootPath
+      : resolveWithin(rootPath, target)
+
+    if (target === 'root') {
+      try {
+        await mkdir(folderPath, { recursive: true })
+      } catch {
+        throw new Error('创建下载文件夹失败')
+      }
+    }
+
+    const error = await shell.openPath(folderPath)
     if (error) throw new Error(`打开下载文件夹失败: ${error}`)
   })
 

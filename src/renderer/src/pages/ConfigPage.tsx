@@ -448,6 +448,17 @@ function DownloadTab() {
     }
   }
 
+  const handleOpenDownloadFolder = async () => {
+    setStatus(null)
+    try {
+      await api.openFolder('root')
+    } catch (openError) {
+      setStatus({ type: 'error', msg: messageFrom(openError) })
+    }
+  }
+
+  const hasUnsavedDownloadPath = downloadPath !== snapshot?.download.downloadPath
+
   return (
     <div className="space-y-4 max-w-lg">
       <h3 className="text-lg font-semibold text-apple-heading">书名格式</h3>
@@ -499,15 +510,10 @@ function DownloadTab() {
         <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
         <div className="flex items-center gap-2">
           <div className="flex-1 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading truncate">
-            {downloadPath || (
-              <span className="text-apple-tertiary">
-                {window.electronAPI.platform === 'win32'
-                  ? '%USERPROFILE%\\Downloads\\Wenku8Downloader\\'
-                  : '~/Downloads/Wenku8Downloader/'}
-              </span>
-            )}
+            {downloadPath || <span className="text-apple-tertiary">默认下载目录</span>}
           </div>
           <button
+            type="button"
             className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light rounded-[20px] hover:bg-apple-accent/15 transition-colors"
             onClick={async () => {
               try {
@@ -520,8 +526,18 @@ function DownloadTab() {
           >
             选择文件夹
           </button>
+          <button
+            type="button"
+            disabled={hasUnsavedDownloadPath}
+            title={hasUnsavedDownloadPath ? '请先保存下载设置' : '打开当前下载目录'}
+            className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-secondary bg-apple-card border border-apple-border-subtle rounded-[20px] hover:text-apple-heading disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            onClick={() => void handleOpenDownloadFolder()}
+          >
+            打开目录
+          </button>
           {downloadPath && (
             <button
+              type="button"
               aria-label="清除文件夹路径"
               className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
               onClick={() => setDownloadPath('')}
@@ -531,7 +547,7 @@ function DownloadTab() {
           )}
         </div>
         <p className="text-[12px] text-apple-tertiary mt-1.5">
-          留空则使用默认路径。修改后新下载的文件将保存到新路径，已有文件不受影响。
+          留空时，开发版使用项目 downloads 目录，安装版使用系统下载目录下的 Wenku8Downloader。修改后新下载的文件将保存到新路径，已有文件不受影响。
         </p>
       </div>
       <button

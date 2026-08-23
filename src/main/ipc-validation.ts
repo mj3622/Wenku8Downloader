@@ -1,4 +1,7 @@
-import { DOWNLOAD_FOLDERS, type DownloadFolder } from '../shared/ipc-types'
+import {
+  OPEN_FOLDER_TARGETS,
+  type OpenFolderTarget,
+} from '../shared/ipc-types'
 
 const EXTERNAL_HOSTS = new Set(['github.com', 'wenku8.net', 'www.wenku8.net'])
 
@@ -33,11 +36,14 @@ export function validateExternalUrl(value: unknown): string {
   return url.toString()
 }
 
-export function validateOpenFolder(value: unknown): DownloadFolder {
-  if (typeof value !== 'string' || !DOWNLOAD_FOLDERS.includes(value as DownloadFolder)) {
-    throw new Error('下载文件夹必须为 pics 或 novels')
+export function validateOpenFolder(value: unknown): OpenFolderTarget {
+  if (
+    typeof value !== 'string'
+    || !OPEN_FOLDER_TARGETS.includes(value as OpenFolderTarget)
+  ) {
+    throw new Error('下载文件夹必须为 root、pics 或 novels')
   }
-  return value as DownloadFolder
+  return value as OpenFolderTarget
 }
 
 export function validateOptionalVolumeName(value: unknown): string | undefined {
