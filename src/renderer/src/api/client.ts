@@ -1,3 +1,9 @@
+import type {
+  DownloadConfig,
+  UpdateCredentialsInput,
+} from '../../../shared/config-types'
+import type { DownloadFolder } from '../../../shared/ipc-types'
+
 export type CookieProgress = {
   step: string
   message: string
@@ -13,14 +19,16 @@ export type DownloadProgress = {
 export const api = {
   // 配置
   getConfig: () => window.electronAPI.getConfig(),
-
-  setConfig: (section: string, key: string, value: string) =>
-    window.electronAPI.setConfig(section, key, value),
+  updateDownloadConfig: (input: DownloadConfig) =>
+    window.electronAPI.updateDownloadConfig(input),
+  updateCredentials: (input: UpdateCredentialsInput) =>
+    window.electronAPI.updateCredentials(input),
+  resetCorruptConfig: () => window.electronAPI.resetCorruptConfig(),
 
   // Cookie
   autoGetCookie: () => window.electronAPI.autoGetCookie(),
   getCookieProgress: (callback: (data: CookieProgress) => void) => {
-    window.electronAPI.onCookieProgress(callback)
+    return window.electronAPI.onCookieProgress(callback)
   },
 
   // 搜索
@@ -37,11 +45,11 @@ export const api = {
   downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
     window.electronAPI.downloadImages(bookId, volumeName, taskId),
   getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
-    window.electronAPI.onDownloadProgress(callback)
+    return window.electronAPI.onDownloadProgress(callback)
   },
 
   // 文件
-  openFolder: (subdir: string) => window.electronAPI.openFolder(subdir),
+  openFolder: (subdir: DownloadFolder) => window.electronAPI.openFolder(subdir),
   selectFolder: () => window.electronAPI.selectFolder(),
 }
 

@@ -89,7 +89,7 @@ export default function HomePage() {
           />
           <FeatureCard
             title="自动获取 Cookie"
-            desc="内置 Chrome 浏览器自动化，一键绕过 Cloudflare 防护获取有效 Cookie"
+            desc="使用已保存的账号登录轻小说文库，并更新下载所需的 Cookie"
           />
         </div>
       </section>

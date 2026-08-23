@@ -1,7 +1,8 @@
-export interface ElectronAPI {
+import type { ConfigApi } from '../../../shared/config-types'
+import type { DownloadFolder } from '../../../shared/ipc-types'
+
+export interface ElectronAPI extends ConfigApi {
   platform: NodeJS.Platform
-  getConfig: () => Promise<Record<string, unknown>>
-  setConfig: (section: string, key: string, value: string) => Promise<{ status: string }>
   autoGetCookie: () => Promise<{ status: string; message: string }>
   searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
@@ -9,9 +10,9 @@ export interface ElectronAPI {
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
   downloadEpub: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
   downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
-  onCookieProgress: (callback: (data: { step: string; message: string }) => void) => void
-  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => void
-  openFolder: (subdir: string) => Promise<void>
+  onCookieProgress: (callback: (data: { step: string; message: string }) => void) => () => void
+  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => () => void
+  openFolder: (subdir: DownloadFolder) => Promise<void>
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
 }
