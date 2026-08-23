@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     }),
     openExternal: vi.fn(async () => undefined),
     openPath: vi.fn(async () => ''),
+    mkdir: vi.fn(async () => undefined),
     setOnProgress: vi.fn(),
     downloadNovel: vi.fn(async () => undefined),
     downloadPictures: vi.fn(async () => undefined),
@@ -28,6 +29,10 @@ vi.mock('electron', () => ({
   ipcMain: { handle: mocks.handle },
   shell: { openExternal: mocks.openExternal, openPath: mocks.openPath },
   dialog: { showOpenDialog: vi.fn() },
+}))
+
+vi.mock('fs/promises', () => ({
+  mkdir: mocks.mkdir,
 }))
 
 vi.mock('./cookie-service', () => ({
@@ -375,6 +380,15 @@ describe('registerIpcHandlers application operations', () => {
     expect(mocks.openPath).toHaveBeenCalledWith(
       resolve(mocks.downloadsPath, 'Wenku8Downloader', 'novels'),
     )
+  })
+
+  it('creates and opens the current download root', async () => {
+    const downloadRoot = resolve(mocks.downloadsPath, 'Wenku8Downloader')
+
+    await invoke('shell:openFolder', {}, 'root')
+
+    expect(mocks.mkdir).toHaveBeenCalledWith(downloadRoot, { recursive: true })
+    expect(mocks.openPath).toHaveBeenCalledWith(downloadRoot)
   })
 
   it('invalidates cached books after automatic Cookie refresh', async () => {

@@ -26,7 +26,8 @@ describe('IPC validation', () => {
     expect(() => validateExternalUrl('file:///C:/Windows/System32')).toThrow('外部链接')
   })
 
-  it('allows only the two download subfolders', () => {
+  it('allows only the download root and known subfolders', () => {
+    expect(validateOpenFolder('root')).toBe('root')
     expect(validateOpenFolder('pics')).toBe('pics')
     expect(validateOpenFolder('novels')).toBe('novels')
     expect(() => validateOpenFolder('../')).toThrow('下载文件夹')

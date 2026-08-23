@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   resetCorruptConfig: vi.fn(),
   autoGetCookie: vi.fn(),
   getCookieProgress: vi.fn(() => () => undefined),
+  openFolder: vi.fn(),
   selectFolder: vi.fn(),
 }))
 
@@ -137,6 +138,7 @@ beforeEach(() => {
   mocks.resetCorruptConfig.mockResolvedValue(structuredClone(snapshot))
   mocks.autoGetCookie.mockResolvedValue({ status: 'ok', message: 'ok' })
   mocks.getCookieProgress.mockReturnValue(() => undefined)
+  mocks.openFolder.mockResolvedValue(undefined)
   mocks.selectFolder.mockResolvedValue(null)
   useConfigStore.setState({
     snapshot: null,
@@ -236,6 +238,16 @@ describe('ConfigPage', () => {
       defaultCoverIndex: 2,
       downloadPath: 'D:\\Books',
     })
+  })
+
+  it('opens the effective download root from download settings', async () => {
+    await renderPage()
+    await click(button('下载设置'))
+
+    expect(container.textContent).toContain('默认下载目录')
+    await click(button('打开目录'))
+
+    expect(mocks.openFolder).toHaveBeenCalledWith('root')
   })
 
   it('renders load failures and retries explicitly', async () => {

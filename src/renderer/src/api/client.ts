@@ -2,7 +2,7 @@ import type {
   DownloadConfig,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
-import type { DownloadFolder } from '../../../shared/ipc-types'
+import type { OpenFolderTarget } from '../../../shared/ipc-types'
 
 export type CookieProgress = {
   step: string
@@ -49,7 +49,7 @@ export const api = {
   },
 
   // 文件
-  openFolder: (subdir: DownloadFolder) => window.electronAPI.openFolder(subdir),
+  openFolder: (target: OpenFolderTarget) => window.electronAPI.openFolder(target),
   selectFolder: () => window.electronAPI.selectFolder(),
 }
 
