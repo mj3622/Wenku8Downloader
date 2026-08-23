@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { IMAGE_MEDIA_TYPES } from './path-safety'
 
 export interface EpubChapter {
   title: string
@@ -117,14 +118,14 @@ export class EpubBuilder {
     // 章节
     for (const ch of this.chapters) {
       const id = this.nextId()
-      manifestItems.push(`    <item id="${id}" href="${ch.fileName}" media-type="application/xhtml+xml"/>`)
+      manifestItems.push(`    <item id="${id}" href="${this.escapeXml(ch.fileName)}" media-type="application/xhtml+xml"/>`)
       spineItems.push(`    <itemref idref="${id}"/>`)
     }
 
     // 图片
     for (const img of this.images) {
       const id = this.nextId()
-      manifestItems.push(`    <item id="${id}" href="${img.fileName}" media-type="${img.mediaType}"/>`)
+      manifestItems.push(`    <item id="${id}" href="${this.escapeXml(img.fileName)}" media-type="${this.escapeXml(img.mediaType)}"/>`)
     }
 
     // 封面图片（在 manifest 中引用）
@@ -146,7 +147,7 @@ export class EpubBuilder {
     <dc:identifier id="book-id">${uid}</dc:identifier>
     <dc:title>${this.escapeXml(this.title)}</dc:title>
     <dc:creator>${this.escapeXml(this.author)}</dc:creator>
-    <dc:language>${this.lang}</dc:language>
+    <dc:language>${this.escapeXml(this.lang)}</dc:language>
 ${coverMeta}
   </metadata>
   <manifest>
@@ -168,7 +169,7 @@ ${coverMeta}
       const id = this.nextId()
       navPoints.push(`    <navPoint id="${id}" playOrder="${playOrder++}">
       <navLabel><text>${this.escapeXml(ch.title)}</text></navLabel>
-      <content src="${ch.fileName}"/>
+      <content src="${this.escapeXml(ch.fileName)}"/>
     </navPoint>`)
     }
 
@@ -190,7 +191,7 @@ ${coverMeta}
   private buildNav(): string {
     const items: string[] = []
     for (const ch of this.chapters) {
-      items.push(`      <li><a href="${ch.fileName}">${this.escapeXml(ch.title)}</a></li>`)
+      items.push(`      <li><a href="${this.escapeXml(ch.fileName)}">${this.escapeXml(ch.title)}</a></li>`)
     }
 
     return `<?xml version="1.0" encoding="UTF-8"?>
@@ -230,19 +231,24 @@ ${items.join('\n')}
     const quot = gt.replace(/&quot;/g, '\x00QUOT\x00')
     const apos = quot.replace(/&apos;/g, '\x00APOS\x00')
 
-    // 将所有 &word; 模式转为 &#NNN; 数值实体
-    const converted = apos.replace(/&([a-zA-Z]+);/g, (_m, name: string) => {
+    // 将所有命名实体模式转为 &#NNN; 数值实体
+    const converted = apos.replace(/&([a-zA-Z][a-zA-Z0-9]*);/g, (_m, name: string) => {
       const cp = HTML_ENTITY_CODEPOINTS[name]
       return cp !== undefined ? `&#${cp};` : _m
     })
 
+    // 保留数值实体，将裸 & 和未知 HTML 命名实体转成 XML 安全的文本。
+    const escaped = converted.replace(/&(?!(?:#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')
+
     // 恢复 XML 预定义实体
-    return converted
+    /* eslint-disable no-control-regex -- these expressions restore the intentional control-character placeholders above */
+    return escaped
       .replace(/\x00AMP\x00/g, '&amp;')
       .replace(/\x00LT\x00/g, '&lt;')
       .replace(/\x00GT\x00/g, '&gt;')
       .replace(/\x00QUOT\x00/g, '&quot;')
       .replace(/\x00APOS\x00/g, '&apos;')
+    /* eslint-enable no-control-regex */
   }
 
   /** 将 HTML void 元素转为 XHTML 兼容的自闭合标签（如 <br> → <br/>） */
@@ -303,11 +309,5 @@ const HTML_ENTITY_CODEPOINTS: Record<string, number> = {
 
 export function guessMediaType(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase()
-  switch (ext) {
-    case 'png': return 'image/png'
-    case 'gif': return 'image/gif'
-    case 'webp': return 'image/webp'
-    case 'svg': return 'image/svg+xml'
-    default: return 'image/jpeg'
-  }
+  return IMAGE_MEDIA_TYPES[ext as keyof typeof IMAGE_MEDIA_TYPES] ?? IMAGE_MEDIA_TYPES.jpg
 }
