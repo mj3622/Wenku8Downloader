@@ -136,7 +136,9 @@ export const useDownloadStore = create<DownloadState>()(
         },
 
         clearHistory: () => {
-          set((s) => ({ tasks: s.tasks.filter((t) => t.status === 'downloading') }))
+          set((s) => ({
+            tasks: s.tasks.filter((t) => t.status === 'pending' || t.status === 'downloading'),
+          }))
         },
 
         retryTask: (id) => {

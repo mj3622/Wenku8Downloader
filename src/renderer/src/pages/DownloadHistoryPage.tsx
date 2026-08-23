@@ -1,12 +1,24 @@
 import { useState } from 'react'
+import type { DownloadFolder } from '../../../shared/ipc-types'
 import { useDownloadStore, type DownloadTask } from '../stores/downloadStore'
 import { formatTimeAgo } from '../utils/format'
 import { api } from '../api/client'
+import StatusAlert from '../components/StatusAlert'
 
 export default function DownloadHistoryPage() {
   const { tasks, removeTask, clearCompleted, clearHistory, retryTask } = useDownloadStore()
+  const [folderError, setFolderError] = useState<string | null>(null)
 
-  const downloading = tasks.filter((t) => t.status === 'downloading')
+  const handleOpenFolder = async (subdir: DownloadFolder) => {
+    try {
+      await api.openFolder(subdir)
+      setFolderError(null)
+    } catch (error) {
+      setFolderError(String(error))
+    }
+  }
+
+  const activeTasks = tasks.filter((t) => t.status === 'pending' || t.status === 'downloading')
   const failed = tasks.filter((t) => t.status === 'failed')
   const completed = tasks.filter((t) => t.status === 'completed')
 
@@ -28,17 +40,23 @@ export default function DownloadHistoryPage() {
       <h2 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h2>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
 
+      <StatusAlert
+        type="error"
+        message={folderError}
+        onDismiss={() => setFolderError(null)}
+      />
+
       {/* 进行中 */}
-      {downloading.length > 0 && (
+      {activeTasks.length > 0 && (
         <section className="mb-5">
           <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-apple-accent inline-block" />
             <span className="text-apple-accent">进行中</span>
             <span className="text-apple-secondary text-[12px] font-normal">
-              · {downloading.length} 项
+              · {activeTasks.length} 项
             </span>
           </h3>
-          {downloading.map((task) => (
+          {activeTasks.map((task) => (
             <div
               key={task.id}
               className="bg-apple-card rounded-xl border border-apple-accent/20 p-4 mb-2"
@@ -62,7 +80,7 @@ export default function DownloadHistoryPage() {
                   <div className="mt-2 flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-apple-bg rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-apple-accent rounded-full animate-pulse"
+                        className={`h-full bg-apple-accent rounded-full ${task.status === 'downloading' ? 'animate-pulse' : ''}`}
                         style={{ width: `${task.progress}%` }}
                       />
                     </div>
@@ -81,7 +99,7 @@ export default function DownloadHistoryPage() {
                   className="px-4 py-1.5 text-[11px] font-medium text-apple-tertiary bg-apple-bg
                              rounded-[14px] cursor-not-allowed opacity-60 flex-shrink-0"
                 >
-                  下载中
+                  {task.status === 'pending' ? '等待中' : '下载中'}
                 </button>
               </div>
             </div>
@@ -136,7 +154,7 @@ export default function DownloadHistoryPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => api.openFolder(task.type === 'images' ? 'pics' : 'novels')}
+                  onClick={() => void handleOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
                   className="text-apple-tertiary hover:text-apple-accent transition-colors px-1"
                   title="打开所在文件夹"
                 >
