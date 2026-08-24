@@ -5,19 +5,27 @@ import SearchPage from './pages/SearchPage'
 import BookDetailPage from './pages/BookDetailPage'
 import DownloadHistoryPage from './pages/DownloadHistoryPage'
 import ConfigPage from './pages/ConfigPage'
+import NotFoundPage from './pages/NotFoundPage'
+import ToastViewport from './components/ToastViewport'
+import GlobalErrorListener from './components/GlobalErrorListener'
 
 export default function App() {
   return (
-    <HashRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/book/:id" element={<BookDetailPage />} />
-          <Route path="/download" element={<DownloadHistoryPage />} />
-          <Route path="/config" element={<ConfigPage />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+    <>
+      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/book/:id" element={<BookDetailPage />} />
+            <Route path="/download" element={<DownloadHistoryPage />} />
+            <Route path="/config" element={<ConfigPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Routes>
+      </HashRouter>
+      <ToastViewport />
+      <GlobalErrorListener />
+    </>
   )
 }

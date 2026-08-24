@@ -6,41 +6,57 @@ import type {
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
 import { api } from '../api/client'
+import { toast } from './toastStore'
+import {
+  getUserFeedback,
+  toUserFacingError,
+  type FeedbackContext,
+} from '../utils/userFeedback'
 
 export type ConfigLoadState = 'idle' | 'loading' | 'ready' | 'error'
+
+export interface ConfigOperationOptions {
+  isCurrent?: () => boolean
+  context?: FeedbackContext
+}
 
 export interface ConfigState {
   snapshot: PublicConfigSnapshot | null
   loadState: ConfigLoadState
   error: string | null
-  fetchConfig(): Promise<void>
+  fetchConfig(options?: ConfigOperationOptions): Promise<boolean>
   updateDownloadConfig(input: DownloadConfig): Promise<void>
   updateLogConfig(input: LogConfig): Promise<void>
-  updateCredentials(input: UpdateCredentialsInput): Promise<void>
+  updateCredentials(
+    input: UpdateCredentialsInput,
+    options?: ConfigOperationOptions,
+  ): Promise<void>
   resetCorruptConfig(): Promise<void>
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 export const useConfigStore = create<ConfigState>((set) => {
   const runMutation = async (
     request: () => Promise<PublicConfigSnapshot>,
+    context: FeedbackContext,
+    options: ConfigOperationOptions = {},
   ): Promise<void> => {
-    set({ error: null })
+    const isCurrent = options.isCurrent ?? (() => true)
+    if (isCurrent()) set({ error: null })
     try {
       const snapshot = await request()
-      set({ snapshot, loadState: 'ready', error: null })
+      if (isCurrent()) set({ snapshot, loadState: 'ready', error: null })
     } catch (error) {
-      const message = errorMessage(error)
+      const message = getUserFeedback(error, context).message
+      if (!isCurrent()) throw toUserFacingError(error, context)
       try {
         const snapshot = await api.getConfig()
-        set({ snapshot, loadState: 'ready', error: message })
+        if (isCurrent()) set({ snapshot, loadState: 'ready', error: message })
       } catch {
-        set({ error: message })
+        // Reconciliation is an internal best-effort read; the original action
+        // failure is still rethrown and shown by the initiating page.
+        if (isCurrent()) set({ error: message })
       }
-      throw error
+      throw toUserFacingError(error, context)
     }
   }
 
@@ -49,19 +65,41 @@ export const useConfigStore = create<ConfigState>((set) => {
     loadState: 'idle',
     error: null,
 
-    fetchConfig: async () => {
+    fetchConfig: async (options = {}) => {
+      const isCurrent = options.isCurrent ?? (() => true)
+      const context = options.context ?? 'config-load'
+      if (!isCurrent()) return false
       set({ loadState: 'loading', error: null })
       try {
-        const snapshot = await api.getConfig()
+        const snapshot = await api.getConfig(context)
+        if (!isCurrent()) return false
         set({ snapshot, loadState: 'ready', error: null })
+        return true
       } catch (error) {
-        set({ loadState: 'error', error: errorMessage(error) })
+        if (!isCurrent()) return false
+        const feedback = getUserFeedback(error, context)
+        set({ loadState: 'error', error: feedback.message })
+        toast.error(feedback)
+        return false
       }
     },
 
-    updateDownloadConfig: (input) => runMutation(() => api.updateDownloadConfig(input)),
-    updateLogConfig: (input) => runMutation(() => api.updateLogConfig(input)),
-    updateCredentials: (input) => runMutation(() => api.updateCredentials(input)),
-    resetCorruptConfig: () => runMutation(() => api.resetCorruptConfig()),
+    updateDownloadConfig: (input) => runMutation(
+      () => api.updateDownloadConfig(input),
+      'config-save',
+    ),
+    updateLogConfig: (input) => runMutation(
+      () => api.updateLogConfig(input),
+      'log-save',
+    ),
+    updateCredentials: (input, options) => runMutation(
+      () => api.updateCredentials(input),
+      'account-save',
+      options,
+    ),
+    resetCorruptConfig: () => runMutation(
+      () => api.resetCorruptConfig(),
+      'config-reset',
+    ),
   }
 })

@@ -1,20 +1,19 @@
-import { useState } from 'react'
 import type { DownloadFolder } from '../../../shared/ipc-types'
 import { useDownloadStore, type DownloadTask } from '../stores/downloadStore'
 import { formatTimeAgo } from '../utils/format'
 import { api } from '../api/client'
-import StatusAlert from '../components/StatusAlert'
+import { toast } from '../stores/toastStore'
+import { getUserFeedback } from '../utils/userFeedback'
+import BookCover from '../components/BookCover'
 
 export default function DownloadHistoryPage() {
   const { tasks, removeTask, clearCompleted, clearHistory, retryTask } = useDownloadStore()
-  const [folderError, setFolderError] = useState<string | null>(null)
 
   const handleOpenFolder = async (subdir: DownloadFolder) => {
     try {
       await api.openFolder(subdir)
-      setFolderError(null)
     } catch (error) {
-      setFolderError(String(error))
+      toast.error(getUserFeedback(error, 'open-folder'))
     }
   }
 
@@ -40,12 +39,6 @@ export default function DownloadHistoryPage() {
       <h2 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h2>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
 
-      <StatusAlert
-        type="error"
-        message={folderError}
-        onDismiss={() => setFolderError(null)}
-      />
-
       {/* 进行中 */}
       {activeTasks.length > 0 && (
         <section className="mb-5">
@@ -63,10 +56,12 @@ export default function DownloadHistoryPage() {
             >
               <div className="flex items-center gap-3">
                 {task.cover && (
-                  <img
+                  <BookCover
                     src={task.cover}
-                    alt=""
-                    className="w-10 h-14 object-cover rounded-md flex-shrink-0 bg-apple-bg"
+                    title={task.title}
+                    className="w-10 h-14 rounded-md"
+                    decorative
+                    showFailureText={false}
                   />
                 )}
                 <div className="flex-1 min-w-0">
@@ -138,10 +133,12 @@ export default function DownloadHistoryPage() {
               <div key={task.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 {task.cover && (
-                  <img
+                  <BookCover
                     src={task.cover}
-                    alt=""
-                    className="w-9 h-12 object-cover rounded-md flex-shrink-0 bg-apple-bg"
+                    title={task.title}
+                    className="w-9 h-12 rounded-md"
+                    decorative
+                    showFailureText={false}
                   />
                 )}
                 <div className="flex-1 min-w-0">
@@ -152,9 +149,15 @@ export default function DownloadHistoryPage() {
                     {' · '}
                     {formatTimeAgo(task.createdAt)}
                   </div>
+                  {task.warning && (
+                    <p className="mt-1 text-[11px] leading-4 text-amber-600">
+                      {getUserFeedback(task.warning, 'download-warning').message}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={() => void handleOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
+                  aria-label={`打开 ${task.title} 所在文件夹`}
                   className="text-apple-tertiary hover:text-apple-accent transition-colors px-1"
                   title="打开所在文件夹"
                 >
@@ -164,6 +167,7 @@ export default function DownloadHistoryPage() {
                 </button>
                 <button
                   onClick={() => removeTask(task.id)}
+                  aria-label={`删除 ${task.title} 的下载记录`}
                   className="text-apple-tertiary hover:text-red-400 transition-colors text-[16px] leading-none px-1"
                   title="删除记录"
                 >
@@ -204,17 +208,23 @@ function FailedTaskItem({
   task, onRetry, onRemove,
 }: {
   task: DownloadTask
-  onRetry: (id: string) => void
+  onRetry: (id: string) => boolean
   onRemove: (id: string) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const errorMessage = getUserFeedback(task.error, 'download').message
 
   return (
     <div className="bg-apple-card rounded-xl border border-red-200 mb-2 overflow-hidden">
       <div className="flex items-center gap-3 p-4">
         <div className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
         {task.cover && (
-          <img src={task.cover} alt="" className="w-10 h-14 object-cover rounded-md flex-shrink-0 bg-apple-bg" />
+          <BookCover
+            src={task.cover}
+            title={task.title}
+            className="w-10 h-14 rounded-md"
+            decorative
+            showFailureText={false}
+          />
         )}
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-semibold text-apple-heading">{task.title}</div>
@@ -222,15 +232,12 @@ function FailedTaskItem({
             {task.type === 'images' ? '插图下载' : 'EPUB 下载'}
             {task.volume && ` · ${task.volume}`}
           </div>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-[11px] text-apple-tertiary mt-0.5 hover:text-apple-secondary transition-colors"
-          >
-            {expanded ? '收起详情' : '查看错误详情'}
-          </button>
+          <p className="mt-1 text-[11px] leading-4 text-apple-secondary">
+            {errorMessage}
+          </p>
         </div>
         <button
-          onClick={() => onRetry(task.id)}
+          onClick={() => { onRetry(task.id) }}
           className="px-4 py-1.5 text-[11px] font-medium bg-apple-accent-light text-apple-accent
                      rounded-[14px] hover:bg-apple-accent/15 transition-colors"
         >
@@ -238,18 +245,12 @@ function FailedTaskItem({
         </button>
         <button
           onClick={() => onRemove(task.id)}
+          aria-label={`删除 ${task.title} 的失败记录`}
           className="text-apple-tertiary hover:text-red-400 transition-colors text-[16px] leading-none px-1"
         >
           ×
         </button>
       </div>
-      {expanded && task.error && (
-        <div className="px-4 pb-4">
-          <pre className="text-[11px] text-apple-secondary bg-apple-bg rounded-lg p-3 font-mono leading-relaxed whitespace-pre-wrap break-all">
-            {task.error}
-          </pre>
-        </div>
-      )}
     </div>
   )
 }
