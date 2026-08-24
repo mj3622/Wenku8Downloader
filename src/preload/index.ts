@@ -5,7 +5,12 @@ import type {
   LogConfig,
   UpdateCredentialsInput,
 } from '../shared/config-types'
-import type { OpenFolderTarget, RendererErrorReport } from '../shared/ipc-types'
+import type {
+  CookieProgress,
+  DownloadResult,
+  OpenFolderTarget,
+  RendererErrorReport,
+} from '../shared/ipc-types'
 
 const configApi: ConfigApi = {
   getConfig: () => ipcRenderer.invoke('config:get'),
@@ -22,17 +27,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   ...configApi,
-  autoGetCookie: () => ipcRenderer.invoke('cookie:auto'),
+  autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
   getBook: (bookId: string) => ipcRenderer.invoke('book:get', { bookId }),
   getBookImages: (bookId: string) => ipcRenderer.invoke('book:images', { bookId }),
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) =>
+  downloadEpub: (bookId: string, volumeName?: string, taskId?: string): Promise<DownloadResult> =>
     ipcRenderer.invoke('download:epub', { bookId, volumeName, taskId }),
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
+  downloadImages: (bookId: string, volumeName?: string, taskId?: string): Promise<DownloadResult> =>
     ipcRenderer.invoke('download:images', { bookId, volumeName, taskId }),
-  onCookieProgress: (callback: (data: { step: string; message: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, data: { step: string; message: string }) => callback(data)
+  onCookieProgress: (callback: (data: CookieProgress) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: CookieProgress) => callback(data)
     ipcRenderer.on('cookie:progress', listener)
     return () => ipcRenderer.removeListener('cookie:progress', listener)
   },

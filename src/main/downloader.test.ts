@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { link, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { load } from 'cheerio'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 
 const logMocks = vi.hoisted(() => ({
@@ -13,8 +14,10 @@ const logMocks = vi.hoisted(() => ({
 vi.mock('./logging/logger', () => ({ logger: logMocks }))
 
 import { DownloadRateLimiter } from './download-rate-limiter'
+import { Book } from './book'
 import {
   asyncPool,
+  atomicWriteDownloadFile,
   buildBookKey,
   buildVolumeKey,
   Downloader,
@@ -100,7 +103,158 @@ describe('buildVolumeKey', () => {
   })
 })
 
+describe('atomicWriteDownloadFile', () => {
+  it('keeps the previous file and removes its temporary file when replacement fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-atomic-download-'))
+    const target = join(root, 'existing.epub')
+    await writeFile(target, 'existing-epub')
+
+    try {
+      await expect(atomicWriteDownloadFile(target, Buffer.from('new-epub'), {
+        rename: vi.fn(async () => { throw new Error('磁盘写入失败') }),
+      })).rejects.toThrow('磁盘写入失败')
+
+      await expect(readFile(target, 'utf-8')).resolves.toBe('existing-epub')
+      expect((await readdir(root)).filter(name => name.includes('.tmp-'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Downloader.downloadPictures', () => {
+  it('keeps successfully downloaded images and records a warning for partial failures', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-pictures-'))
+    const getImageContent = vi.fn(async (url: string) => (
+      url.endsWith('ok.jpg') ? Buffer.from('image') : null
+    ))
+
+    try {
+      const downloader = new Downloader(
+        createCrawlerFixture({ getImageContent }),
+        runtimeConfig(root),
+      )
+
+      await downloader.downloadPictures(
+        ['https://example.com/ok.jpg', 'https://example.com/missing.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )
+
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '1.jpg')))
+        .resolves.toBeInstanceOf(Buffer)
+      expect(downloader.getWarnings()).toEqual([
+        '“第一卷”有 1 张插图未能下载，已保存其余插图。',
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an all-zero-byte picture response instead of writing an empty file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-empty-picture-'))
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async () => Buffer.alloc(0)),
+    }), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadPictures(
+        ['https://example.com/empty.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )).rejects.toThrow('该分卷没有可保存的插图')
+      expect(downloader.getWarnings()).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('treats a zero-byte response as a partial failure when another picture succeeds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-partial-empty-picture-'))
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async (url: string) => (
+        url.endsWith('empty.jpg') ? Buffer.alloc(0) : Buffer.from('image')
+      )),
+    }), runtimeConfig(root))
+
+    try {
+      await downloader.downloadPictures(
+        ['https://example.com/empty.jpg', 'https://example.com/ok.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )
+
+      expect(downloader.getWarnings()).toContain(
+        '“第一卷”有 1 张插图未能下载，已保存其余插图。',
+      )
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '2.jpg')))
+        .resolves.toEqual(Buffer.from('image'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('downloads again when a resumed picture file is zero bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-resume-empty-picture-'))
+    const volumeDir = join(root, 'pics', '100_测试作品', '1_第一卷')
+    await mkdir(volumeDir, { recursive: true })
+    await writeFile(join(volumeDir, '1.jpg'), Buffer.alloc(0))
+    const getImageContent = vi.fn(async () => Buffer.from('fresh-image'))
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent }),
+      runtimeConfig(root),
+    )
+
+    try {
+      await downloader.downloadPictures(
+        ['https://example.com/1.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )
+
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+      await expect(readFile(join(volumeDir, '1.jpg'))).resolves.toEqual(Buffer.from('fresh-image'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces a zero-byte hard link without modifying its other path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-resume-hard-link-'))
+    const volumeDir = join(root, 'pics', '100_测试作品', '1_第一卷')
+    const linkedFile = join(root, 'outside.jpg')
+    await mkdir(volumeDir, { recursive: true })
+    await writeFile(linkedFile, Buffer.alloc(0))
+    await link(linkedFile, join(volumeDir, '1.jpg'))
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent: vi.fn(async () => Buffer.from('fresh-image')) }),
+      runtimeConfig(root),
+    )
+
+    try {
+      await downloader.downloadPictures(
+        ['https://example.com/1.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )
+
+      await expect(readFile(linkedFile)).resolves.toEqual(Buffer.alloc(0))
+      await expect(readFile(join(volumeDir, '1.jpg'))).resolves.toEqual(Buffer.from('fresh-image'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('does not reuse an ambiguous legacy image directory for a book ID', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-pictures-'))
 
@@ -164,7 +318,10 @@ describe('Downloader.downloadPictures', () => {
 
       await expect(
         downloader.downloadPictures([secretUrl], '第一卷', '测试作品', '100', 0),
-      ).rejects.toThrow('图片下载失败')
+      ).rejects.toThrow('请求过于频繁，已自动降低下载速度，请稍等片刻后重试')
+      expect(downloader.getWarnings()).not.toContain(
+        '“第一卷”有 1 张插图未能下载，已保存其余插图。',
+      )
 
       expect(getImageContent).toHaveBeenNthCalledWith(1, secretUrl, 1, expect.any(Function))
       expect(rateLimiter.speed.level).toBe(2)
@@ -274,6 +431,44 @@ describe('Downloader.downloadPictures', () => {
 })
 
 describe('Downloader.downloadNovel', () => {
+  it.each([
+    {
+      label: '整本',
+      volumeName: undefined,
+      outputPath: join('novels', '200_同名作品.epub'),
+    },
+    {
+      label: '分卷',
+      volumeName: '第一卷',
+      outputPath: join('novels', '200_同名作品', '1_第一卷.epub'),
+    },
+  ])('replaces an existing $label EPUB without modifying its other hard-link path', async ({
+    volumeName,
+    outputPath,
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-epub-hard-link-'))
+    const peerPath = join(root, 'existing-copy.epub')
+    const targetPath = join(root, outputPath)
+    await mkdir(join(targetPath, '..'), { recursive: true })
+    await writeFile(peerPath, 'existing-epub')
+    await link(peerPath, targetPath)
+    const book = createBookFixture({
+      volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
+    })
+    const downloader = new Downloader(createCrawlerFixture({
+      fetch: vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch'],
+    }), runtimeConfig(root))
+
+    try {
+      await downloader.downloadNovel(book, volumeName)
+
+      await expect(readFile(peerPath, 'utf-8')).resolves.toBe('existing-epub')
+      await expect(readFile(targetPath)).resolves.not.toEqual(Buffer.from('existing-epub'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps an ambiguous legacy full-book EPUB when writing the book-ID path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-novels-'))
 
@@ -284,13 +479,17 @@ describe('Downloader.downloadNovel', () => {
 
       const book = createBookFixture({
         getCoverContent: async () => { throw new Error('no cover') },
+        volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
       })
-      const downloader = new Downloader(createCrawlerFixture(), runtimeConfig(root))
+      const downloader = new Downloader(createCrawlerFixture({
+        fetch: vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch'],
+      }), runtimeConfig(root))
 
       await downloader.downloadNovel(book)
 
       await expect(readFile(legacyFile, 'utf-8')).resolves.toBe('other-book')
       await expect(readFile(join(root, 'novels', '200_同名作品.epub'))).resolves.toBeInstanceOf(Buffer)
+      expect(downloader.getWarnings()).toContain('封面未能下载，正文内容仍已保存。')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -305,9 +504,11 @@ describe('Downloader.downloadNovel', () => {
       await writeFile(legacyFile, 'other-book')
 
       const book = createBookFixture({
-        volumes: { '第一卷': [] },
+        volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
       })
-      const downloader = new Downloader(createCrawlerFixture(), runtimeConfig(root))
+      const downloader = new Downloader(createCrawlerFixture({
+        fetch: vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch'],
+      }), runtimeConfig(root))
 
       await downloader.downloadNovel(book, '第一卷')
 
@@ -317,6 +518,238 @@ describe('Downloader.downloadNovel', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it.each([
+    [429, '请求过于频繁，已自动降低下载速度，请稍等片刻后重试'],
+    [403, '登录状态已失效，请前往配置页重新登录后重试'],
+  ] as const)('preserves structured HTTP %s when every picture fails', async (
+    status,
+    expectedMessage,
+  ) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-picture-http-'))
+    const statusError = Object.assign(new Error('服务暂时不可用，请稍后重试'), { status })
+    const requestError = new Error('图片请求失败', { cause: statusError })
+    const rateLimiter = new DownloadRateLimiter(() => undefined)
+    const record = vi.spyOn(rateLimiter, 'record')
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async () => { throw requestError }),
+    }), runtimeConfig(root), rateLimiter)
+
+    try {
+      await expect(downloader.downloadPictures(
+        ['https://example.com/failed.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )).rejects.toThrow(expectedMessage)
+      expect(record).toHaveBeenCalledWith(status)
+      expect(downloader.getWarnings()).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    {
+      label: '整本',
+      volumeName: undefined,
+      outputPath: join('novels', '200_同名作品.epub'),
+    },
+    {
+      label: '分卷',
+      volumeName: '第一卷',
+      outputPath: join('novels', '200_同名作品', '1_第一卷.epub'),
+    },
+  ])('keeps $label EPUB content when the illustration page cannot be read', async ({
+    volumeName,
+    outputPath,
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-illustration-page-'))
+    const book = createBookFixture({
+      volumes: {
+        '第一卷': [
+          { name: '插图', link: 'illust.htm' },
+          { name: '第一章', link: '1.htm' },
+        ],
+      },
+      getChapterImageUrls: async () => {
+        throw new Error('illustration page timeout')
+      },
+    })
+    const downloader = new Downloader(createCrawlerFixture({
+      fetch: vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch'],
+    }), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadNovel(book, volumeName)).resolves.toBeUndefined()
+      await expect(readFile(join(root, outputPath))).resolves.toBeInstanceOf(Buffer)
+      expect(downloader.getWarnings()).toContain(
+        '“第一卷”的插图页无法读取，正文内容仍会保存。',
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    {
+      label: '整本',
+      volumeName: undefined,
+      outputPath: join('novels', '200_同名作品.epub'),
+    },
+    {
+      label: '分卷',
+      volumeName: '第一卷',
+      outputPath: join('novels', '200_同名作品', '1_第一卷.epub'),
+    },
+  ])('keeps $label EPUB正文 when every optional illustration byte request fails', async ({
+    volumeName,
+    outputPath,
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-optional-images-'))
+    const book = createBookFixture({
+      volumes: {
+        '第一卷': [
+          { name: '插图', link: 'illust.htm' },
+          { name: '第一章', link: '1.htm' },
+        ],
+      },
+      getChapterImageUrls: async () => ['https://example.com/failed.jpg'],
+    })
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async () => { throw new Error('network failed') }),
+      fetch: vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch'],
+    }), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadNovel(book, volumeName)).resolves.toBeUndefined()
+      await expect(readFile(join(root, outputPath))).resolves.toBeInstanceOf(Buffer)
+      expect(downloader.getWarnings()).toContain(
+        '“第一卷”的插图未能下载，正文内容仍会保存。',
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a zero-byte image cache entry and downloads the image again', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-empty-image-cache-'))
+    const cacheDir = join(root, '.cache', '200', 'images', '1_第一卷')
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(join(cacheDir, '0.bin'), Buffer.alloc(0))
+    await writeFile(join(cacheDir, '0.meta'), 'jpg', 'utf-8')
+    const getImageContent = vi.fn(async () => Buffer.from('fresh-image'))
+    const book = createBookFixture({
+      volumes: { '第一卷': [{ name: '插图', link: 'illust.htm' }] },
+      getChapterImageUrls: async () => ['https://example.com/cover.jpg'],
+    })
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent }),
+      runtimeConfig(root),
+    )
+
+    try {
+      await downloader.downloadNovel(book, '第一卷')
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    { label: '整本', volumeName: undefined },
+    { label: '分卷', volumeName: '第一卷' },
+  ])('preserves the illustration-page error for an illustration-only $label download', async ({
+    volumeName,
+  }) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-illustration-only-'))
+    const pageError = new Error('登录状态已失效，请重新登录后重试')
+    const book = createBookFixture({
+      volumes: {
+        '第一卷': [{ name: '插图', link: 'illust.htm' }],
+      },
+      getChapterImageUrls: async () => { throw pageError },
+    })
+    const downloader = new Downloader(createCrawlerFixture(), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadNovel(book, volumeName)).rejects.toBe(pageError)
+      expect(downloader.getWarnings()).not.toContain(
+        '“第一卷”的插图页无法读取，正文内容仍会保存。',
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an empty chapter before it can be cached or written', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-empty-chapter-'))
+    const book = createBookFixture({
+      volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
+    })
+    const downloader = new Downloader(createCrawlerFixture({
+      fetch: vi.fn(async () => load('<div id="content"><br /></div>')) as unknown as DownloaderCrawler['fetch'],
+    }), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadNovel(book, '第一卷'))
+        .rejects.toThrow('章节内容为空')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    [429, '请求过于频繁，已自动降低下载速度，请稍等片刻后重试'],
+    [403, '登录状态已失效，请前往配置页重新登录后重试'],
+  ] as const)('uses structured HTTP %s failures to update chapter throttling', async (
+    status,
+    expectedMessage,
+  ) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-http-status-'))
+    const statusError = Object.assign(new Error('服务暂时不可用，请稍后重试'), { status })
+    const requestError = new Error('请求失败（已重试 3 次）', { cause: statusError })
+    const rateLimiter = new DownloadRateLimiter(() => undefined)
+    const record = vi.spyOn(rateLimiter, 'record')
+    const book = createBookFixture({
+      volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
+    })
+    const downloader = new Downloader(createCrawlerFixture({
+      fetch: vi.fn(async () => { throw requestError }) as unknown as DownloaderCrawler['fetch'],
+    }), runtimeConfig(root), rateLimiter)
+
+    try {
+      await expect(downloader.downloadNovel(book, '第一卷')).rejects.toThrow(expectedMessage)
+      expect(record).toHaveBeenCalledWith(status)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a work that has no usable volume content', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-empty-book-'))
+    const downloader = new Downloader(createCrawlerFixture(), runtimeConfig(root))
+
+    try {
+      await expect(downloader.downloadNovel(createBookFixture()))
+        .rejects.toThrow('没有可保存的内容')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Book.getCoverContent', () => {
+  it('rejects a zero-byte cover response', async () => {
+    const book = Object.create(Book.prototype) as Book
+    Object.assign(book, {
+      basicInfo: { cover: 'https://example.com/cover.jpg' },
+      crawler: { getImageContent: vi.fn(async () => Buffer.alloc(0)) },
+    })
+
+    await expect(book.getCoverContent()).rejects.toThrow('封面下载失败')
   })
 })
 

@@ -21,7 +21,7 @@ export function configureLogger(config: LogConfig): void {
 
 export function getLogDirectory(): string {
   if (!active) {
-    throw new Error('日志器尚未初始化')
+    throw new Error('日志目录暂时不可用，请重启应用后再试')
   }
   return active.getDirectory()
 }

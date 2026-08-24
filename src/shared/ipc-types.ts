@@ -6,6 +6,18 @@ export const OPEN_FOLDER_TARGETS = ['root', ...DOWNLOAD_FOLDERS] as const
 
 export type OpenFolderTarget = typeof OPEN_FOLDER_TARGETS[number]
 
+export interface DownloadResult {
+  status: 'ok'
+  message: string
+  warnings?: string[]
+}
+
+export interface CookieProgress {
+  operationId: string
+  step: string
+  message: string
+}
+
 export interface RendererErrorReport {
   kind: 'error' | 'unhandled-rejection'
   message: string

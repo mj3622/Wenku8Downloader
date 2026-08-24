@@ -1,6 +1,17 @@
 import { Link } from 'react-router-dom'
+import { api } from '../api/client'
+import { toast } from '../stores/toastStore'
+import { getUserFeedback } from '../utils/userFeedback'
 
 export default function HomePage() {
+  const openExternal = async (url: string): Promise<void> => {
+    try {
+      await api.openExternal(url)
+    } catch (error) {
+      toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
   return (
     <div className="max-w-2xl">
       {/* 版本号 + GitHub */}
@@ -9,7 +20,10 @@ export default function HomePage() {
           v2.0.0
         </span>
         <a
-          onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://github.com/mj3622/Wenku8Downloader') }}
+          onClick={(event) => {
+            event.preventDefault()
+            void openExternal('https://github.com/mj3622/Wenku8Downloader')
+          }}
           href="https://github.com/mj3622/Wenku8Downloader"
           className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors cursor-pointer"
         >
@@ -58,8 +72,8 @@ export default function HomePage() {
         <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">快速入门</h3>
         <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
         <div className="space-y-3">
-          <Step index={1} title="配置账号与 Cookie" to="/config">
-            首次使用请先在「配置」页面填写文库账号密码，保存后自动登录获取 Cookie。可在「下载设置」中自定义文件保存路径。
+          <Step index={1} title="配置登录信息" to="/config">
+            首次使用请先在「配置」页面填写文库账号密码，保存后会自动登录。可在「下载设置」中自定义文件保存路径。
           </Step>
           <Step index={2} title="检索作品" to="/search">
             进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
@@ -88,8 +102,8 @@ export default function HomePage() {
             desc="单独提取并下载指定卷的插图图片，适合收藏高清原图"
           />
           <FeatureCard
-            title="自动获取 Cookie"
-            desc="使用已保存的账号登录轻小说文库，并更新下载所需的 Cookie"
+            title="自动更新登录状态"
+            desc="使用已保存的账号登录轻小说文库，并更新检索和下载所需的登录状态"
           />
         </div>
       </section>
@@ -103,11 +117,14 @@ export default function HomePage() {
             <li>
               · 本工具仅支持{' '}
               <strong className="text-apple-heading">
-                轻小说文库 (<a onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://www.wenku8.net') }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
+                轻小说文库 (<a onClick={(event) => {
+                  event.preventDefault()
+                  void openExternal('https://www.wenku8.net')
+                }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
               </strong>{' '}
               的内容下载
             </li>
-            <li>· Cookie 有效期为数小时至数天不等，下载失败时可重新获取 Cookie 后再试</li>
+            <li>· 登录状态会定期失效，下载失败时可前往配置页重新登录</li>
             <li>
               · EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径
             </li>

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { load } from 'cheerio'
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
@@ -141,6 +142,20 @@ describe('WebCrawler.fetch logging', () => {
   })
 })
 
+describe('WebCrawler.search', () => {
+  it('keeps parser diagnostics internal when the search page is incomplete', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load('<html><body></body></html>') as unknown as Buffer,
+    )
+
+    await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
+      message: '网站暂时无法完成搜索，请稍后重试',
+      cause: expect.objectContaining({ message: '搜索页面缺少标题，可能被拦截' }),
+    })
+  })
+})
+
 describe('WebCrawler.getImageContent response reporting', () => {
   it('reports each HTTP status when a throttled request later succeeds', async () => {
     mocks.fetch
@@ -232,11 +247,25 @@ describe('WebCrawler.syncCookies', () => {
 })
 
 describe('WebCrawler.getCookie credential consistency', () => {
+  it('rejects a 200 response that only leaves an anonymous session cookie', async () => {
+    const fixture = createMutableLoginConfig()
+    mocks.fetch.mockResolvedValue({ ok: true, status: 200 })
+    mocks.getCookies.mockResolvedValue([{ name: 'PHPSESSID', value: 'anonymous-session' }])
+    const crawler = new WebCrawler(fixture.config, {})
+
+    await expect(crawler.getCookie()).rejects.toThrow('未检测到有效登录状态')
+    expect(fixture.replaceCookies).not.toHaveBeenCalled()
+  })
+
   it('continues login retries after a non-Error rejection', async () => {
     const fixture = createMutableLoginConfig()
     mocks.fetch
       .mockRejectedValueOnce(undefined)
       .mockResolvedValueOnce({ ok: true, status: 200 })
+    mocks.getCookies.mockResolvedValue([
+      { name: 'jieqiUserInfo', value: 'user-info' },
+      { name: 'jieqiVisitInfo', value: 'visit-info' },
+    ])
     const crawler = new WebCrawler(fixture.config, {})
 
     await expect(crawler.getCookie()).resolves.toBeUndefined()
@@ -250,6 +279,25 @@ describe('WebCrawler.getCookie credential consistency', () => {
     const crawler = new WebCrawler(createMutableLoginConfig().config, {})
 
     await expect(crawler.getCookie()).rejects.toMatchObject({ cause })
+  })
+
+  it('keeps the final HTTP status in login retry and failure logs', async () => {
+    mocks.fetch.mockResolvedValue({ ok: false, status: 503 })
+    const crawler = new WebCrawler(createMutableLoginConfig().config, {})
+
+    await expect(crawler.getCookie()).rejects.toThrow('服务暂时不可用')
+
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'login.retry',
+      '登录请求失败，准备重试',
+      expect.objectContaining({ status: 503 }),
+    )
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      'login.failed',
+      '登录 Cookie 刷新失败',
+      expect.any(Error),
+      expect.objectContaining({ status: 503 }),
+    )
   })
 
   it('rejects an old login result and restores the current Cookie snapshot', async () => {
@@ -276,7 +324,12 @@ describe('WebCrawler.getCookie credential consistency', () => {
     await expect(loginPromise).rejects.toThrow('登录期间账号已变更')
     expect(fixture.replaceCookies).not.toHaveBeenCalled()
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
-    expect(mocks.removeCookie).toHaveBeenCalledTimes(COOKIE_NAMES.length)
+    expect(mocks.removeCookie).toHaveBeenCalledTimes(COOKIE_NAMES.length + 3)
+    expect(mocks.removeCookie.mock.calls.slice(0, 3)).toEqual([
+      ['https://www.wenku8.net', 'PHPSESSID'],
+      ['https://www.wenku8.net', 'jieqiUserInfo'],
+      ['https://www.wenku8.net', 'jieqiVisitInfo'],
+    ])
     expect(mocks.setCookie).toHaveBeenCalledWith(expect.objectContaining({
       name: 'PHPSESSID',
       value: 'current-session',

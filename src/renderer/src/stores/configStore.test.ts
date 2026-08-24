@@ -14,6 +14,7 @@ vi.mock('../api/client', () => ({
 
 import type { PublicConfigSnapshot } from '../../../shared/config-types'
 import { useConfigStore } from './configStore'
+import { useToastStore } from './toastStore'
 
 const snapshot: PublicConfigSnapshot = {
   download: {
@@ -42,6 +43,7 @@ beforeEach(() => {
     loadState: 'idle',
     error: null,
   })
+  useToastStore.getState().clear()
 })
 
 describe('configStore', () => {
@@ -65,7 +67,7 @@ describe('configStore', () => {
     })
 
     resolveConfig?.(snapshot)
-    await task
+    await expect(task).resolves.toBe(true)
     expect(useConfigStore.getState()).toMatchObject({
       snapshot,
       loadState: 'ready',
@@ -77,7 +79,7 @@ describe('configStore', () => {
     useConfigStore.setState({ snapshot, loadState: 'ready', error: null })
     mocks.getConfig.mockRejectedValue(new Error('主进程不可用'))
 
-    await useConfigStore.getState().fetchConfig()
+    await expect(useConfigStore.getState().fetchConfig()).resolves.toBe(false)
 
     expect(useConfigStore.getState()).toMatchObject({
       snapshot,
@@ -105,6 +107,66 @@ describe('configStore', () => {
     })
 
     expect(useConfigStore.getState().snapshot).toBe(canonical)
+  })
+
+  it('does not commit a config response after its operation becomes stale', async () => {
+    let resolveConfig: ((value: PublicConfigSnapshot) => void) | undefined
+    let current = true
+    const latest: PublicConfigSnapshot = {
+      ...snapshot,
+      account: { username: '', hasPassword: false, hasCookies: false },
+    }
+    mocks.getConfig.mockReturnValue(new Promise((resolve) => { resolveConfig = resolve }))
+
+    const task = useConfigStore.getState().fetchConfig({ isCurrent: () => current })
+    current = false
+    useConfigStore.setState({ snapshot: latest, loadState: 'ready', error: null })
+    resolveConfig?.(snapshot)
+
+    await expect(task).resolves.toBe(false)
+    expect(useConfigStore.getState()).toMatchObject({
+      snapshot: latest,
+      loadState: 'ready',
+      error: null,
+    })
+  })
+
+  it('does not show a config error after its operation becomes stale', async () => {
+    let rejectConfig: ((reason: Error) => void) | undefined
+    let current = true
+    mocks.getConfig.mockReturnValue(new Promise((_resolve, reject) => { rejectConfig = reject }))
+
+    const task = useConfigStore.getState().fetchConfig({ isCurrent: () => current })
+    current = false
+    useConfigStore.setState({ snapshot, loadState: 'ready', error: null })
+    rejectConfig?.(new Error('旧配置请求失败'))
+
+    await expect(task).resolves.toBe(false)
+    expect(useConfigStore.getState()).toMatchObject({ snapshot, loadState: 'ready', error: null })
+    expect(useToastStore.getState().items).toEqual([])
+  })
+
+  it('does not commit a credential response after its operation becomes stale', async () => {
+    let resolveCredentials: ((value: PublicConfigSnapshot) => void) | undefined
+    let current = true
+    const latest: PublicConfigSnapshot = {
+      ...snapshot,
+      account: { username: '', hasPassword: false, hasCookies: false },
+    }
+    mocks.updateCredentials.mockReturnValue(new Promise((resolve) => {
+      resolveCredentials = resolve
+    }))
+
+    const task = useConfigStore.getState().updateCredentials(
+      { username: 'tester' },
+      { isCurrent: () => current },
+    )
+    current = false
+    useConfigStore.setState({ snapshot: latest, loadState: 'ready', error: null })
+    resolveCredentials?.(snapshot)
+
+    await expect(task).resolves.toBeUndefined()
+    expect(useConfigStore.getState().snapshot).toBe(latest)
   })
 
   it('uses the canonical server response after a logging update', async () => {
@@ -156,20 +218,20 @@ describe('configStore', () => {
       ...snapshot,
       account: { ...snapshot.account, username: 'next-user', hasCookies: false },
     }
-    mocks.updateCredentials.mockRejectedValue(
-      new Error('账号设置已保存，但 Cookie 同步失败，请重试刷新 Cookie'),
-    )
+    mocks.updateCredentials.mockRejectedValue(new Error(
+      "Error invoking remote method 'config:update-credentials': Error: 账号设置已保存，但登录状态同步失败，请重新登录",
+    ))
     mocks.getConfig.mockResolvedValue(committed)
 
     await expect(useConfigStore.getState().updateCredentials({
       username: 'next-user',
       password: 'new-password',
-    })).rejects.toThrow('Cookie 同步失败')
+    })).rejects.toThrow('账号已保存，但登录状态没有更新')
 
     expect(useConfigStore.getState()).toMatchObject({
       snapshot: committed,
       loadState: 'ready',
-      error: '账号设置已保存，但 Cookie 同步失败，请重试刷新 Cookie',
+      error: '账号已保存，但登录状态没有更新，请点击“刷新登录状态”重试。',
     })
   })
 
@@ -179,18 +241,18 @@ describe('configStore', () => {
       health: { state: 'recovery-required', message: '配置损坏' },
     }
     useConfigStore.setState({ snapshot: recovery, loadState: 'ready', error: null })
-    mocks.resetCorruptConfig.mockRejectedValue(
-      new Error('配置已重置，但 Cookie 同步失败，请重启应用'),
-    )
+    mocks.resetCorruptConfig.mockRejectedValue(new Error(
+      "Error invoking remote method 'config:reset-corrupt': Error: 配置已重置，但登录状态同步失败，请重启应用",
+    ))
     mocks.getConfig.mockResolvedValue(snapshot)
 
     await expect(useConfigStore.getState().resetCorruptConfig())
-      .rejects.toThrow('配置已重置')
+      .rejects.toThrow('配置已重置，请重启应用后再次登录')
 
     expect(useConfigStore.getState()).toMatchObject({
       snapshot,
       loadState: 'ready',
-      error: '配置已重置，但 Cookie 同步失败，请重启应用',
+      error: '配置已重置，请重启应用后再次登录。',
     })
   })
 })

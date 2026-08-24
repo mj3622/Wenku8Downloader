@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
   createWindow()
 }).catch((error) => {
   logger.error('app.startup-failed', '应用启动失败', error)
-  dialog.showErrorBox('启动失败', 'Cookie 会话同步失败，请重启应用')
+  dialog.showErrorBox('启动失败', '登录状态同步失败，请重启应用')
   app.quit()
 })
 
