@@ -15,7 +15,7 @@
   },
   "include": [],
   "references": [
-    { "path": "./tsconfig.node.json" },
-    { "path": "./tsconfig.web.json" }
+    { "path": "./tooling/tsconfig.node.json" },
+    { "path": "./tooling/tsconfig.web.json" }
   ]
 }
