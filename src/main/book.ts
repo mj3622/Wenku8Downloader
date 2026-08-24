@@ -180,7 +180,7 @@ export class Book {
     const coverUrl = this.basicInfo['cover']
     if (!coverUrl) throw new Error('无封面图片')
     const content = await this.crawler.getImageContent(coverUrl)
-    if (!content) throw new Error('封面下载失败')
+    if (!content || content.byteLength === 0) throw new Error('封面下载失败')
     return content
   }
 

@@ -11,6 +11,7 @@ import { validateDownloadConfig, validateLogConfig } from './config/config-schem
 import type { WebCrawler } from './crawler'
 import {
   Downloader,
+  NoUsableDownloadContentError,
   resolveDownloadRoot,
   type DownloaderBook,
   type DownloadRuntimeConfig,
@@ -19,18 +20,20 @@ import { resolveWithin } from './path-safety'
 import {
   validateBookId,
   validateExternalUrl,
+  validateLoginOperationId,
   validateOpenFolder,
   validateOptionalTaskId,
   validateOptionalVolumeName,
   validateSearchQuery,
 } from './ipc-validation'
 import type { LogContext } from './logging/file-logger'
+import type { DownloadResult } from '../shared/ipc-types'
 import { configureLogger, getLogDirectory, logger } from './logging/logger'
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('IPC 参数格式无效')
+    throw new Error('请求参数格式无效')
   }
   return value as Record<string, unknown>
 }
@@ -58,6 +61,17 @@ export interface IpcServices {
     get(bookId: string): Promise<IpcBook>
     clear(): void
   }
+}
+
+function completedDownloadResult(warnings: string[]): DownloadResult {
+  const uniqueWarnings = [...new Set(warnings)]
+  return uniqueWarnings.length > 0
+    ? {
+        status: 'ok',
+        message: '下载完成，但有部分内容缺失',
+        warnings: uniqueWarnings,
+      }
+    : { status: 'ok', message: '下载完成' }
 }
 
 function downloadLogContext(
@@ -163,12 +177,17 @@ export function registerIpcHandlers(services: IpcServices): void {
     'config.update-credentials',
     { action: 'update' },
     async () => {
-      services.config.updateCredentials(validateCredentialsInput(input))
+      const credentials = validateCredentialsInput(input)
+      const clearRequested = credentials.username === '' && credentials.password === ''
+      services.config.updateCredentials(credentials)
       try {
         await services.crawler.syncCookies()
         services.books.clear()
       } catch (error) {
-        throw new Error('账号设置已保存，但 Cookie 同步失败，请重试刷新 Cookie', {
+        const message = clearRequested
+          ? '登录信息已清除，但旧登录状态清理未完成，请重启应用'
+          : '账号设置已保存，但登录状态同步失败，请重新登录'
+        throw new Error(message, {
           cause: error,
         })
       }
@@ -185,28 +204,32 @@ export function registerIpcHandlers(services: IpcServices): void {
         await services.crawler.syncCookies()
         services.books.clear()
       } catch (error) {
-        throw new Error('配置已重置，但 Cookie 同步失败，请重启应用', { cause: error })
+        throw new Error('配置已重置，但登录状态同步失败，请重启应用', { cause: error })
       }
       return services.config.getPublicSnapshot()
     },
   ))
 
-  ipcMain.handle('cookie:auto', (event) => runLoggedOperation(
-    'cookie.auto',
-    {},
-    async () => {
-      const service = new CookieService(services.crawler, services.config)
-      try {
-        await service.acquire((progress) => {
-          event.sender.send('cookie:progress', progress)
-        })
-      } catch (error) {
-        throw new Error('登录或 Cookie 保存失败，请检查账号后重试', { cause: error })
-      }
-      services.books.clear()
-      return { status: 'ok', message: '登录成功，已获取 Cookie' }
-    },
-  ))
+  ipcMain.handle('cookie:auto', (event, rawPayload: unknown) => {
+    const operationId = validateLoginOperationId(requirePayload(rawPayload).operationId)
+    return runLoggedOperation(
+      'cookie.auto',
+      {},
+      async () => {
+        const service = new CookieService(services.crawler, services.config)
+        try {
+          await service.acquire((progress) => {
+            event.sender.send('cookie:progress', { ...progress, operationId })
+          })
+        } catch (error) {
+          throw new Error('登录失败或登录状态无法保存，请检查账号后重试', { cause: error })
+        }
+        services.books.clear()
+        return { status: 'ok', message: '登录成功，登录状态已更新' }
+      },
+      { operationId },
+    )
+  })
 
   ipcMain.handle('search:author', (_event, rawPayload: unknown) => {
     const context: LogContext = {}
@@ -275,7 +298,7 @@ export function registerIpcHandlers(services: IpcServices): void {
         event.sender.send('download:progress', { taskId, ...progress })
       })
       await downloader.downloadNovel(book, volumeName)
-      return { status: 'ok', message: '下载完成' }
+      return completedDownloadResult(downloader.getWarnings())
     }, { operationId: preferredOperationId })
   })
 
@@ -298,7 +321,9 @@ export function registerIpcHandlers(services: IpcServices): void {
       if (volumeName) {
         const volumeIndex = Object.keys(book.volumes).indexOf(volumeName)
         const urls = await book.getChapterImageUrls(volumeName)
-        if (volumeIndex < 0 || !urls) throw new Error(`该卷没有可下载的插图: ${volumeName}`)
+        if (volumeIndex < 0 || !urls?.length) {
+          throw new NoUsableDownloadContentError(`该卷没有可保存的插图: ${volumeName}`)
+        }
         await downloader.downloadPictures(
           urls,
           volumeName,
@@ -308,12 +333,32 @@ export function registerIpcHandlers(services: IpcServices): void {
         )
       } else {
         if (Object.keys(book.pictureUrls).length === 0) {
-          throw new Error('该作品没有可下载的插图')
+          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
         }
+        const warnings: string[] = []
+        let firstIllustrationError: unknown
+        let completedVolumes = 0
         for (const volume of Object.keys(book.pictureUrls)) {
-          const urls = await book.getChapterImageUrls(volume)
-          if (urls) {
-            const volumeIndex = Object.keys(book.volumes).indexOf(volume)
+          let urls: string[] | null
+          try {
+            urls = await book.getChapterImageUrls(volume)
+          } catch (error) {
+            firstIllustrationError ??= error
+            logger.error(
+              'download.illustration-page.failed',
+              '插图页读取失败，继续处理其他分卷',
+              error,
+              { ...context, volumeName: volume },
+            )
+            warnings.push(`“${volume}”的插图页无法读取，已跳过该卷。`)
+            continue
+          }
+          if (!urls?.length) {
+            warnings.push(`“${volume}”没有可保存的插图。`)
+            continue
+          }
+          const volumeIndex = Object.keys(book.volumes).indexOf(volume)
+          try {
             await downloader.downloadPictures(
               urls,
               volume,
@@ -321,10 +366,19 @@ export function registerIpcHandlers(services: IpcServices): void {
               book.bookId,
               volumeIndex,
             )
+            completedVolumes++
+          } catch (error) {
+            if (!(error instanceof NoUsableDownloadContentError)) throw error
+            warnings.push(`“${volume}”没有可保存的插图。`)
           }
         }
+        if (completedVolumes === 0) {
+          if (firstIllustrationError !== undefined) throw firstIllustrationError
+          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
+        }
+        return completedDownloadResult([...downloader.getWarnings(), ...warnings])
       }
-      return { status: 'ok', message: '下载完成' }
+      return completedDownloadResult(downloader.getWarnings())
     }, { operationId: preferredOperationId })
   })
 

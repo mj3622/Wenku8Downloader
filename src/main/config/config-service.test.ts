@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import type { DownloadConfig, LogConfig } from '../../shared/config-types'
 import {
   ConfigService,
+  validateCredentialsInput,
   type SecretStorePort,
   type SettingsStorePort,
 } from './config-service'
@@ -193,6 +194,39 @@ describe('ConfigService', () => {
     expect(() => service.updateCredentials({ username: 'new-user' }))
       .toThrow('用户名变更时必须提供密码')
     expect(secretStore.save).not.toHaveBeenCalled()
+  })
+
+  it('rejects blank usernames and missing effective passwords in the service boundary', () => {
+    const { settingsStore, secretStore } = createStores({
+      login: { username: 'same-user', password: '' },
+      cookies: emptySecretPayload().cookies,
+    })
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+    vi.mocked(secretStore.save).mockClear()
+
+    expect(() => service.updateCredentials({ username: '   ', password: 'secret' }))
+      .toThrow('请输入用户名')
+    expect(() => service.updateCredentials({ username: 'same-user' }))
+      .toThrow('请输入密码')
+    expect(secretStore.save).not.toHaveBeenCalled()
+  })
+
+  it('does not interpret username whitespace as an explicit credential clear request', () => {
+    const { settingsStore, secretStore } = createStores({
+      login: { username: 'same-user', password: 'old-password' },
+      cookies: emptySecretPayload().cookies,
+    })
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+    vi.mocked(secretStore.save).mockClear()
+
+    expect(() => service.updateCredentials({ username: '   ', password: '' }))
+      .toThrow('请输入用户名')
+    expect(secretStore.save).not.toHaveBeenCalled()
+  })
+
+  it('normalizes surrounding username whitespace at the IPC validation boundary', () => {
+    expect(validateCredentialsInput({ username: '  tester  ', password: 'secret' }))
+      .toEqual({ username: 'tester', password: 'secret' })
   })
 
   it('preserves an existing password for the same username', () => {

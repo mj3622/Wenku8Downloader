@@ -71,7 +71,7 @@ function cloneSettings(value: SettingsConfig): SettingsConfig {
 
 function parseTitleFormat(value: unknown): TitleFormat {
   if (value !== 'FULL' && value !== 'IN' && value !== 'OUT') {
-    throw new Error('书名格式必须为 FULL、IN 或 OUT')
+    throw new Error('书名格式无效，请重新选择')
   }
   return value
 }
@@ -100,16 +100,16 @@ function parseDownloadPath(value: unknown): string {
     || value.includes('\0')
     || (value !== '' && !isAbsolute(value))
   ) {
-    throw new Error('下载路径格式无效')
+    throw new Error('下载路径无效，请重新选择文件夹')
   }
   return value
 }
 
 export function validateDownloadConfig(value: unknown): DownloadConfig {
-  const record = requireRecord(value, '下载设置格式无效')
+  const record = requireRecord(value, '下载设置格式不正确，请刷新页面后重试')
   const allowedKeys = new Set(['fullTitle', 'defaultCoverIndex', 'downloadPath'])
   const unknownKey = Object.keys(record).find((key) => !allowedKeys.has(key))
-  if (unknownKey) throw new Error(`未知下载设置: ${unknownKey}`)
+  if (unknownKey) throw new Error('下载设置包含不支持的内容，请刷新页面后重试')
 
   return {
     fullTitle: parseTitleFormat(record.fullTitle),
@@ -131,10 +131,10 @@ function requireIntegerInRange(
 }
 
 export function validateLogConfig(value: unknown): LogConfig {
-  const record = requireRecord(value, '日志设置格式无效')
+  const record = requireRecord(value, '日志设置格式不正确，请刷新页面后重试')
   const allowedKeys = new Set(['retentionDays', 'maxFileSizeMb', 'maxTotalSizeMb'])
   const unknownKey = Object.keys(record).find((key) => !allowedKeys.has(key))
-  if (unknownKey) throw new Error(`未知日志设置: ${unknownKey}`)
+  if (unknownKey) throw new Error('日志设置包含不支持的内容，请刷新页面后重试')
 
   const retentionDays = requireIntegerInRange(
     record.retentionDays,
