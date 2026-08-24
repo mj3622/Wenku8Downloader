@@ -49,7 +49,7 @@ describe('validateDownloadConfig', () => {
       defaultCoverIndex: 0,
       downloadPath: '',
       future: true,
-    })).toThrow('未知下载设置')
+    })).toThrow('下载设置包含不支持的内容')
   })
 })
 
@@ -204,6 +204,6 @@ describe('validateLogConfig', () => {
       maxFileSizeMb: 100,
       maxTotalSizeMb: 200,
       future: true,
-    })).toThrow('未知日志设置')
+    })).toThrow('日志设置包含不支持的内容')
   })
 })

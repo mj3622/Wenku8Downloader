@@ -14,6 +14,12 @@ export interface Credentials {
 
 export type CookieSnapshot = Record<CookieName, string>
 
+export function hasAuthenticatedCookies(
+  cookies: Readonly<Pick<CookieSnapshot, 'jieqiUserInfo' | 'jieqiVisitInfo'>>,
+): boolean {
+  return Boolean(cookies.jieqiUserInfo && cookies.jieqiVisitInfo)
+}
+
 export function emptyCookieSnapshot(): CookieSnapshot {
   return {
     PHPSESSID: '',

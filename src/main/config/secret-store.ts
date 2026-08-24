@@ -102,7 +102,7 @@ export class SecretStore {
         return {
           state: 'encryption-unavailable',
           value: fallback,
-          message: '系统安全存储不可用，无法保存账号和 Cookie',
+          message: '系统安全存储不可用，无法保存登录信息',
         }
       }
       return { state: 'missing', value: fallback }
@@ -111,7 +111,7 @@ export class SecretStore {
       return {
         state: 'encryption-unavailable',
         value: fallback,
-        message: '系统安全存储不可用，无法读取账号和 Cookie',
+        message: '系统安全存储不可用，无法读取登录信息',
       }
     }
 
@@ -147,7 +147,7 @@ export class SecretStore {
 
   save(next: SecretPayloadV1): SecretPayloadV1 {
     if (!this.codec.isAvailable()) {
-      throw new Error('系统安全存储不可用，无法保存账号和 Cookie')
+      throw new Error('系统安全存储不可用，无法保存登录信息')
     }
 
     const value = parseSecretPayload(next)

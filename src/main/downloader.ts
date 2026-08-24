@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
-import { join, dirname } from 'path'
+import { randomUUID } from 'crypto'
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import { EpubBuilder, escapeXml, guessMediaType } from './epub-builder'
 import type { Book } from './book'
 import type { WebCrawler } from './crawler'
@@ -61,6 +62,51 @@ export function buildVolumeKey(volumeName: string, volumeIndex: number): string 
   return `${volumeIndex + 1}_${safePathSegment(volumeName, 'volume')}`
 }
 
+interface AtomicDownloadFileOps {
+  open(path: string, flags: 'wx', mode: number): ReturnType<typeof open>
+  rename(oldPath: string, newPath: string): Promise<void>
+  rm(path: string, options: { force: true }): Promise<void>
+}
+
+const DEFAULT_ATOMIC_DOWNLOAD_FILE_OPS: AtomicDownloadFileOps = { open, rename, rm }
+
+export async function atomicWriteDownloadFile(
+  targetPath: string,
+  content: Buffer,
+  overrides: Partial<AtomicDownloadFileOps> = {},
+): Promise<void> {
+  const ops = { ...DEFAULT_ATOMIC_DOWNLOAD_FILE_OPS, ...overrides }
+  const tempPath = resolveWithin(
+    dirname(targetPath),
+    `.${basename(targetPath)}.tmp-${process.pid}-${randomUUID()}`,
+  )
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+
+  try {
+    handle = await ops.open(tempPath, 'wx', 0o600)
+    await handle.writeFile(content)
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    // Renaming replaces the directory entry instead of following an existing link.
+    await ops.rename(tempPath, targetPath)
+  } catch (error) {
+    if (handle) {
+      try {
+        await handle.close()
+      } catch {
+        // Preserve the original write error.
+      }
+    }
+    try {
+      await ops.rm(tempPath, { force: true })
+    } catch {
+      // Preserve the original write error.
+    }
+    throw error
+  }
+}
+
 // ---- 下载缓存：支持断点续传 ----
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 小时后缓存自动失效
@@ -74,6 +120,30 @@ function bookCacheDir(rootPath: string, bookId: string): string {
 }
 
 interface CachedChapter { title: string; content: string }
+
+function hasUsableChapterContent(content: string): boolean {
+  if (!content.trim()) return false
+  if (/<img\b/i.test(content)) return true
+  return content
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:nbsp|#160);/gi, ' ')
+    .trim()
+    .length > 0
+}
+
+function httpStatusFromError(error: unknown): number | undefined {
+  const seen = new Set<unknown>()
+  let current = error
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    const record = current as { status?: unknown; cause?: unknown }
+    if (typeof record.status === 'number' && Number.isInteger(record.status)) {
+      return record.status
+    }
+    current = record.cause
+  }
+  return undefined
+}
 
 async function saveChapterCache(
   rootPath: string,
@@ -96,7 +166,8 @@ async function loadChapterCache(
   const p = resolveWithin(bookCacheDir(rootPath, bookId), 'chapters', safePathSegment(vol, 'volume'), `${idx}.json`)
   try {
     if (Date.now() - (await stat(p)).mtimeMs > CACHE_TTL_MS) return null
-    return JSON.parse(await readFile(p, 'utf-8'))
+    const cached = JSON.parse(await readFile(p, 'utf-8')) as CachedChapter
+    return hasUsableChapterContent(cached.content) ? cached : null
   } catch {
     return null
   }
@@ -130,7 +201,7 @@ async function loadImageCache(
   try {
     if (Date.now() - (await stat(dp)).mtimeMs > CACHE_TTL_MS) return null
     const [data, ext] = await Promise.all([readFile(dp), readFile(mp, 'utf-8')])
-    return { data, ext }
+    return data.byteLength > 0 ? { data, ext } : null
   } catch {
     return null
   }
@@ -182,34 +253,69 @@ type ImageBatchItem = {
   index: number
 }
 
-export async function downloadImageBatch(
+type ImageBatchOutcome = {
+  succeeded: number
+  failedIndices: number[]
+  firstError?: unknown
+}
+
+class MissingImageDataError extends Error {
+  constructor() {
+    super('图片响应中没有可保存的内容')
+    this.name = 'MissingImageDataError'
+  }
+}
+
+async function settleImageBatch(
   items: ImageBatchItem[],
   fetchImage: (url: string) => Promise<Buffer | null>,
   onImage: (data: Buffer, ext: string, index: number) => void | Promise<void>,
-): Promise<void> {
+): Promise<ImageBatchOutcome> {
   const results = await Promise.allSettled(
     items.map(async (item) => {
       const data = await fetchImage(item.url)
-      if (!data) {
-        throw new Error('图片下载失败')
-      }
-      const ext = imageExtensionFromUrl(item.url)
-      return { ...item, data, ext }
+      if (!data || data.byteLength === 0) throw new MissingImageDataError()
+      return { ...item, data, ext: imageExtensionFromUrl(item.url) }
     }),
   )
 
   const failedIndices = results.flatMap((result, index) =>
     result.status === 'rejected' ? [items[index].index + 1] : [],
   )
+  let succeeded = 0
   for (const result of results) {
     if (result.status === 'fulfilled') {
       const item = result.value
       await onImage(item.data, item.ext, item.index)
+      succeeded++
     }
   }
+  const firstError = results.find(
+    (result) => result.status === 'rejected' && !(result.reason instanceof MissingImageDataError),
+  )
+  return {
+    succeeded,
+    failedIndices,
+    firstError: firstError?.status === 'rejected' ? firstError.reason : undefined,
+  }
+}
+
+export async function downloadImageBatch(
+  items: ImageBatchItem[],
+  fetchImage: (url: string) => Promise<Buffer | null>,
+  onImage: (data: Buffer, ext: string, index: number) => void | Promise<void>,
+): Promise<void> {
+  const { failedIndices } = await settleImageBatch(items, fetchImage, onImage)
 
   if (failedIndices.length > 0) {
     throw new Error(`图片下载失败（序号：${failedIndices.join(', ')}）`)
+  }
+}
+
+export class NoUsableDownloadContentError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NoUsableDownloadContentError'
   }
 }
 
@@ -218,6 +324,7 @@ export class Downloader {
   private readonly runtimeConfig: Readonly<DownloadRuntimeConfig>
   private readonly rateLimiter: DownloadRateLimiter
   private readonly logContext: DownloaderLogContext
+  private readonly warnings: string[] = []
   private onProgress: ((p: DownloadProgress) => void) | null = null
 
   constructor(
@@ -264,13 +371,23 @@ export class Downloader {
       if (content && !receivedResponseStatus) this.rateLimiter.record(200)
       return content
     } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      const status = httpStatusFromError(err)
+        ?? (/\bHTTP\s*429\b/i.test(message) ? 429 : undefined)
+        ?? (/\bHTTP\s*403\b/i.test(message) ? 403 : undefined)
       if (!receivedResponseStatus) {
-        const msg = (err as Error).message
-        if (msg.includes('429')) this.rateLimiter.record(429)
-        else if (msg.includes('403')) this.rateLimiter.record(403)
+        if (status === 429) this.rateLimiter.record(429)
+        else if (status === 403) this.rateLimiter.record(403)
         else this.rateLimiter.record(503)
       }
-      return null
+      if (status === 429) {
+        throw new Error('请求过于频繁，已自动降低下载速度，请稍等片刻后重试', { cause: err })
+      }
+      if (status === 403) {
+        throw new Error('登录状态已失效，请前往配置页重新登录后重试', { cause: err })
+      }
+      if (err instanceof Error) throw err
+      throw new Error('图片下载失败，请稍后重试', { cause: err })
     }
   }
 
@@ -280,18 +397,22 @@ export class Downloader {
       const $ = await this.crawler.fetch(url)
       const textDiv = $('#content')
       textDiv.find('ul').each((_i, ul) => $(ul).remove())
-      const html = textDiv.html() || ''
+      const html = (textDiv.html() || '').trim()
+      const readableText = textDiv.text().replace(/\u00a0/g, ' ').trim()
+      if (!html || (!readableText && textDiv.find('img').length === 0)) {
+        throw new NoUsableDownloadContentError('章节内容为空，请稍后重试')
+      }
       this.rateLimiter.record(200)
       return html
     } catch (err) {
-      const msg = (err as Error).message
-      if (msg.includes('429')) {
+      const status = httpStatusFromError(err)
+      if (status === 429) {
         this.rateLimiter.record(429)
-        throw new Error('服务器限流（HTTP 429），已自动降低下载速度并进入冷却期，请等待片刻后重试', { cause: err })
+        throw new Error('请求过于频繁，已自动降低下载速度，请稍等片刻后重试', { cause: err })
       }
-      if (msg.includes('403')) {
+      if (status === 403) {
         this.rateLimiter.record(403)
-        throw new Error('访问被拒绝（HTTP 403），Cookie 可能已过期，请前往「配置」页面刷新 Cookie', { cause: err })
+        throw new Error('登录状态已失效，请前往配置页重新登录后重试', { cause: err })
       }
       throw err
     }
@@ -301,18 +422,24 @@ export class Downloader {
     urls: string[],
     onImage: (data: Buffer, ext: string, index: number) => void | Promise<void>,
     onProgress: (completed: number, total: number) => void,
-  ): Promise<void> {
+  ): Promise<ImageBatchOutcome> {
     const retries = this.speed.maxRetries
     const total = urls.length
     let completed = 0
+    let succeeded = 0
+    const failedIndices: number[] = []
+    let firstError: unknown
 
     if (this.speed.imageConcurrency === 1) {
       for (let i = 0; i < urls.length; i++) {
-        await downloadImageBatch(
+        const outcome = await settleImageBatch(
           [{ url: urls[i], index: i }],
           (url) => this.fetchImageWithRetry(url, retries),
           onImage,
         )
+        succeeded += outcome.succeeded
+        failedIndices.push(...outcome.failedIndices)
+        firstError ??= outcome.firstError
         completed++
         onProgress(completed, total)
       }
@@ -320,16 +447,20 @@ export class Downloader {
       const batchSize = this.speed.imageConcurrency
       for (let i = 0; i < urls.length; i += batchSize) {
         const batch = urls.slice(i, i + batchSize)
-        await downloadImageBatch(
+        const outcome = await settleImageBatch(
           batch.map((url, batchIdx) => ({ url, index: i + batchIdx })),
           (url) => this.fetchImageWithRetry(url, retries),
           onImage,
         )
+        succeeded += outcome.succeeded
+        failedIndices.push(...outcome.failedIndices)
+        firstError ??= outcome.firstError
         completed += batch.length
         onProgress(completed, total)
         if (this.speed.delayMs > 0) await sleep(this.speed.delayMs)
       }
     }
+    return { succeeded, failedIndices, firstError }
   }
 
   async downloadPictures(
@@ -339,6 +470,9 @@ export class Downloader {
     bookId: string,
     volumeIndex?: number,
   ): Promise<void> {
+    if (urls.length === 0) {
+      throw new NoUsableDownloadContentError('该分卷没有可保存的插图')
+    }
     const savePath = this.runtimeConfig.rootPath
     const bookKey = buildBookKey(novelName, bookId)
     const safeVolumeName = safePathSegment(volumeName, 'volume')
@@ -350,9 +484,12 @@ export class Downloader {
 
     // 检查已有文件，跳过已下载的图片
     const existingIndices = new Set<number>()
-    for (const f of await readdir(volumePath)) {
-      const match = f.match(/^(\d+)\./)
-      if (match) existingIndices.add(parseInt(match[1]) - 1)
+    for (const entry of await readdir(volumePath, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const match = entry.name.match(/^(\d+)\./)
+      if (!match) continue
+      const metadata = await stat(resolveWithin(volumePath, entry.name))
+      if (metadata.size > 0) existingIndices.add(parseInt(match[1]) - 1)
     }
 
     const toFetch: { url: string; idx: number }[] = []
@@ -380,12 +517,12 @@ export class Downloader {
     }
 
     let writtenBytes = 0
-    await this.downloadImagesWithConcurrency(
+    const outcome = await this.downloadImagesWithConcurrency(
       toFetch.map(x => x.url),
       async (content, ext, batchIdx) => {
         const i = toFetch[batchIdx].idx
         const filePath = resolveWithin(volumePath, `${i + 1}.${ext}`)
-        await writeFile(filePath, content)
+        await atomicWriteDownloadFile(filePath, content)
         writtenBytes += content.byteLength
       },
       (completed, _total) => {
@@ -396,12 +533,52 @@ export class Downloader {
         )
       },
     )
+    if (skipped + outcome.succeeded === 0) {
+      if (outcome.firstError !== undefined) throw outcome.firstError
+      throw new NoUsableDownloadContentError('该分卷没有可保存的插图')
+    }
+    if (outcome.failedIndices.length > 0) {
+      this.addWarning(
+        `“${volumeName}”有 ${outcome.failedIndices.length} 张插图未能下载，已保存其余插图。`,
+      )
+    }
     logger.info('download.output.written', '插图文件已写入', {
       ...summaryContext,
-      itemCount: toFetch.length,
+      itemCount: outcome.succeeded,
       byteCount: writtenBytes,
     })
     logger.info('download.pictures.volume-completed', '插图卷下载完成', summaryContext)
+  }
+
+  getWarnings(): string[] {
+    return [...this.warnings]
+  }
+
+  private addWarning(message: string): void {
+    if (this.warnings.includes(message)) return
+    this.warnings.push(message)
+    logger.warn('download.partial-warning', message, { ...this.logContext })
+  }
+
+  private async loadIllustrationUrls(
+    book: DownloaderBook,
+    volumeName: string,
+  ): Promise<{ urls: string[] | null; error?: unknown }> {
+    try {
+      return { urls: await book.getChapterImageUrls(volumeName) }
+    } catch (error) {
+      logger.error(
+        'download.illustration-page.failed',
+        '插图页读取失败',
+        error,
+        {
+          ...this.logContext,
+          bookId: String(book.bookId),
+          volumeName,
+        },
+      )
+      return { urls: null, error }
+    }
   }
 
   async downloadNovel(book: DownloaderBook, volumeName?: string): Promise<void> {
@@ -445,21 +622,38 @@ export class Downloader {
     let completedChapters = 0
     let imageCache = { hits: 0, total: 0 }
     let chapterCache = { hits: 0, total: chapterItems.length }
+    let illustrationError: unknown
+    let illustrationDownloadError: unknown
+    let illustrationWarning: string | undefined
 
     // 插图下载（带缓存）
     if (illustItem) {
       this.emitProgress(0, totalChapters, `正在下载插图 (${volumeName})`)
-      const urls = await book.getChapterImageUrls(volumeName)
-      if (urls) {
+      const illustration = await this.loadIllustrationUrls(book, volumeName)
+      const { urls } = illustration
+      illustrationError = illustration.error
+      if (urls?.length) {
         const imgResults = await this.downloadVolumeImagesCached(
-          urls, volumeKey, 0, totalChapters, images, builder, bookId,
+          urls, volumeName, volumeKey, 0, totalChapters, images, builder, bookId,
         )
         imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
-        chapters.push({
-          title: '插图',
-          content: imgResults.html,
-          fileName: `illustrations_${volumeKey}.xhtml`,
-        })
+        illustrationDownloadError = imgResults.firstError
+        if (imgResults.failedCount > 0) {
+          illustrationWarning = imgResults.html
+            ? `“${volumeName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
+            : `“${volumeName}”的插图未能下载，正文内容仍会保存。`
+        }
+        if (imgResults.html) {
+          chapters.push({
+            title: '插图',
+            content: imgResults.html,
+            fileName: `illustrations_${volumeKey}.xhtml`,
+          })
+        }
+      } else if (illustrationError !== undefined) {
+        illustrationWarning = `“${volumeName}”的插图页无法读取，正文内容仍会保存。`
+      } else if (urls === null) {
+        illustrationWarning = `“${volumeName}”的插图未能获取，正文内容仍会保存。`
       }
     }
 
@@ -475,6 +669,13 @@ export class Downloader {
 
     this.logCacheSummary(bookId, volumeName, imageCache, chapterCache)
 
+    if (chapters.length === 0 && images.length === 0) {
+      if (illustrationError !== undefined) throw illustrationError
+      if (illustrationDownloadError !== undefined) throw illustrationDownloadError
+      throw new NoUsableDownloadContentError('该分卷没有可保存的内容')
+    }
+    if (illustrationWarning) this.addWarning(illustrationWarning)
+
     for (const ch of chapters) builder.addChapter(ch)
     for (const img of images) builder.addImage(img)
 
@@ -484,7 +685,7 @@ export class Downloader {
     const outputFileName = `${volumeKey}.epub`
     await mkdir(saveDir, { recursive: true })
     const outputPath = resolveWithin(saveDir, outputFileName)
-    await writeFile(outputPath, epubBuffer)
+    await atomicWriteDownloadFile(outputPath, epubBuffer)
     logger.info('download.output.written', 'EPUB 文件已写入', {
       ...this.logContext,
       bookId,
@@ -498,6 +699,7 @@ export class Downloader {
 
   private async downloadVolumeImagesCached(
     urls: string[],
+    volumeName: string,
     volumeKey: string,
     itemIdx: number,
     total: number,
@@ -505,8 +707,16 @@ export class Downloader {
     builder: EpubBuilder,
     bookId: string,
     setCover = true,
-  ): Promise<{ html: string; cacheHits: number; total: number }> {
+  ): Promise<{
+    html: string
+    cacheHits: number
+    total: number
+    failedCount: number
+    firstError?: unknown
+  }> {
     let htmlParts = ''
+    let failedCount = 0
+    let firstError: unknown
 
     // 加载已缓存的图片
     const cachedImgs: { data: Buffer; ext: string; idx: number }[] = []
@@ -534,7 +744,7 @@ export class Downloader {
       .filter(x => !cachedImgs.some(r => r.idx === x.idx))
 
     if (toFetch.length > 0) {
-      await this.downloadImagesWithConcurrency(
+      const outcome = await this.downloadImagesWithConcurrency(
         toFetch.map(x => x.url),
         async (data, ext, batchIdx) => {
           const idx = toFetch[batchIdx].idx
@@ -556,9 +766,17 @@ export class Downloader {
           )
         },
       )
+      failedCount = outcome.failedIndices.length
+      firstError = outcome.firstError
     }
 
-    return { html: htmlParts, cacheHits: cachedImgs.length, total: urls.length }
+    return {
+      html: htmlParts,
+      cacheHits: cachedImgs.length,
+      total: urls.length,
+      failedCount,
+      firstError,
+    }
   }
 
   /** 下载章节列表，优先使用缓存。startCompleted 为跨卷累计的已完成章节数 */
@@ -659,8 +877,13 @@ export class Downloader {
       const coverUrl = book.basicInfo['cover'] || ''
       const coverFileName = `cover.${imageExtensionFromUrl(coverUrl)}`
       builder.setCover(coverFileName, coverContent)
-    } catch {
-      // 封面下载失败，继续
+    } catch (error) {
+      logger.error('download.cover.failed', '封面下载失败，继续生成 EPUB', error, {
+        ...this.logContext,
+        bookId: book.bookId,
+        title: bookTitle,
+      })
+      this.addWarning('封面未能下载，正文内容仍已保存。')
     }
 
     const bookId = String(book.bookId)
@@ -668,12 +891,17 @@ export class Downloader {
     const images: EpubImage[] = []
     const allVolumes = Object.entries(book.volumes)
     const volumeNames = allVolumes.map(([name]) => name)
+    if (allVolumes.length === 0) {
+      throw new NoUsableDownloadContentError('该作品没有可保存的内容')
+    }
 
     let totalChapters = 0
     for (const [, volume] of allVolumes) {
       totalChapters += volume.filter(item => item.name !== '插图').length
     }
     let completedChapters = 0
+    const illustrationFailures: Array<{ volumeName: string; error: unknown }> = []
+    const illustrationWarnings: string[] = []
 
     for (const [volumeIndex, [volName, volume]] of allVolumes.entries()) {
       let htmlParts = ''
@@ -693,14 +921,30 @@ export class Downloader {
       // 插图下载（带缓存）
       if (illustItem) {
         this.emitProgress(completedChapters, totalChapters, `正在下载插图 (${volName})`)
-        const urls = await book.getChapterImageUrls(volName)
-        if (urls) {
+        const illustration = await this.loadIllustrationUrls(book, volName)
+        const { urls } = illustration
+        if (urls?.length) {
           const imgResults = await this.downloadVolumeImagesCached(
-            urls, volumeKey, completedChapters, totalChapters, images, builder, bookId,
+            urls, volName, volumeKey, completedChapters, totalChapters, images, builder, bookId,
             false, // 整本下载不从卷插图设置封面（封面已在前面通过 book.getCoverContent() 设置）
           )
           imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
-          htmlParts += imgResults.html + '<br/>'
+          if (imgResults.failedCount > 0) {
+            if (!imgResults.html && imgResults.firstError !== undefined) {
+              illustrationFailures.push({ volumeName: volName, error: imgResults.firstError })
+            }
+            illustrationWarnings.push(
+              imgResults.html
+                ? `“${volName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
+                : `“${volName}”的插图未能下载，正文内容仍会保存。`,
+            )
+          }
+          if (imgResults.html) htmlParts += imgResults.html + '<br/>'
+        } else if (illustration.error !== undefined) {
+          illustrationFailures.push({ volumeName: volName, error: illustration.error })
+          illustrationWarnings.push(`“${volName}”的插图页无法读取，正文内容仍会保存。`)
+        } else if (urls === null) {
+          illustrationWarnings.push(`“${volName}”的插图未能获取，正文内容仍会保存。`)
         }
       }
 
@@ -716,13 +960,21 @@ export class Downloader {
         }
       }
 
-      chapters.push({
-        title: volName,
-        content: htmlParts,
-        fileName: `${volumeKey}.xhtml`,
-      })
+      if (hasUsableChapterContent(htmlParts)) {
+        chapters.push({
+          title: volName,
+          content: htmlParts,
+          fileName: `${volumeKey}.xhtml`,
+        })
+      }
       this.logCacheSummary(bookId, volName, imageCache, chapterCache)
     }
+
+    if (chapters.length === 0 && images.length === 0) {
+      if (illustrationFailures.length > 0) throw illustrationFailures[0].error
+      throw new NoUsableDownloadContentError('该作品没有可保存的内容')
+    }
+    for (const warning of illustrationWarnings) this.addWarning(warning)
 
     for (const ch of chapters) builder.addChapter(ch)
     for (const img of images) builder.addImage(img)
@@ -733,7 +985,7 @@ export class Downloader {
     const outputFileName = `${bookKey}.epub`
     await mkdir(novelsDir, { recursive: true })
     const outputPath = resolveWithin(novelsDir, outputFileName)
-    await writeFile(outputPath, epubBuffer)
+    await atomicWriteDownloadFile(outputPath, epubBuffer)
     logger.info('download.output.written', 'EPUB 文件已写入', {
       ...this.logContext,
       bookId,

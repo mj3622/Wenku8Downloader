@@ -12,16 +12,16 @@ const MAX_RENDERER_REPORT = 64 * 1024
 
 export function validateBookId(value: unknown): string {
   if (typeof value !== 'string' || !/^\d{1,12}$/.test(value)) {
-    throw new Error('作品编号必须为 1 到 12 位数字')
+    throw new Error('作品编号无效，请输入 1 到 12 位数字')
   }
   return value
 }
 
 export function validateSearchQuery(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('搜索内容必须为字符串')
+  if (typeof value !== 'string') throw new Error('搜索内容格式不正确，请重新输入')
   const query = value.trim()
   if (query.length === 0 || query.length > 100) {
-    throw new Error('搜索内容长度必须为 1 到 100 个字符')
+    throw new Error('请输入 1 到 100 个字符进行搜索')
   }
   return query
 }
@@ -46,7 +46,7 @@ export function validateOpenFolder(value: unknown): OpenFolderTarget {
     typeof value !== 'string'
     || !OPEN_FOLDER_TARGETS.includes(value as OpenFolderTarget)
   ) {
-    throw new Error('下载文件夹必须为 root、pics 或 novels')
+    throw new Error('下载文件夹类型无效，请重新打开页面后再试')
   }
   return value as OpenFolderTarget
 }
@@ -54,7 +54,7 @@ export function validateOpenFolder(value: unknown): OpenFolderTarget {
 export function validateOptionalVolumeName(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string' || value.length === 0 || value.length > 200) {
-    throw new Error('卷名格式无效')
+    throw new Error('分卷信息无效，请返回作品页重新选择')
   }
   return value
 }
@@ -62,7 +62,14 @@ export function validateOptionalVolumeName(value: unknown): string | undefined {
 export function validateOptionalTaskId(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string' || !/^dl-\d+-\d+$/.test(value)) {
-    throw new Error('下载任务编号格式无效')
+    throw new Error('下载任务信息已失效，请重新发起下载')
+  }
+  return value
+}
+
+export function validateLoginOperationId(value: unknown): string {
+  if (typeof value !== 'string' || !/^login-\d{1,16}-\d{1,10}$/.test(value)) {
+    throw new Error('登录请求已失效，请重新刷新登录状态')
   }
   return value
 }

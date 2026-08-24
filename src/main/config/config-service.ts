@@ -19,6 +19,7 @@ import {
 } from './secret-store'
 import {
   COOKIE_NAMES,
+  hasAuthenticatedCookies,
   type CookieSnapshot,
   type Credentials,
 } from './secret-types'
@@ -66,34 +67,38 @@ function requireRecord(value: unknown, message: string): Record<string, unknown>
 }
 
 export function validateCredentialsInput(value: unknown): UpdateCredentialsInput {
-  const record = requireRecord(value, '账号设置格式无效')
+  const record = requireRecord(value, '账号设置格式不正确，请重新输入')
   const allowed = new Set(['username', 'password'])
   const unknownKey = Object.keys(record).find((key) => !allowed.has(key))
-  if (unknownKey) throw new Error(`未知账号设置: ${unknownKey}`)
+  if (unknownKey) throw new Error('账号设置包含不支持的内容，请刷新页面后重试')
   if (typeof record.username !== 'string' || record.username.length > 256) {
-    throw new Error('用户名格式无效')
+    throw new Error('用户名格式不正确，请重新输入')
   }
   if (
     record.password !== undefined
     && (typeof record.password !== 'string' || record.password.length > 4096)
   ) {
-    throw new Error('密码格式无效')
+    throw new Error('密码格式不正确，请重新输入')
   }
+  const rawUsername = record.username
+  const username = rawUsername.trim()
+  const exactClearRequest = rawUsername === '' && record.password === ''
+  if (!exactClearRequest && !username) throw new Error('请输入用户名')
   return record.password === undefined
-    ? { username: record.username }
-    : { username: record.username, password: record.password as string }
+    ? { username }
+    : { username, password: record.password as string }
 }
 
 function validateCookies(value: unknown): CookieSnapshot {
-  const record = requireRecord(value, 'Cookie 设置格式无效')
+  const record = requireRecord(value, '登录状态数据格式无效')
   const unknownKey = Object.keys(record).find(
     (key) => !COOKIE_NAMES.includes(key as typeof COOKIE_NAMES[number]),
   )
-  if (unknownKey) throw new Error(`未知 Cookie: ${unknownKey}`)
+  if (unknownKey) throw new Error('登录状态数据包含不支持的字段')
   const result = {} as CookieSnapshot
   for (const key of COOKIE_NAMES) {
     if (typeof record[key] !== 'string' || (record[key] as string).length > 16_384) {
-      throw new Error('Cookie 设置格式无效')
+      throw new Error('登录状态数据格式无效')
     }
     result[key] = record[key] as string
   }
@@ -134,7 +139,7 @@ function healthFrom(
   ) {
     return {
       state: 'encryption-unavailable',
-      message: '系统安全存储不可用，账号和 Cookie 无法持久化',
+      message: '系统安全存储不可用，登录信息无法长期保存',
     }
   }
   return { state: 'ok' }
@@ -236,7 +241,7 @@ export class ConfigService {
       account: {
         username: this.secrets.login.username,
         hasPassword: this.secrets.login.password.length > 0,
-        hasCookies: Object.values(this.secrets.cookies).some(Boolean),
+        hasCookies: hasAuthenticatedCookies(this.secrets.cookies),
       },
       health: healthFrom(this.settingsLoad, this.secretLoad, this.migration),
     }
@@ -327,20 +332,28 @@ export class ConfigService {
       this.secretLoad.state !== 'ok'
       || !this.secretStore.isEncryptionAvailable()
     ) {
-      throw new Error('账号和 Cookie 当前不可修改，请先恢复安全存储')
+      throw new Error('登录信息当前不可修改，请先恢复系统安全存储')
     }
-    if (value.username !== this.secrets.login.username && value.password === undefined) {
+    const validated = validateCredentialsInput(value)
+    const clearRequested = validated.username === '' && validated.password === ''
+    if (!clearRequested && !validated.username) {
+      throw new Error('请输入用户名')
+    }
+    if (
+      validated.username !== this.secrets.login.username
+      && validated.password === undefined
+    ) {
       throw new Error('用户名变更时必须提供密码')
     }
 
-    const password = value.password ?? this.secrets.login.password
-    const credentialsChanged = value.username !== this.secrets.login.username
+    const password = validated.password ?? this.secrets.login.password
+    if (!clearRequested && !password) throw new Error('请输入密码')
+    const credentialsChanged = validated.username !== this.secrets.login.username
       || password !== this.secrets.login.password
-    const clearRequested = value.username === '' && value.password === ''
     const next: SecretPayloadV1 = clearRequested
       ? emptySecretPayload()
       : {
-          login: { username: value.username, password },
+          login: { username: validated.username, password },
           cookies: credentialsChanged
             ? emptySecretPayload().cookies
             : { ...this.secrets.cookies },
@@ -362,7 +375,7 @@ export class ConfigService {
       this.secretLoad.state !== 'ok'
       || !this.secretStore.isEncryptionAvailable()
     ) {
-      throw new Error('Cookie 当前不可保存，请先恢复安全存储')
+      throw new Error('登录状态当前不可保存，请先恢复系统安全存储')
     }
     const next: SecretPayloadV1 = {
       login: { ...this.secrets.login },
@@ -372,7 +385,7 @@ export class ConfigService {
     try {
       saved = this.secretStore.save(next)
     } catch (error) {
-      throw new Error('Cookie 保存失败', { cause: error })
+      throw new Error('登录状态保存失败', { cause: error })
     }
     this.secrets = cloneSecrets(saved)
     this.secretLoad = { state: 'ok', value: cloneSecrets(saved) }

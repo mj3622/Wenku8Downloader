@@ -24,7 +24,10 @@ const mocks = vi.hoisted(() => {
     downloadNovel: vi.fn(async () => undefined),
     downloadPictures: vi.fn(async () => undefined),
     downloaderConfigs: [] as unknown[],
-    acquireCookie: vi.fn(async () => ({ loginCookies: {} })),
+    downloaderWarnings: [] as string[],
+    acquireCookie: vi.fn(async (
+      _onProgress?: (progress: { step: string; message: string }) => void,
+    ) => ({ loginCookies: {} })),
     configureLogger: vi.fn(),
     logger: {
       debug: vi.fn(),
@@ -51,7 +54,8 @@ vi.mock('./logging/logger', () => ({
   logger: mocks.logger,
 }))
 
-vi.mock('fs/promises', () => ({
+vi.mock('fs/promises', async (importOriginal) => ({
+  ...await importOriginal<typeof import('fs/promises')>(),
   mkdir: mocks.mkdir,
 }))
 
@@ -73,6 +77,7 @@ vi.mock('./downloader', async (importOriginal) => {
       setOnProgress = mocks.setOnProgress
       downloadNovel = mocks.downloadNovel
       downloadPictures = mocks.downloadPictures
+      getWarnings = () => [...mocks.downloaderWarnings]
     },
   }
 })
@@ -126,7 +131,7 @@ function createBookFixture() {
 type BookFixture = ReturnType<typeof createBookFixture>
 
 function createServices(
-  bookPromise: Promise<BookFixture> = Promise.resolve(createBookFixture()),
+  bookPromise: Promise<IpcBook> = Promise.resolve(createBookFixture()),
 ): IpcServices {
   return {
     config: {
@@ -171,6 +176,7 @@ beforeEach(() => {
   mocks.handlers.clear()
   mocks.listeners.clear()
   mocks.downloaderConfigs.length = 0
+  mocks.downloaderWarnings.length = 0
   vi.clearAllMocks()
   services = createServices()
   registerIpcHandlers(services)
@@ -282,9 +288,24 @@ describe('registerIpcHandlers configuration boundary', () => {
     await expect(invoke('config:update-credentials', {}, {
       username: 'tester',
       password: 'new-secret',
-    })).rejects.toThrow('账号设置已保存，但 Cookie 同步失败')
+    })).rejects.toThrow('账号设置已保存，但登录状态同步失败')
 
     expect(services.config.updateCredentials).toHaveBeenCalledTimes(1)
+    expect(services.books.clear).not.toHaveBeenCalled()
+  })
+
+  it('explains that credentials were cleared when stale login cleanup fails', async () => {
+    vi.mocked(services.crawler.syncCookies).mockRejectedValue(new Error('session cleanup failed'))
+
+    await expect(invoke('config:update-credentials', {}, {
+      username: '',
+      password: '',
+    })).rejects.toThrow('登录信息已清除，但旧登录状态清理未完成，请重启应用')
+
+    expect(services.config.updateCredentials).toHaveBeenCalledWith({
+      username: '',
+      password: '',
+    })
     expect(services.books.clear).not.toHaveBeenCalled()
   })
 
@@ -405,7 +426,7 @@ describe('registerIpcHandlers application operations', () => {
   })
 
   it('rejects invalid payloads before external side effects', async () => {
-    await expect(invoke('search:title', {}, { query: '' })).rejects.toThrow('搜索内容长度')
+    await expect(invoke('search:title', {}, { query: '' })).rejects.toThrow('请输入 1 到 100 个字符')
     await expect(invoke('book:get', {}, { bookId: '../3057' })).rejects.toThrow('作品编号')
     await expect(invoke('download:epub', {}, { bookId: 'not-a-book' })).rejects.toThrow('作品编号')
     await expect(invoke('shell:openExternal', {}, 'http://wenku8.net')).rejects.toThrow('允许范围')
@@ -480,6 +501,109 @@ describe('registerIpcHandlers application operations', () => {
     )
   })
 
+  it('returns safe partial-success warnings from EPUB downloads', async () => {
+    mocks.downloaderWarnings.push('封面未能下载，正文内容仍已保存。')
+
+    const result = await invoke(
+      'download:epub',
+      { sender: { send: vi.fn() } },
+      { bookId: '3057', taskId: 'dl-123-1' },
+    )
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: '下载完成，但有部分内容缺失',
+      warnings: ['封面未能下载，正文内容仍已保存。'],
+    })
+  })
+
+  it('rejects an all-volume image request when no volume produces output', async () => {
+    const book: IpcBook = {
+      ...createBookFixture(),
+      getChapterImageUrls: vi.fn(async () => null),
+    }
+    mocks.handlers.clear()
+    services = createServices(Promise.resolve(book))
+    registerIpcHandlers(services)
+
+    await expect(invoke(
+      'download:images',
+      { sender: { send: vi.fn() } },
+      { bookId: '3057', taskId: 'dl-123-1' },
+    )).rejects.toThrow('没有可保存的插图')
+
+    expect(mocks.downloadPictures).not.toHaveBeenCalled()
+  })
+
+  it('preserves the first illustration-page error when every volume fails to load', async () => {
+    const firstError = new Error('登录状态已失效，请重新登录后重试')
+    const book: IpcBook = {
+      ...createBookFixture(),
+      volumes: {
+        '第一卷': [{ name: '插图', link: 'first.htm' }],
+        '第二卷': [{ name: '插图', link: 'second.htm' }],
+      },
+      pictureUrls: {
+        '第一卷': 'first.htm',
+        '第二卷': 'second.htm',
+      },
+      getChapterImageUrls: vi.fn()
+        .mockRejectedValueOnce(firstError)
+        .mockRejectedValueOnce(new Error('网络连接失败，请稍后重试')),
+    }
+    mocks.handlers.clear()
+    services = createServices(Promise.resolve(book))
+    registerIpcHandlers(services)
+
+    await expect(invoke(
+      'download:images',
+      { sender: { send: vi.fn() } },
+      { bookId: '3057', taskId: 'dl-123-1' },
+    )).rejects.toBe(firstError)
+
+    expect(mocks.downloadPictures).not.toHaveBeenCalled()
+  })
+
+  it('returns a warning when a later illustration page fails after another volume succeeds', async () => {
+    const book: IpcBook = {
+      ...createBookFixture(),
+      volumes: {
+        '第一卷': [{ name: '插图', link: 'first.htm' }],
+        '第二卷': [{ name: '插图', link: 'second.htm' }],
+      },
+      pictureUrls: {
+        '第一卷': 'first.htm',
+        '第二卷': 'second.htm',
+      },
+      getChapterImageUrls: vi.fn(async (volumeName?: string) => {
+        if (volumeName === '第二卷') throw new Error('illustration page timeout')
+        return ['https://example.com/1.jpg']
+      }),
+    }
+    mocks.handlers.clear()
+    services = createServices(Promise.resolve(book))
+    registerIpcHandlers(services)
+
+    const result = await invoke(
+      'download:images',
+      { sender: { send: vi.fn() } },
+      { bookId: '3057', taskId: 'dl-123-1' },
+    )
+
+    expect(mocks.downloadPictures).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({
+      status: 'ok',
+      message: '下载完成，但有部分内容缺失',
+      warnings: ['“第二卷”的插图页无法读取，已跳过该卷。'],
+    })
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      'download.illustration-page.failed',
+      '插图页读取失败，继续处理其他分卷',
+      expect.any(Error),
+      expect.objectContaining({ bookId: '3057', volumeName: '第二卷' }),
+    )
+  })
+
   it.each([
     ['download:epub', mocks.downloadNovel],
     ['download:images', mocks.downloadPictures],
@@ -539,9 +663,24 @@ describe('registerIpcHandlers application operations', () => {
   })
 
   it('invalidates cached books after automatic Cookie refresh', async () => {
-    await invoke('cookie:auto', { sender: { send: vi.fn() } })
+    const send = vi.fn()
+    mocks.acquireCookie.mockImplementationOnce(async (onProgress) => {
+      onProgress?.({ step: 'login', message: '正在登录...' })
+      return { loginCookies: {} }
+    })
+
+    await invoke(
+      'cookie:auto',
+      { sender: { send } },
+      { operationId: 'login-123-1' },
+    )
 
     expect(mocks.acquireCookie).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledWith('cookie:progress', {
+      operationId: 'login-123-1',
+      step: 'login',
+      message: '正在登录...',
+    })
     expect(services.books.clear).toHaveBeenCalledTimes(1)
   })
 })
