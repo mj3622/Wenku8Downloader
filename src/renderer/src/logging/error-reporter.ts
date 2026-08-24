@@ -9,12 +9,17 @@ function bounded(value: string | undefined, maxLength: number): string | undefin
   return value.length <= maxLength ? value : value.slice(0, maxLength)
 }
 
-function safeReport(
+export function reportRendererErrorSafely(
   report: (value: RendererErrorReport) => void,
   value: RendererErrorReport,
 ): void {
   try {
-    report(value)
+    report({
+      ...value,
+      message: bounded(value.message, MAX_MESSAGE) ?? 'Unknown renderer error',
+      stack: bounded(value.stack, MAX_STACK),
+      source: bounded(value.source, MAX_SOURCE),
+    })
   } catch {
     // Error reporting must not create another renderer failure.
   }
@@ -27,18 +32,16 @@ export function installRendererErrorReporter(
   const onError = (rawEvent: Event): void => {
     try {
       const event = rawEvent as ErrorEvent
-      const message = bounded(event.message || 'Unknown renderer error', MAX_MESSAGE)
-        ?? 'Unknown renderer error'
-      safeReport(report, {
+      reportRendererErrorSafely(report, {
         kind: 'error',
-        message,
-        stack: bounded(event.error instanceof Error ? event.error.stack : undefined, MAX_STACK),
-        source: bounded(event.filename || undefined, MAX_SOURCE),
+        message: event.message || 'Unknown renderer error',
+        stack: event.error instanceof Error ? event.error.stack : undefined,
+        source: event.filename || undefined,
         line: event.lineno || undefined,
         column: event.colno || undefined,
       })
     } catch {
-      safeReport(report, {
+      reportRendererErrorSafely(report, {
         kind: 'error',
         message: 'Unknown renderer error',
       })
@@ -48,13 +51,13 @@ export function installRendererErrorReporter(
     try {
       const reason = (rawEvent as Event & { reason?: unknown }).reason
       const rawMessage = reason instanceof Error ? reason.message : String(reason ?? 'Unknown rejection')
-      safeReport(report, {
+      reportRendererErrorSafely(report, {
         kind: 'unhandled-rejection',
-        message: bounded(rawMessage, MAX_MESSAGE) ?? 'Unknown rejection',
-        stack: bounded(reason instanceof Error ? reason.stack : undefined, MAX_STACK),
+        message: rawMessage || 'Unknown rejection',
+        stack: reason instanceof Error ? reason.stack : undefined,
       })
     } catch {
-      safeReport(report, {
+      reportRendererErrorSafely(report, {
         kind: 'unhandled-rejection',
         message: 'Unknown rejection',
         stack: undefined,

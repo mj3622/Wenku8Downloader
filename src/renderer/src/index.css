@@ -15,3 +15,24 @@ body {
 * {
   -webkit-font-smoothing: antialiased;
 }
+
+.toast-card {
+  animation: toast-enter 180ms ease-out;
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-card {
+    animation: none;
+  }
+}

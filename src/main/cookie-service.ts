@@ -1,4 +1,5 @@
 import type { CrawlerConfig, WebCrawler } from './crawler'
+import { hasAuthenticatedCookies, type CookieSnapshot } from './config/secret-types'
 
 export type CookieProgress = {
   step: 'login' | 'done'
@@ -22,12 +23,15 @@ export class CookieService {
   async acquire(onProgress?: (p: CookieProgress) => void): Promise<CookieResult> {
     onProgress?.({ step: 'login', message: '正在登录...' })
     const loginCookies = await this.login()
+    if (!hasAuthenticatedCookies(loginCookies)) {
+      throw new Error('登录后未检测到有效登录状态')
+    }
     onProgress?.({ step: 'login', message: '登录成功' })
-    onProgress?.({ step: 'done', message: '登录成功，已获取 Cookie' })
+    onProgress?.({ step: 'done', message: '登录成功，登录状态已更新' })
     return { loginCookies }
   }
 
-  private async login(): Promise<Record<string, string>> {
+  private async login(): Promise<Omit<CookieSnapshot, 'cf_clearance'>> {
     const { username, password } = this.config.getCredentials()
 
     if (!username || !password) {

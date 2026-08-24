@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio'
 import iconv from 'iconv-lite'
 import {
   COOKIE_NAMES,
+  hasAuthenticatedCookies,
   type CookieSnapshot,
   type Credentials,
 } from './config/secret-types'
@@ -22,6 +23,7 @@ const COMMON_HEADERS: Record<string, string> = {
 
 const BASE_URL = 'https://www.wenku8.net'
 const REQUEST_TIMEOUT_MS = 30_000
+const LOGIN_COOKIE_NAMES = ['PHPSESSID', 'jieqiUserInfo', 'jieqiVisitInfo'] as const
 export interface CrawlerConfig {
   getCredentialRevision(): number
   getCredentials(): Readonly<Credentials>
@@ -31,15 +33,25 @@ export interface CrawlerConfig {
 
 class CredentialsChangedDuringLoginError extends Error {
   constructor() {
-    super('登录期间账号已变更，请重新刷新 Cookie')
+    super('登录期间账号已变更，请重新登录')
     this.name = 'CredentialsChangedDuringLoginError'
   }
 }
 
 function formatHttpError(status: number): string {
-  if (status === 429) return '访问过于频繁（HTTP 429），服务器限制了请求频率，请稍后重试'
-  if (status === 403) return '访问被拒绝（HTTP 403），Cookie 可能已过期，请尝试刷新 Cookie'
-  return `HTTP ${status}`
+  if (status === 429) return '操作过于频繁，请稍后重试'
+  if (status === 403) return '登录状态已失效，请重新登录后重试'
+  return '服务暂时不可用，请稍后重试'
+}
+
+export class HttpStatusError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(formatHttpError(status))
+    this.name = 'HttpStatusError'
+    this.status = status
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -149,9 +161,7 @@ export class WebCrawler {
         })
         lastStatus = resp.status
 
-        if (!resp.ok) {
-          throw new Error(formatHttpError(resp.status))
-        }
+        if (!resp.ok) throw new HttpStatusError(resp.status)
 
         if (parse) {
           const buf = Buffer.from(await resp.arrayBuffer())
@@ -209,6 +219,8 @@ export class WebCrawler {
     const { username, password } = this.config.getCredentials()
     const startedAt = performance.now()
     const maxRetries = 3
+    let lastStatus: number | undefined
+    const ses = session.defaultSession
     logger.info('login.started', '开始刷新登录 Cookie', { maxAttempts: maxRetries })
 
     if (!username || !password) {
@@ -227,6 +239,10 @@ export class WebCrawler {
         await this.rejectIfCredentialsChanged(credentialRevision)
       }
       try {
+        for (const name of LOGIN_COOKIE_NAMES) {
+          await ses.cookies.remove(BASE_URL, name)
+        }
+
         const body = new URLSearchParams({
           username,
           password,
@@ -246,15 +262,13 @@ export class WebCrawler {
           redirect: 'follow',
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
+        lastStatus = resp.status
 
         await this.rejectIfCredentialsChanged(credentialRevision)
 
-        if (!resp.ok) {
-          throw new Error(formatHttpError(resp.status))
-        }
+        if (!resp.ok) throw new HttpStatusError(resp.status)
 
         // Extract cookies from response
-        const ses = session.defaultSession
         const cookies = await ses.cookies.get({ url: BASE_URL })
         await this.rejectIfCredentialsChanged(credentialRevision)
         const cookieMap: Record<string, string> = {}
@@ -262,13 +276,17 @@ export class WebCrawler {
           cookieMap[c.name] = c.value
         }
 
-        const current = this.config.getCookies()
-        this.config.replaceCookies({
-          PHPSESSID: cookieMap.PHPSESSID ?? current.PHPSESSID,
-          jieqiUserInfo: cookieMap.jieqiUserInfo ?? current.jieqiUserInfo,
-          jieqiVisitInfo: cookieMap.jieqiVisitInfo ?? current.jieqiVisitInfo,
-          cf_clearance: cookieMap.cf_clearance ?? current.cf_clearance,
-        })
+        const loginCookies: CookieSnapshot = {
+          PHPSESSID: cookieMap.PHPSESSID ?? '',
+          jieqiUserInfo: cookieMap.jieqiUserInfo ?? '',
+          jieqiVisitInfo: cookieMap.jieqiVisitInfo ?? '',
+          cf_clearance: cookieMap.cf_clearance ?? this.config.getCookies().cf_clearance,
+        }
+        if (!hasAuthenticatedCookies(loginCookies)) {
+          throw new Error('登录后未检测到有效登录状态，请检查账号和密码')
+        }
+
+        this.config.replaceCookies(loginCookies)
         await this.syncCookies()
         await this.rejectIfCredentialsChanged(credentialRevision)
         logger.info('login.completed', '登录 Cookie 刷新完成', {
@@ -290,6 +308,7 @@ export class WebCrawler {
         if (attempt >= maxRetries - 1) {
           const finalError = new Error(`登录失败: ${message}`, { cause })
           logger.error('login.failed', '登录 Cookie 刷新失败', finalError, {
+            status: lastStatus,
             attempt: attempt + 1,
             maxAttempts: maxRetries,
             durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
@@ -297,6 +316,7 @@ export class WebCrawler {
           throw finalError
         }
         logger.warn('login.retry', '登录请求失败，准备重试', {
+          status: lastStatus,
           attempt: attempt + 1,
           maxAttempts: maxRetries,
           backoffMs: 5000,
@@ -333,7 +353,7 @@ export class WebCrawler {
         }
 
         onResponseStatus?.(resp.status)
-        lastCause = new Error(formatHttpError(resp.status))
+        lastCause = new HttpStatusError(resp.status)
         lastError = lastCause.message
         const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
         if (attempt < maxRetries - 1) {
@@ -387,7 +407,9 @@ export class WebCrawler {
 
     const title = $('title').text()
     if (!title) {
-      throw new Error('页面无标题，可能被拦截')
+      throw new Error('网站暂时无法完成搜索，请稍后重试', {
+        cause: new Error('搜索页面缺少标题，可能被拦截'),
+      })
     }
 
     const blockMsg = $('.blockcontent').text()

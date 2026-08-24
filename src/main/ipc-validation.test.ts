@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
   validateExternalUrl,
+  validateLoginOperationId,
   validateOpenFolder,
   validateRendererErrorReport,
   validateSearchQuery,
@@ -16,8 +17,8 @@ describe('IPC validation', () => {
 
   it('trims bounded search queries', () => {
     expect(validateSearchQuery('  测试作品  ')).toBe('测试作品')
-    expect(() => validateSearchQuery('')).toThrow('搜索内容')
-    expect(() => validateSearchQuery('x'.repeat(101))).toThrow('搜索内容')
+    expect(() => validateSearchQuery('')).toThrow('请输入 1 到 100 个字符')
+    expect(() => validateSearchQuery('x'.repeat(101))).toThrow('请输入 1 到 100 个字符')
   })
 
   it('allows only known external HTTPS destinations', () => {
@@ -32,6 +33,12 @@ describe('IPC validation', () => {
     expect(validateOpenFolder('pics')).toBe('pics')
     expect(validateOpenFolder('novels')).toBe('novels')
     expect(() => validateOpenFolder('../')).toThrow('下载文件夹')
+  })
+
+  it('accepts only bounded login operation IDs', () => {
+    expect(validateLoginOperationId('login-1720000000000-3')).toBe('login-1720000000000-3')
+    expect(() => validateLoginOperationId('../login-1-1')).toThrow('登录请求')
+    expect(() => validateLoginOperationId('dl-1-1')).toThrow('登录请求')
   })
 
   it('accepts bounded renderer error reports', () => {
