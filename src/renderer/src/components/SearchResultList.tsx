@@ -1,5 +1,5 @@
-import { useRef } from 'react'
 import type { SearchResult } from '../api/client'
+import BookCover from './BookCover'
 
 type Props = {
   results: SearchResult[]
@@ -17,7 +17,7 @@ export default function SearchResultList({ results, onSelect }: Props) {
           className="rounded-2xl bg-apple-card border border-apple-border-subtle shadow-card
                      overflow-hidden flex flex-col"
         >
-          <CoverImage src={item.cover} title={item.title} />
+          <BookCover src={item.cover} title={item.title} />
           <div className="px-3 py-2.5 flex flex-col flex-1">
             <h4 className="text-[12px] font-semibold text-apple-heading leading-snug line-clamp-2 min-h-[2.4em]">
               {item.title}
@@ -47,39 +47,6 @@ export default function SearchResultList({ results, onSelect }: Props) {
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-function CoverImage({ src, title }: { src?: string; title: string }) {
-  const retries = useRef(0)
-
-  const handleError = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    if (retries.current < 2) {
-      retries.current += 1
-      const img = e.currentTarget
-      img.src = `${src}?retry=${retries.current}`
-    }
-  }
-
-  if (!src) {
-    return (
-      <div className="w-full aspect-[2/3] bg-apple-accent-light flex items-center justify-center">
-        <span className="text-apple-accent text-[28px] font-bold opacity-30">
-          {title.charAt(0)}
-        </span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="aspect-[2/3]">
-      <img
-        src={src}
-        alt={title}
-        className="w-full h-full object-cover bg-apple-bg"
-        onError={handleError}
-      />
     </div>
   )
 }

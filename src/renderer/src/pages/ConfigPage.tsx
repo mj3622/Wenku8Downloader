@@ -8,7 +8,13 @@ import type {
 import { api } from '../api/client'
 import StatusAlert from '../components/StatusAlert'
 import { useConfigStore } from '../stores/configStore'
+import {
+  useLoginOperationStore,
+  type LoginCookieState,
+} from '../stores/loginOperationStore'
+import { toast } from '../stores/toastStore'
 import { formatTimeAgo } from '../utils/format'
+import { getUserFeedback } from '../utils/userFeedback'
 
 const TITLE_FORMATS = [
   { value: 'FULL', label: '完整' },
@@ -25,44 +31,50 @@ const CONFIG_TABS = [
 const RECOVERY_CONFIRMATION =
   '确定要处理配置问题吗？损坏文件将保留恢复备份，已迁移的旧明文配置将被清理。'
 const CLEAR_CREDENTIALS_CONFIRMATION =
-  '确定要清除已保存的账号、密码和 Cookie 吗？此操作不会删除已下载文件。'
+  '确定要清除已保存的登录信息吗？此操作不会删除已下载文件。'
 
-function messageFrom(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+type LogField = 'retentionDays' | 'maxFileSizeMb' | 'maxTotalSizeMb'
 
 function validateLogConfigFields(
   retentionDays: string,
   maxFileSizeMb: string,
   maxTotalSizeMb: string,
-): { value?: LogConfig; error?: string } {
+): { value?: LogConfig; errors: Partial<Record<LogField, string>> } {
   const fields = [
-    { value: retentionDays, minimum: 1, maximum: 365, label: '保留天数' },
-    { value: maxFileSizeMb, minimum: 1, maximum: 1024, label: '单文件上限（MB）' },
-    { value: maxTotalSizeMb, minimum: 2, maximum: 10240, label: '目录总上限（MB）' },
+    { key: 'retentionDays', value: retentionDays, minimum: 1, maximum: 365, label: '保留天数' },
+    { key: 'maxFileSizeMb', value: maxFileSizeMb, minimum: 1, maximum: 1024, label: '单文件上限（MB）' },
+    { key: 'maxTotalSizeMb', value: maxTotalSizeMb, minimum: 2, maximum: 10240, label: '目录总上限（MB）' },
   ] as const
-  const parsed: number[] = []
+  const parsed: Partial<Record<LogField, number>> = {}
+  const errors: Partial<Record<LogField, string>> = {}
   for (const field of fields) {
     if (!/^\d+$/.test(field.value)) {
-      return { error: `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数` }
+      errors[field.key] = `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数`
+      continue
     }
     const value = Number(field.value)
     if (value < field.minimum || value > field.maximum) {
-      return { error: `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数` }
+      errors[field.key] = `${field.label}必须为 ${field.minimum} 到 ${field.maximum} 的整数`
+      continue
     }
-    parsed.push(value)
+    parsed[field.key] = value
   }
 
-  const [days, fileSize, totalSize] = parsed
-  if (totalSize < fileSize * 2) {
-    return { error: '目录总上限必须至少为单文件上限的两倍' }
+  const fileSize = parsed.maxFileSizeMb
+  const totalSize = parsed.maxTotalSizeMb
+  if (fileSize !== undefined && totalSize !== undefined && totalSize < fileSize * 2) {
+    errors.maxTotalSizeMb = '目录总上限必须至少为单文件上限的两倍'
   }
+
+  if (Object.keys(errors).length > 0) return { errors }
+
   return {
     value: {
-      retentionDays: days,
-      maxFileSizeMb: fileSize,
-      maxTotalSizeMb: totalSize,
+      retentionDays: parsed.retentionDays!,
+      maxFileSizeMb: parsed.maxFileSizeMb!,
+      maxTotalSizeMb: parsed.maxTotalSizeMb!,
     },
+    errors,
   }
 }
 
@@ -77,14 +89,39 @@ export default function ConfigPage() {
   const [tab, setTab] = useState<'login' | 'download' | 'logging'>('login')
   const [resetting, setResetting] = useState(false)
   const resetInFlight = useRef(false)
+  const initialConfigRequest = useRef(false)
+  const healthNotice = useRef<string | null>(null)
   const [resetStatus, setResetStatus] = useState<{
     type: 'success' | 'error'
     msg: string
   } | null>(null)
 
   useEffect(() => {
+    if (initialConfigRequest.current) return
+    initialConfigRequest.current = true
+    if (useLoginOperationStore.getState().kind !== 'idle') return
     void fetchConfig()
   }, [fetchConfig])
+
+  useEffect(() => {
+    const health = snapshot?.health
+    if (!health || health.state === 'ok') {
+      healthNotice.current = null
+      return
+    }
+
+    const feedback = getUserFeedback(health.message, 'config-load')
+    const noticeKey = `${health.state}:${feedback.message}`
+    if (healthNotice.current === noticeKey) return
+    healthNotice.current = noticeKey
+
+    const title = health.state === 'recovery-required'
+      ? '配置需要处理'
+      : health.state === 'read-only-newer-version'
+        ? '当前配置为只读'
+        : '系统安全存储不可用'
+    toast.warning({ title, message: feedback.message })
+  }, [snapshot])
 
   const handleReset = async () => {
     if (resetInFlight.current) return
@@ -96,8 +133,11 @@ export default function ConfigPage() {
     try {
       await resetCorruptConfig()
       setResetStatus({ type: 'success', msg: '配置问题已处理' })
+      toast.success({ title: '配置问题已处理', message: '现在可以继续使用应用。' })
     } catch (resetError) {
-      setResetStatus({ type: 'error', msg: messageFrom(resetError) })
+      const feedback = getUserFeedback(resetError, 'config-reset')
+      setResetStatus({ type: 'error', msg: feedback.message })
+      toast.error(feedback)
     } finally {
       resetInFlight.current = false
       setResetting(false)
@@ -111,7 +151,7 @@ export default function ConfigPage() {
 
       {loadState === 'error' && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p>配置加载失败：{error || '未知错误'}</p>
+          <p>配置加载失败：{error || '暂时无法读取设置，请重试。'}</p>
           <button
             className="mt-2 px-4 py-1.5 rounded-[18px] bg-red-100 hover:bg-red-200 transition-colors"
             onClick={() => void fetchConfig()}
@@ -123,7 +163,7 @@ export default function ConfigPage() {
 
       {snapshot?.health.state !== 'ok' && snapshot && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <p>{snapshot.health.message}</p>
+          <p>{getUserFeedback(snapshot.health.message, 'config-load').message}</p>
           {snapshot.health.state === 'recovery-required' && (
             <button
               disabled={resetting}
@@ -142,6 +182,7 @@ export default function ConfigPage() {
             type={resetStatus.type}
             message={resetStatus.msg}
             onDismiss={() => setResetStatus(null)}
+            announce={false}
           />
         </div>
       )}
@@ -156,6 +197,8 @@ export default function ConfigPage() {
             {CONFIG_TABS.map((item) => (
               <button
                 key={item.key}
+                type="button"
+                aria-pressed={tab === item.key}
                 onClick={() => setTab(item.key)}
                 className={`px-4 py-2 text-sm transition-colors ${
                   tab === item.key
@@ -167,7 +210,9 @@ export default function ConfigPage() {
               </button>
             ))}
           </div>
-          {tab === 'login' && <LoginTab />}
+          <div hidden={tab !== 'login'}>
+            <LoginTab />
+          </div>
           {tab === 'download' && <DownloadTab />}
           {tab === 'logging' && <LogTab />}
         </>
@@ -210,17 +255,19 @@ const CARD_STYLE = {
   error: 'border-red-200 bg-red-50/50',
 } as const
 
-type CookieState = keyof typeof COOKIE_STATE_CONFIG
+type CookieState = LoginCookieState
 
 function CookieStatusCard({
   cookieState,
   cookieMsg,
   timeAgo,
+  disabled,
   onRefresh,
 }: {
   cookieState: CookieState
   cookieMsg: string
   timeAgo: string | null
+  disabled: boolean
   onRefresh: () => void
 }) {
   const stateConfig = COOKIE_STATE_CONFIG[cookieState]
@@ -229,7 +276,7 @@ function CookieStatusCard({
     <div className={`rounded-xl border p-5 ${CARD_STYLE[cookieState]}`}>
       <div className="flex items-center gap-2 mb-4">
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${stateConfig.dot}`} />
-        <h3 className="text-sm font-semibold text-apple-heading">Cookie 状态</h3>
+        <h3 className="text-sm font-semibold text-apple-heading">登录状态</h3>
       </div>
       <div className="flex items-center justify-between">
         <div>
@@ -257,11 +304,11 @@ function CookieStatusCard({
           )}
         </div>
         <button
-          disabled={cookieState === 'loading'}
+          disabled={disabled || cookieState === 'loading'}
           className="px-5 py-2 bg-apple-accent-light text-apple-accent hover:bg-apple-accent/15 disabled:opacity-40 rounded-[20px] text-[13px] font-medium transition-colors flex-shrink-0"
           onClick={onRefresh}
         >
-          {cookieState === 'loading' ? '刷新中...' : '刷新 Cookie'}
+          {cookieState === 'loading' ? '刷新中...' : '刷新登录状态'}
         </button>
       </div>
     </div>
@@ -274,91 +321,193 @@ function LoginTab() {
     fetchConfig,
     updateCredentials,
   } = useConfigStore()
+  const {
+    kind: accountOperation,
+    cookieState,
+    cookieMessage: cookieMsg,
+    lastRefresh,
+    begin: beginAccountOperation,
+    isCurrent: isCurrentAccountOperation,
+    startLogin,
+    updateProgress,
+    markSubscriptionError,
+    setCookieResult,
+    syncFromSnapshot,
+    preserveResultThroughSnapshotSync,
+    finish: finishAccountOperation,
+  } = useLoginOperationStore()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [clearing, setClearing] = useState(false)
-  const [cookieState, setCookieState] = useState<CookieState>('idle')
-  const [cookieMsg, setCookieMsg] = useState('')
-  const [lastRefresh, setLastRefresh] = useState<number | null>(null)
-  const [alert, setAlert] = useState<{
-    type: 'success' | 'error'
-    msg: string
-  } | null>(null)
+  const mounted = useRef(true)
+  const [fieldErrors, setFieldErrors] = useState<{
+    username?: string
+    password?: string
+  }>({})
+  const storedUsername = snapshot?.account.username
+  const hasStoredPassword = snapshot?.account.hasPassword
+  const hasStoredCookies = snapshot?.account.hasCookies
 
   useEffect(() => {
-    if (!snapshot) return
-    setUsername(snapshot.account.username)
+    if (storedUsername === undefined) return
+    setUsername(storedUsername)
     setPassword('')
-    setCookieState(snapshot.account.hasCookies ? 'valid' : 'idle')
-  }, [snapshot])
+    syncFromSnapshot(Boolean(hasStoredCookies))
+  }, [hasStoredCookies, hasStoredPassword, storedUsername, syncFromSnapshot])
 
-  useEffect(() => api.getCookieProgress((data) => setCookieMsg(data.message)), [])
-
-  const doRefresh = async () => {
-    setCookieState('loading')
-    setCookieMsg('正在登录...')
+  useEffect(() => {
     try {
-      await api.autoGetCookie()
-      await fetchConfig()
-      setCookieState('valid')
-      setLastRefresh(Date.now())
-      setCookieMsg('已就绪')
+      return api.getCookieProgress((data) => {
+        updateProgress(data.operationId, data.message)
+      })
+    } catch (subscriptionError) {
+      const feedback = getUserFeedback(subscriptionError, 'login')
+      markSubscriptionError(feedback.message)
+      toast.error(feedback)
+      return undefined
+    }
+  }, [markSubscriptionError, updateProgress])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  const doRefresh = async (showSuccess = true, operationGeneration?: number) => {
+    const generation = operationGeneration ?? beginAccountOperation(
+      'refreshing',
+      Boolean(snapshot?.account.hasCookies),
+    )
+    if (!isCurrentAccountOperation(generation)) return
+
+    const currentLoginOperationId = startLogin(generation)
+    if (!currentLoginOperationId) return
+    try {
+      await api.autoGetCookie(currentLoginOperationId)
+      if (!isCurrentAccountOperation(generation)) return
+      const configLoaded = await fetchConfig({
+        context: 'login',
+        isCurrent: () => isCurrentAccountOperation(generation),
+      })
+      if (!isCurrentAccountOperation(generation)) return
+      if (!configLoaded) {
+        setCookieResult(
+          generation,
+          'error',
+          '登录可能已完成，但无法读取最新状态，请重试。',
+        )
+        return
+      }
+      const refreshedSnapshot = await api.getConfig('login')
+      if (!isCurrentAccountOperation(generation)) return
+      if (!refreshedSnapshot.account.hasCookies) {
+        const feedback = getUserFeedback(
+          new Error('登录完成后未检测到有效登录状态，请重试。'),
+          'login',
+        )
+        if (isCurrentAccountOperation(generation)) {
+          setCookieResult(generation, 'error', feedback.message)
+          preserveResultThroughSnapshotSync(generation)
+        }
+        toast.error(feedback)
+        return
+      }
+      setCookieResult(generation, 'valid', '已就绪', Date.now())
+      if (showSuccess) {
+        toast.success({ title: '登录状态已更新', message: '现在可以继续检索和下载。' })
+      }
     } catch (refreshError) {
-      setCookieState('error')
-      setCookieMsg(messageFrom(refreshError))
+      if (!isCurrentAccountOperation(generation)) return
+      const feedback = getUserFeedback(refreshError, 'login')
+      setCookieResult(generation, 'error', feedback.message)
+      toast.error(feedback)
+    } finally {
+      finishAccountOperation(generation)
     }
   }
 
   const handleSave = async () => {
-    setSaving(true)
-    setAlert(null)
-    const input: UpdateCredentialsInput = password
-      ? { username, password }
-      : { username }
-    try {
-      await updateCredentials(input)
-      setPassword('')
-      setAlert({ type: 'success', msg: '账号已保存' })
-    } catch (saveError) {
-      setAlert({ type: 'error', msg: messageFrom(saveError) })
-      setSaving(false)
+    const normalizedUsername = username.trim()
+    const nextErrors: typeof fieldErrors = {}
+    if (!normalizedUsername) nextErrors.username = '请输入用户名'
+    else if (normalizedUsername.length > 256) nextErrors.username = '用户名不能超过 256 个字符'
+    if (password.length > 4096) nextErrors.password = '密码内容过长，请重新输入'
+    else if (!password && !snapshot?.account.hasPassword) {
+      nextErrors.password = '请输入密码'
+    } else if (
+      !password
+      && snapshot
+      && normalizedUsername !== snapshot.account.username
+    ) {
+      nextErrors.password = '用户名变更时必须提供密码'
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors)
       return
     }
-    setSaving(false)
-    await doRefresh()
+
+    const generation = beginAccountOperation('saving', Boolean(snapshot?.account.hasCookies))
+    setFieldErrors({})
+    const input: UpdateCredentialsInput = password
+      ? { username: normalizedUsername, password }
+      : { username: normalizedUsername }
+    try {
+      await updateCredentials(input, {
+        isCurrent: () => isCurrentAccountOperation(generation),
+      })
+      if (!isCurrentAccountOperation(generation)) return
+      if (mounted.current) setPassword('')
+      toast.success({ title: '账号已保存', message: '正在更新登录状态。' })
+      await doRefresh(false, generation)
+    } catch (saveError) {
+      if (!isCurrentAccountOperation(generation)) return
+      const feedback = getUserFeedback(saveError, 'account-save')
+      toast.error(feedback)
+    } finally {
+      finishAccountOperation(generation)
+    }
   }
 
   const handleRefresh = async () => {
-    if (!snapshot?.account.username) {
-      setAlert({ type: 'error', msg: '请先填写并保存账号' })
+    const normalizedUsername = username.trim()
+    const nextErrors: typeof fieldErrors = {}
+    if (!normalizedUsername || !snapshot?.account.username) {
+      nextErrors.username = normalizedUsername ? '请先保存用户名' : '请输入用户名'
+    } else if (normalizedUsername !== snapshot.account.username) {
+      nextErrors.username = '用户名已修改，请先保存'
+    }
+    if (password) nextErrors.password = '密码已修改，请先保存'
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors)
       return
     }
-    if (username !== snapshot.account.username) {
-      setAlert({ type: 'error', msg: '账号已修改，请先保存后再刷新' })
-      return
-    }
-    setAlert(null)
+    setFieldErrors({})
     await doRefresh()
   }
 
   const handleClearCredentials = async () => {
     if (!window.confirm(CLEAR_CREDENTIALS_CONFIRMATION)) return
 
-    setClearing(true)
-    setAlert(null)
+    const generation = beginAccountOperation('clearing', Boolean(snapshot?.account.hasCookies))
     try {
-      await updateCredentials({ username: '', password: '' })
-      setUsername('')
-      setPassword('')
-      setCookieState('idle')
-      setCookieMsg('')
-      setLastRefresh(null)
-      setAlert({ type: 'success', msg: '账号、密码和 Cookie 已清除' })
+      await updateCredentials({ username: '', password: '' }, {
+        isCurrent: () => isCurrentAccountOperation(generation),
+      })
+      if (!isCurrentAccountOperation(generation)) return
+      if (mounted.current) {
+        setUsername('')
+        setPassword('')
+        setFieldErrors({})
+      }
+      setCookieResult(generation, 'idle', '', null)
+      toast.success({ title: '登录信息已清除', message: '已保存的账号和登录状态均已移除。' })
     } catch (clearError) {
-      setAlert({ type: 'error', msg: messageFrom(clearError) })
+      if (!isCurrentAccountOperation(generation)) return
+      const feedback = getUserFeedback(clearError, 'account-save')
+      toast.error(feedback)
     } finally {
-      setClearing(false)
+      finishAccountOperation(generation)
     }
   }
 
@@ -368,42 +517,75 @@ function LoginTab() {
     || snapshot?.account.hasPassword
     || snapshot?.account.hasCookies,
   )
+  const saving = accountOperation === 'saving'
+  const clearing = accountOperation === 'clearing'
+  const accountBusy = accountOperation !== 'idle'
 
   return (
     <div className="space-y-4 max-w-lg">
       <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-5">
         <div className="flex items-center gap-2 mb-4">
           <span className="w-1.5 h-1.5 rounded-full bg-apple-accent flex-shrink-0" />
-          <h3 className="text-sm font-semibold text-apple-heading">账号凭证</h3>
+          <h3 className="text-sm font-semibold text-apple-heading">登录信息</h3>
         </div>
         <div className="grid grid-cols-2 gap-3.5">
           <div>
-            <label className="block text-[12px] font-medium text-apple-secondary mb-1.5">用户名</label>
+            <label htmlFor="config-username" className="block text-[12px] font-medium text-apple-secondary mb-1.5">用户名</label>
             <input
-              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+              id="config-username"
+              disabled={accountBusy}
+              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               placeholder="轻小说文库用户名"
+              maxLength={257}
               value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              aria-invalid={fieldErrors.username ? 'true' : undefined}
+              aria-describedby={fieldErrors.username ? 'config-username-error' : undefined}
+              onChange={(event) => {
+                setUsername(event.target.value)
+                if (fieldErrors.username) {
+                  setFieldErrors((current) => ({ ...current, username: undefined }))
+                }
+              }}
             />
+            {fieldErrors.username && (
+              <p id="config-username-error" role="alert" className="mt-1 text-xs text-red-600">
+                {fieldErrors.username}
+              </p>
+            )}
           </div>
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-[12px] font-medium text-apple-secondary">密码</label>
+              <label htmlFor="config-password" className="block text-[12px] font-medium text-apple-secondary">密码</label>
               {snapshot?.account.hasPassword && (
                 <span className="text-[11px] text-green-600">已保存密码</span>
               )}
             </div>
             <input
+              id="config-password"
               type="password"
-              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+              disabled={accountBusy}
+              maxLength={4097}
+              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               placeholder={snapshot?.account.hasPassword ? '留空则保留已保存密码' : '请输入密码'}
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              aria-invalid={fieldErrors.password ? 'true' : undefined}
+              aria-describedby={fieldErrors.password ? 'config-password-error' : undefined}
+              onChange={(event) => {
+                setPassword(event.target.value)
+                if (fieldErrors.password) {
+                  setFieldErrors((current) => ({ ...current, password: undefined }))
+                }
+              }}
             />
+            {fieldErrors.password && (
+              <p id="config-password-error" role="alert" className="mt-1 text-xs text-red-600">
+                {fieldErrors.password}
+              </p>
+            )}
           </div>
         </div>
         <button
-          disabled={saving || clearing}
+          disabled={accountBusy}
           className="mt-4 w-full px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40 rounded-[20px] text-[13px] font-medium text-white transition-opacity"
           onClick={() => void handleSave()}
         >
@@ -412,15 +594,15 @@ function LoginTab() {
         {hasStoredCredentials && (
           <button
             type="button"
-            disabled={saving || clearing}
+            disabled={accountBusy}
             className="mt-2 w-full px-6 py-2.5 border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-[20px] text-[13px] font-medium transition-colors"
             onClick={() => void handleClearCredentials()}
           >
-            {clearing ? '清除中...' : '清除已保存凭证'}
+            {clearing ? '清除中...' : '清除已保存登录信息'}
           </button>
         )}
         <p className="text-[12px] text-apple-tertiary mt-2">
-          保存后自动尝试登录并获取 Cookie；密码留空会保留已保存密码。
+          保存后会自动尝试登录；密码留空会保留已保存密码。
         </p>
       </div>
 
@@ -428,20 +610,14 @@ function LoginTab() {
         cookieState={cookieState}
         cookieMsg={cookieMsg}
         timeAgo={timeAgo}
+        disabled={saving || clearing}
         onRefresh={() => void handleRefresh()}
       />
 
       <p className="text-[12px] text-apple-tertiary text-center">
-        Cookie 过期后点击「刷新 Cookie」重新获取
+        登录状态失效后，点击「刷新登录状态」重新登录
       </p>
 
-      {alert && (
-        <StatusAlert
-          type={alert.type}
-          message={alert.msg}
-          onDismiss={() => setAlert(null)}
-        />
-      )}
     </div>
   )
 }
@@ -450,48 +626,47 @@ function DownloadTab() {
   const { snapshot, updateDownloadConfig } = useConfigStore()
   const [titleFormat, setTitleFormat] = useState<TitleFormat>('FULL')
   const [coverIndex, setCoverIndex] = useState('0')
+  const [coverIndexError, setCoverIndexError] = useState<string | null>(null)
   const [downloadPath, setDownloadPath] = useState('')
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<{
-    type: 'success' | 'error'
-    msg: string
-  } | null>(null)
 
   useEffect(() => {
     if (!snapshot) return
     setTitleFormat(snapshot.download.fullTitle)
     setCoverIndex(String(snapshot.download.defaultCoverIndex))
+    setCoverIndexError(null)
     setDownloadPath(snapshot.download.downloadPath)
   }, [snapshot])
 
   const handleSave = async () => {
-    if (!/^\d+$/.test(coverIndex)) {
-      setStatus({ type: 'error', msg: '封面图片索引必须为非负整数' })
+    const parsedCoverIndex = Number(coverIndex)
+    if (!/^\d+$/.test(coverIndex) || !Number.isSafeInteger(parsedCoverIndex)) {
+      setCoverIndexError('封面图片索引必须为非负整数')
       return
     }
     const input: DownloadConfig = {
       fullTitle: titleFormat,
-      defaultCoverIndex: Number(coverIndex),
+      defaultCoverIndex: parsedCoverIndex,
       downloadPath,
     }
     setSaving(true)
-    setStatus(null)
+    setCoverIndexError(null)
     try {
       await updateDownloadConfig(input)
-      setStatus({ type: 'success', msg: '下载设置已保存' })
+      toast.success({ title: '下载设置已保存', message: '新的下载将使用当前设置。' })
     } catch (saveError) {
-      setStatus({ type: 'error', msg: messageFrom(saveError) })
+      const feedback = getUserFeedback(saveError, 'config-save')
+      toast.error(feedback)
     } finally {
       setSaving(false)
     }
   }
 
   const handleOpenDownloadFolder = async () => {
-    setStatus(null)
     try {
       await api.openFolder('root')
     } catch (openError) {
-      setStatus({ type: 'error', msg: messageFrom(openError) })
+      toast.error(getUserFeedback(openError, 'open-folder'))
     }
   }
 
@@ -511,6 +686,7 @@ function DownloadTab() {
             <button
               key={format.value}
               type="button"
+              aria-pressed={titleFormat === format.value}
               onClick={() => setTitleFormat(format.value)}
               className={`w-full text-left px-4 py-3 rounded-xl border cursor-pointer transition-all ${
                 titleFormat === format.value
@@ -537,12 +713,22 @@ function DownloadTab() {
         <div className="flex items-center gap-3">
           <input
             aria-label="封面图片索引"
+            aria-invalid={coverIndexError ? 'true' : undefined}
+            aria-describedby={coverIndexError ? 'cover-index-error' : undefined}
             className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
             value={coverIndex}
-            onChange={(event) => setCoverIndex(event.target.value)}
+            onChange={(event) => {
+              setCoverIndex(event.target.value)
+              if (coverIndexError) setCoverIndexError(null)
+            }}
           />
           <span className="text-xs text-apple-tertiary">0 表示第一张插图，1 表示第二张，依此类推</span>
         </div>
+        {coverIndexError && (
+          <p id="cover-index-error" role="alert" className="mt-1.5 text-xs text-red-600">
+            {coverIndexError}
+          </p>
+        )}
       </div>
       <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
@@ -557,8 +743,8 @@ function DownloadTab() {
               try {
                 const path = await api.selectFolder()
                 if (path) setDownloadPath(path)
-              } catch {
-                setStatus({ type: 'error', msg: '选择文件夹失败' })
+              } catch (selectError) {
+                toast.error(getUserFeedback(selectError, 'select-folder'))
               }
             }}
           >
@@ -595,13 +781,6 @@ function DownloadTab() {
       >
         {saving ? '保存中...' : '保存下载设置'}
       </button>
-      {status && (
-        <StatusAlert
-          type={status.type}
-          message={status.msg}
-          onDismiss={() => setStatus(null)}
-        />
-      )}
     </div>
   )
 }
@@ -613,10 +792,6 @@ function LogTab() {
   const [maxTotalSizeMb, setMaxTotalSizeMb] = useState('200')
   const [edited, setEdited] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<{
-    type: 'success' | 'error'
-    msg: string
-  } | null>(null)
 
   useEffect(() => {
     if (!snapshot) return
@@ -633,42 +808,44 @@ function LogTab() {
   )
 
   const handleSave = async () => {
-    setStatus(null)
     if (!validation.value) return
     setSaving(true)
     try {
       await updateLogConfig(validation.value)
-      setStatus({ type: 'success', msg: '日志设置已保存并立即生效' })
+      toast.success({ title: '日志设置已保存', message: '新的日志限制已立即生效。' })
     } catch (saveError) {
-      setStatus({ type: 'error', msg: messageFrom(saveError) })
+      const feedback = getUserFeedback(saveError, 'log-save')
+      toast.error(feedback)
     } finally {
       setSaving(false)
     }
   }
 
   const handleOpenDirectory = async () => {
-    setStatus(null)
     try {
       await api.openLogFolder()
     } catch (openError) {
-      setStatus({ type: 'error', msg: messageFrom(openError) })
+      toast.error(getUserFeedback(openError, 'open-log-folder'))
     }
   }
 
   const fields = [
     {
+      key: 'retentionDays' as const,
       label: '保留天数',
       value: retentionDays,
       setValue: setRetentionDays,
       hint: '超过该天数的历史日志会自动删除，范围 1–365 天。',
     },
     {
+      key: 'maxFileSizeMb' as const,
       label: '单文件上限（MB）',
       value: maxFileSizeMb,
       setValue: setMaxFileSizeMb,
       hint: '单个日志文件达到上限后会在当天创建新的分段文件，范围 1–1024 MB。',
     },
     {
+      key: 'maxTotalSizeMb' as const,
       label: '目录总上限（MB）',
       value: maxTotalSizeMb,
       setValue: setMaxTotalSizeMb,
@@ -692,27 +869,37 @@ function LogTab() {
         </button>
       </div>
 
-      {fields.map((field) => (
-        <label key={field.label} className="block">
-          <span className="block text-sm font-semibold text-apple-heading mb-2">
-            {field.label}
-          </span>
-          <input
-            aria-label={field.label}
-            inputMode="numeric"
-            className="w-40 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-            value={field.value}
-            onChange={(event) => {
-              field.setValue(event.target.value)
-              setEdited(true)
-              setStatus(null)
-            }}
-          />
-          <span className="block text-[12px] text-apple-tertiary mt-1.5">
-            {field.hint}
-          </span>
-        </label>
-      ))}
+      {fields.map((field) => {
+        const fieldError = edited ? validation.errors[field.key] : undefined
+        const errorId = `log-${field.key}-error`
+        return (
+          <label key={field.key} className="block">
+            <span className="block text-sm font-semibold text-apple-heading mb-2">
+              {field.label}
+            </span>
+            <input
+              aria-label={field.label}
+              aria-invalid={fieldError ? 'true' : undefined}
+              aria-describedby={fieldError ? errorId : undefined}
+              inputMode="numeric"
+              className="w-40 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+              value={field.value}
+              onChange={(event) => {
+                field.setValue(event.target.value)
+                setEdited(true)
+              }}
+            />
+            <span className="block text-[12px] text-apple-tertiary mt-1.5">
+              {field.hint}
+            </span>
+            {fieldError && (
+              <span id={errorId} role="alert" className="mt-1 block text-sm text-red-600">
+                {fieldError}
+              </span>
+            )}
+          </label>
+        )
+      })}
 
       <button
         disabled={saving || validation.value === undefined}
@@ -721,18 +908,6 @@ function LogTab() {
       >
         {saving ? '保存中...' : '保存日志设置'}
       </button>
-      {edited && validation.error && (
-        <p role="alert" className="text-sm text-red-600">
-          {validation.error}
-        </p>
-      )}
-      {status && (
-        <StatusAlert
-          type={status.type}
-          message={status.msg}
-          onDismiss={() => setStatus(null)}
-        />
-      )}
     </div>
   )
 }

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusAlert from '../components/StatusAlert'
+import BookCover from '../components/BookCover'
+import { toast } from '../stores/toastStore'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
 
@@ -19,14 +21,32 @@ export default function BookDetailPage() {
   const { book, loading, error, fetchBook, clear } = useBookStore()
   const { downloadEpub, downloadImages } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
+  const warnedEmptyBooks = useRef(new Set<string>())
 
   useEffect(() => {
-    if (id) fetchBook(id)
+    fetchBook(id ?? '')
     return () => clear()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clear, fetchBook, id])
+
+  useEffect(() => {
+    if (!book || Object.keys(book.volumes).length > 0) return
+    if (warnedEmptyBooks.current.has(book.book_id)) return
+    warnedEmptyBooks.current.add(book.book_id)
+    toast.warning({
+      title: '暂无可下载分卷',
+      message: '该作品暂未提供可下载的分卷，你可以重新加载或返回检索。',
+      action: { label: '返回检索', href: '#/search' },
+    })
+  }, [book])
 
   const handleDownload = (type: DownloadTab) => {
-    if (!book) return
+    if (!book) {
+      toast.warning({
+        title: '作品信息尚未准备好',
+        message: '请等待作品信息加载完成后再下载。',
+      })
+      return
+    }
     if (type === 'pictures') {
       downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
     } else {
@@ -36,7 +56,17 @@ export default function BookDetailPage() {
   }
 
   const handleMultiDownload = (type: DownloadTab, volumes: string[]) => {
-    if (!book) return
+    if (!book) {
+      toast.warning({
+        title: '作品信息尚未准备好',
+        message: '请等待作品信息加载完成后再下载。',
+      })
+      return
+    }
+    if (volumes.length === 0) {
+      toast.warning({ title: '尚未选择分卷', message: '请至少选择一个要下载的分卷。' })
+      return
+    }
     volumes.forEach(v =>
       type === 'pictures'
         ? downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
@@ -55,19 +85,39 @@ export default function BookDetailPage() {
       </button>
 
       {loading && <LoadingSpinner text="正在查询中..." />}
-      {error && <StatusAlert type="error" message={error} onDismiss={clear} />}
+      {error && (
+        <div className="mb-4">
+          <StatusAlert type="error" message={error} announce={false} />
+          <div className="flex gap-2">
+            {/^\d{1,12}$/.test(id ?? '') && (
+              <button
+                type="button"
+                className="rounded-full bg-apple-accent px-4 py-2 text-xs font-medium text-white"
+                onClick={() => fetchBook(id ?? '')}
+              >
+                重新加载
+              </button>
+            )}
+            <button
+              type="button"
+              className="rounded-full border border-apple-border-input px-4 py-2 text-xs font-medium text-apple-heading"
+              onClick={() => navigate('/search')}
+            >
+              返回检索
+            </button>
+          </div>
+        </div>
+      )}
 
       {book && (
         <>
           {/* 信息区 */}
           <div className="flex items-start gap-6 mb-6">
-            {book.basic_info['cover'] && (
-              <img
-                src={book.basic_info['cover']}
-                alt={book.basic_info['标题']}
-                className="w-[130px] h-[184px] object-cover rounded-[14px] bg-apple-bg shadow-md flex-shrink-0"
-              />
-            )}
+            <BookCover
+              src={book.basic_info['cover']}
+              title={book.basic_info['标题'] ?? '作品'}
+              className="w-[130px] h-[184px] rounded-[14px] shadow-md"
+            />
             <div className="min-w-0">
               <h2 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
                 {book.basic_info['标题']}
@@ -120,6 +170,8 @@ export default function BookDetailPage() {
               {tabs.map((t) => (
                 <button
                   key={t.key}
+                  type="button"
+                  aria-pressed={dlTab === t.key}
                   onClick={() => setDlTab(t.key)}
                   className={`flex-1 text-center py-2.5 text-[13px] transition-colors ${
                     dlTab === t.key
@@ -133,7 +185,7 @@ export default function BookDetailPage() {
             </div>
 
             <div className="p-6">
-              {dlTab === 'full' && (
+              {dlTab === 'full' && Object.keys(book.volumes).length > 0 && (
                 <div className="text-center">
                   <p className="text-[13px] text-apple-secondary mb-4">合并全部卷为一个 EPUB 文件，包含封面与目录</p>
                   <button
@@ -146,14 +198,36 @@ export default function BookDetailPage() {
                 </div>
               )}
 
-              {dlTab === 'divided' && (
+              {Object.keys(book.volumes).length === 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-700">
+                  <p>该作品暂未提供可下载的分卷，请稍后再试。</p>
+                  <div className="mt-3 flex justify-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-full bg-apple-accent px-4 py-2 text-xs font-medium text-white"
+                      onClick={() => void fetchBook(id ?? '')}
+                    >
+                      重新加载
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full border border-amber-300 px-4 py-2 text-xs font-medium text-amber-800"
+                      onClick={() => navigate('/search')}
+                    >
+                      返回检索
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {dlTab === 'divided' && Object.keys(book.volumes).length > 0 && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
                   onDownload={(vols) => handleMultiDownload('divided', vols)}
                 />
               )}
 
-              {dlTab === 'pictures' && (
+              {dlTab === 'pictures' && Object.keys(book.volumes).length > 0 && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
                   onDownload={(vols) => handleMultiDownload('pictures', vols)}
@@ -188,7 +262,7 @@ function MultiVolumeSelector({
   const selectAll = () => setSelected(new Set(volumeKeys))
   const deselectAll = () => setSelected(new Set())
 
-  const allSelected = selected.size === volumeKeys.length
+  const allSelected = volumeKeys.length > 0 && selected.size === volumeKeys.length
   const count = selected.size
 
   return (

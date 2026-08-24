@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api } from '../api/client'
+import { toast } from './toastStore'
+import { getUserFeedback } from '../utils/userFeedback'
 
 export type DownloadTask = {
   id: string
@@ -13,6 +15,7 @@ export type DownloadTask = {
   progress: number
   phase?: string
   error?: string
+  warning?: string
   createdAt: number
 }
 
@@ -21,7 +24,10 @@ function uid(): string {
   return `dl-${Date.now()}-${nextId++}`
 }
 
-type TaskUpdatePatch = Partial<Pick<DownloadTask, 'status' | 'progress' | 'phase' | 'error'>>
+type TaskUpdatePatch = Partial<Pick<
+  DownloadTask,
+  'status' | 'progress' | 'phase' | 'error' | 'warning'
+>>
 
 type DownloadState = {
   tasks: DownloadTask[]
@@ -30,13 +36,37 @@ type DownloadState = {
   removeTask: (id: string) => void
   clearCompleted: () => void
   clearHistory: () => void
-  retryTask: (id: string) => void
+  retryTask: (id: string) => boolean
   updateTask: (id: string, patch: TaskUpdatePatch) => void
 }
 
 // 模块级队列和调度锁
 const pendingQueue: DownloadTask[] = []
 let isExecuting = false
+
+function summarizeWarnings(warnings: string[] | undefined): string | undefined {
+  if (!warnings?.length) return undefined
+  const safeWarnings = [...new Set(
+    warnings.map((warning) => getUserFeedback(warning, 'download-warning').message),
+  )]
+  if (safeWarnings.length === 0) return undefined
+  if (safeWarnings.length === 1) return safeWarnings[0]
+  return `${safeWarnings[0]} 另外还有 ${safeWarnings.length - 1} 项内容未能完整保存。`
+}
+
+function sanitizePersistedTask(value: unknown): DownloadTask | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const task = value as DownloadTask
+  return {
+    ...task,
+    error: task.error
+      ? getUserFeedback(task.error, 'download').message
+      : undefined,
+    warning: task.warning
+      ? getUserFeedback(task.warning, 'download-warning').message
+      : undefined,
+  }
+}
 
 async function executeNext(): Promise<void> {
   if (isExecuting || pendingQueue.length === 0) return
@@ -47,14 +77,31 @@ async function executeNext(): Promise<void> {
   store.updateTask(task.id, { status: 'downloading', phase: '开始下载...' })
 
   try {
-    if (task.type === 'images') {
-      await api.downloadImages(task.bookId, task.volume, task.id)
+    const result = task.type === 'images'
+      ? await api.downloadImages(task.bookId, task.volume, task.id)
+      : await api.downloadEpub(task.bookId, task.volume, task.id)
+    const warning = summarizeWarnings(result.warnings)
+    store.updateTask(task.id, {
+      status: 'completed',
+      progress: 100,
+      phase: warning ? '下载完成，但有部分内容缺失' : '下载完成',
+      error: undefined,
+      warning,
+    })
+    if (warning) {
+      toast.warning({ title: '下载完成，但有提醒', message: warning })
     } else {
-      await api.downloadEpub(task.bookId, task.volume, task.id)
+      toast.success({ title: '下载完成', message: `${task.title} 已保存。` })
     }
-    store.updateTask(task.id, { status: 'completed', progress: 100, phase: '下载完成' })
   } catch (e) {
-    store.updateTask(task.id, { status: 'failed', error: String(e) })
+    const feedback = getUserFeedback(e, 'download')
+    store.updateTask(task.id, {
+      status: 'failed',
+      phase: '下载失败',
+      error: feedback.message,
+      warning: undefined,
+    })
+    toast.error(feedback)
   } finally {
     isExecuting = false
     void executeNext()
@@ -69,15 +116,20 @@ export const useDownloadStore = create<DownloadState>()(
     (set, get) => {
       if (!progressRegistered) {
         progressRegistered = true
-        api.getDownloadProgress((data) => {
-          set((s) => ({
-            tasks: s.tasks.map((t) =>
-              t.id === data.taskId
-                ? { ...t, progress: data.total > 0 ? Math.round((data.current / data.total) * 100) : 0, phase: data.phase }
-                : t
-            ),
-          }))
-        })
+        try {
+          api.getDownloadProgress((data) => {
+            set((s) => ({
+              tasks: s.tasks.map((t) =>
+                t.id === data.taskId
+                  ? { ...t, progress: data.total > 0 ? Math.round((data.current / data.total) * 100) : 0, phase: data.phase }
+                  : t
+              ),
+            }))
+          })
+        } catch (error) {
+          progressRegistered = false
+          toast.error(getUserFeedback(error, 'download'))
+        }
       }
 
       return {
@@ -104,6 +156,7 @@ export const useDownloadStore = create<DownloadState>()(
           }
           set((s) => ({ tasks: [task, ...s.tasks] }))
           pendingQueue.push(task)
+          toast.info({ title: '已加入下载队列', message: `${title} 将按顺序下载。` })
           void executeNext()
         },
 
@@ -122,6 +175,7 @@ export const useDownloadStore = create<DownloadState>()(
           }
           set((s) => ({ tasks: [task, ...s.tasks] }))
           pendingQueue.push(task)
+          toast.info({ title: '已加入下载队列', message: `${title} 的插图将按顺序下载。` })
           void executeNext()
         },
 
@@ -143,13 +197,20 @@ export const useDownloadStore = create<DownloadState>()(
 
         retryTask: (id) => {
           const task = get().tasks.find((t) => t.id === id)
-          if (!task || task.status !== 'failed') return
+          if (!task || task.status !== 'failed') {
+            toast.warning({
+              title: '无法重试下载',
+              message: '这条记录不存在或当前状态不需要重试。',
+            })
+            return false
+          }
           set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
           if (task.type === 'images') {
             get().downloadImages(task.bookId, task.title, task.cover, task.volume)
           } else {
             get().downloadEpub(task.bookId, task.title, task.cover, task.volume)
           }
+          return true
         },
       }
     },
@@ -159,6 +220,16 @@ export const useDownloadStore = create<DownloadState>()(
       partialize: (state) => ({
         tasks: state.tasks.filter((t) => t.status === 'completed' || t.status === 'failed'),
       }),
+      version: 2,
+      migrate: (persistedState) => {
+        const state = persistedState as { tasks?: unknown[] }
+        return {
+          ...state,
+          tasks: Array.isArray(state.tasks)
+            ? state.tasks.map(sanitizePersistedTask).filter((task): task is DownloadTask => task !== null)
+            : [],
+        }
+      },
     },
   ),
 )

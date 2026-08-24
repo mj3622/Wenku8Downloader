@@ -3,12 +3,11 @@ import type {
   LogConfig,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
-import type { OpenFolderTarget } from '../../../shared/ipc-types'
-
-export type CookieProgress = {
-  step: string
-  message: string
-}
+import type { CookieProgress, OpenFolderTarget } from '../../../shared/ipc-types'
+import {
+  toUserFacingError,
+  type FeedbackContext,
+} from '../utils/userFeedback'
 
 export type DownloadProgress = {
   taskId: string
@@ -17,43 +16,63 @@ export type DownloadProgress = {
   phase: string
 }
 
+async function invoke<T>(
+  context: FeedbackContext,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    throw toUserFacingError(error, context)
+  }
+}
+
 export const api = {
   // 配置
-  getConfig: () => window.electronAPI.getConfig(),
+  getConfig: (context: FeedbackContext = 'config-load') =>
+    invoke(context, () => window.electronAPI.getConfig()),
   updateDownloadConfig: (input: DownloadConfig) =>
-    window.electronAPI.updateDownloadConfig(input),
-  updateLogConfig: (input: LogConfig) => window.electronAPI.updateLogConfig(input),
+    invoke('config-save', () => window.electronAPI.updateDownloadConfig(input)),
+  updateLogConfig: (input: LogConfig) =>
+    invoke('log-save', () => window.electronAPI.updateLogConfig(input)),
   updateCredentials: (input: UpdateCredentialsInput) =>
-    window.electronAPI.updateCredentials(input),
-  resetCorruptConfig: () => window.electronAPI.resetCorruptConfig(),
+    invoke('account-save', () => window.electronAPI.updateCredentials(input)),
+  resetCorruptConfig: () =>
+    invoke('config-reset', () => window.electronAPI.resetCorruptConfig()),
 
-  // Cookie
-  autoGetCookie: () => window.electronAPI.autoGetCookie(),
+  // 登录状态
+  autoGetCookie: (operationId: string) =>
+    invoke('login', () => window.electronAPI.autoGetCookie(operationId)),
   getCookieProgress: (callback: (data: CookieProgress) => void) => {
     return window.electronAPI.onCookieProgress(callback)
   },
 
   // 搜索
-  searchAuthor: (q: string) => window.electronAPI.searchAuthor(q),
-  searchTitle: (q: string) => window.electronAPI.searchTitle(q),
+  searchAuthor: (q: string) => invoke('search', () => window.electronAPI.searchAuthor(q)),
+  searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
 
   // 书籍
-  getBook: (id: string) => window.electronAPI.getBook(id),
-  getBookImages: (id: string) => window.electronAPI.getBookImages(id),
+  getBook: (id: string) => invoke('book', () => window.electronAPI.getBook(id)),
+  getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
 
   // 下载
   downloadEpub: (bookId: string, volumeName?: string, taskId?: string) =>
-    window.electronAPI.downloadEpub(bookId, volumeName, taskId),
+    invoke('download', () => window.electronAPI.downloadEpub(bookId, volumeName, taskId)),
   downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
-    window.electronAPI.downloadImages(bookId, volumeName, taskId),
+    invoke('download', () => window.electronAPI.downloadImages(bookId, volumeName, taskId)),
   getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
     return window.electronAPI.onDownloadProgress(callback)
   },
 
   // 文件
-  openFolder: (target: OpenFolderTarget) => window.electronAPI.openFolder(target),
-  openLogFolder: () => window.electronAPI.openLogFolder(),
-  selectFolder: () => window.electronAPI.selectFolder(),
+  openFolder: (target: OpenFolderTarget) =>
+    invoke('open-folder', () => window.electronAPI.openFolder(target)),
+  openLogFolder: () =>
+    invoke('open-log-folder', () => window.electronAPI.openLogFolder()),
+  selectFolder: () =>
+    invoke('select-folder', () => window.electronAPI.selectFolder()),
+  openExternal: (url: string) =>
+    invoke('open-external', () => window.electronAPI.openExternal(url)),
 }
 
 export type SearchResult = {
