@@ -44,6 +44,21 @@ afterEach(async () => {
 })
 
 describe('HomePage', () => {
+  it('keeps a single page title without duplicate shortcut actions', () => {
+    expect(container.querySelectorAll('h1')).toHaveLength(1)
+    expect(container.querySelectorAll('a[href="/search"]')).toHaveLength(1)
+    expect(container.querySelectorAll('a[href="/download"]')).toHaveLength(1)
+    expect(container.querySelectorAll('a[href="/config"]')).toHaveLength(1)
+  })
+
+  it('groups onboarding and features into compact sections', () => {
+    expect(container.querySelector('#getting-started-title')?.textContent).toBe('快速入门')
+    expect(container.querySelector('#features-title')?.textContent).toBe('功能概览')
+    expect(container.querySelectorAll('a[href="/search"]')).toHaveLength(1)
+    expect(container.textContent).not.toContain('使用提示')
+    expect(container.textContent).not.toContain('默认保存到系统下载目录')
+  })
+
   it('shows a safe toast when an external link cannot be opened', async () => {
     mocks.openExternal.mockRejectedValue(new Error('Error: IPC shell failure C:\\Users\\tester'))
     const link = [...container.querySelectorAll('a')]

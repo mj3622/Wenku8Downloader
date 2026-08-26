@@ -65,6 +65,7 @@
     }
   },
   "dependencies": {
+    "@tabler/icons-react": "^3.46.0",
     "cheerio": "^1.0.0-rc.12",
     "iconv-lite": "^0.7.2",
     "jszip": "^3.10.1",
