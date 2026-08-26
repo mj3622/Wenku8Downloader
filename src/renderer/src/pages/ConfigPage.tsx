@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react'
 import type {
   DownloadConfig,
   LogConfig,
@@ -13,7 +19,6 @@ import {
   type LoginCookieState,
 } from '../stores/loginOperationStore'
 import { toast } from '../stores/toastStore'
-import { formatTimeAgo } from '../utils/format'
 import { getUserFeedback } from '../utils/userFeedback'
 
 const TITLE_FORMATS = [
@@ -29,9 +34,9 @@ const CONFIG_TABS = [
 ]
 
 const RECOVERY_CONFIRMATION =
-  '确定要处理配置问题吗？损坏文件将保留恢复备份，已迁移的旧明文配置将被清理。'
+  '确定要处理配置问题吗？损坏文件将保留恢复备份，已迁移的旧明文配置将被清理'
 const CLEAR_CREDENTIALS_CONFIRMATION =
-  '确定要清除已保存的登录信息吗？此操作不会删除已下载文件。'
+  '确定要清除已保存的登录信息吗？此操作不会删除已下载文件'
 
 type LogField = 'retentionDays' | 'maxFileSizeMb' | 'maxTotalSizeMb'
 
@@ -133,7 +138,7 @@ export default function ConfigPage() {
     try {
       await resetCorruptConfig()
       setResetStatus({ type: 'success', msg: '配置问题已处理' })
-      toast.success({ title: '配置问题已处理', message: '现在可以继续使用应用。' })
+      toast.success({ title: '配置问题已处理', message: '现在可以继续使用应用' })
     } catch (resetError) {
       const feedback = getUserFeedback(resetError, 'config-reset')
       setResetStatus({ type: 'error', msg: feedback.message })
@@ -144,16 +149,35 @@ export default function ConfigPage() {
     }
   }
 
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentKey: typeof CONFIG_TABS[number]['key'],
+  ) => {
+    const currentIndex = CONFIG_TABS.findIndex((item) => item.key === currentKey)
+    let nextIndex = currentIndex
+
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % CONFIG_TABS.length
+    else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + CONFIG_TABS.length) % CONFIG_TABS.length
+    } else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = CONFIG_TABS.length - 1
+    else return
+
+    event.preventDefault()
+    const nextTab = CONFIG_TABS[nextIndex].key
+    setTab(nextTab)
+    document.getElementById(`config-tab-${nextTab}`)?.focus()
+  }
+
   return (
     <div>
-      <h2 className="text-2xl font-bold text-apple-heading mb-1">配置</h2>
-      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
+      <h2 className="text-2xl font-bold text-apple-heading mb-5">配置</h2>
 
       {loadState === 'error' && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p>配置加载失败：{error || '暂时无法读取设置，请重试。'}</p>
+          <p>配置加载失败：{error || '暂时无法读取设置，请重试'}</p>
           <button
-            className="mt-2 px-4 py-1.5 rounded-[18px] bg-red-100 hover:bg-red-200 transition-colors"
+            className="mt-2 rounded-lg bg-red-100 px-4 py-1.5 transition-colors hover:bg-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
             onClick={() => void fetchConfig()}
           >
             重试
@@ -167,7 +191,7 @@ export default function ConfigPage() {
           {snapshot.health.state === 'recovery-required' && (
             <button
               disabled={resetting}
-              className="mt-2 px-4 py-1.5 rounded-[18px] bg-amber-100 hover:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="mt-2 rounded-lg bg-amber-100 px-4 py-1.5 transition-colors hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:cursor-not-allowed disabled:bg-amber-50 disabled:text-amber-400"
               onClick={() => void handleReset()}
             >
               {resetting ? '处理中...' : '处理配置问题'}
@@ -193,14 +217,23 @@ export default function ConfigPage() {
 
       {snapshot && (
         <>
-          <div className="flex gap-1 mb-6 border-b border-apple-border-subtle">
+          <div
+            role="tablist"
+            aria-label="配置分类"
+            className="flex gap-1 mb-6 border-b border-apple-border-subtle"
+          >
             {CONFIG_TABS.map((item) => (
               <button
                 key={item.key}
+                id={`config-tab-${item.key}`}
                 type="button"
-                aria-pressed={tab === item.key}
+                role="tab"
+                aria-selected={tab === item.key}
+                aria-controls={`config-panel-${item.key}`}
+                tabIndex={tab === item.key ? 0 : -1}
                 onClick={() => setTab(item.key)}
-                className={`px-4 py-2 text-sm transition-colors ${
+                onKeyDown={(event) => handleTabKeyDown(event, item.key)}
+                className={`px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30 focus-visible:ring-inset ${
                   tab === item.key
                     ? 'border-b-2 border-apple-accent text-apple-accent font-medium'
                     : 'text-apple-secondary hover:text-apple-heading'
@@ -210,11 +243,30 @@ export default function ConfigPage() {
               </button>
             ))}
           </div>
-          <div hidden={tab !== 'login'}>
+          <div
+            id="config-panel-login"
+            role="tabpanel"
+            aria-labelledby="config-tab-login"
+            hidden={tab !== 'login'}
+          >
             <LoginTab />
           </div>
-          {tab === 'download' && <DownloadTab />}
-          {tab === 'logging' && <LogTab />}
+          <div
+            id="config-panel-download"
+            role="tabpanel"
+            aria-labelledby="config-tab-download"
+            hidden={tab !== 'download'}
+          >
+            <DownloadTab />
+          </div>
+          <div
+            id="config-panel-logging"
+            role="tabpanel"
+            aria-labelledby="config-tab-logging"
+            hidden={tab !== 'logging'}
+          >
+            <LogTab />
+          </div>
         </>
       )}
     </div>
@@ -248,69 +300,63 @@ const COOKIE_STATE_CONFIG = {
   },
 } as const
 
-const CARD_STYLE = {
-  idle: 'border-apple-border-subtle bg-[#fafafa]',
-  loading: 'border-apple-border-subtle bg-[#fafafa]',
-  valid: 'border-green-200 bg-green-50/50',
-  error: 'border-red-200 bg-red-50/50',
+type CookieState = LoginCookieState
+type SaveState = 'saved' | 'editing' | 'saving' | 'error'
+
+const SAVE_STATE_CONFIG = {
+  editing: { label: '未保存', className: 'text-amber-600' },
+  error: { label: '保存失败', className: 'text-red-600' },
 } as const
 
-type CookieState = LoginCookieState
+function SaveStateIndicator({ state }: { state: SaveState }) {
+  if (state === 'saved' || state === 'saving') return null
+  const config = SAVE_STATE_CONFIG[state]
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className={`text-sm font-medium ${config.className}`}
+    >
+      {config.label}
+    </span>
+  )
+}
 
 function CookieStatusCard({
   cookieState,
   cookieMsg,
-  timeAgo,
   disabled,
   onRefresh,
 }: {
   cookieState: CookieState
   cookieMsg: string
-  timeAgo: string | null
   disabled: boolean
   onRefresh: () => void
 }) {
   const stateConfig = COOKIE_STATE_CONFIG[cookieState]
 
   return (
-    <div className={`rounded-xl border p-5 ${CARD_STYLE[cookieState]}`}>
-      <div className="flex items-center gap-2 mb-4">
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${stateConfig.dot}`} />
-        <h3 className="text-sm font-semibold text-apple-heading">登录状态</h3>
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2" title={cookieState === 'error' ? cookieMsg : undefined}>
+        {stateConfig.showSpinner ? (
+          <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        ) : (
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${stateConfig.dot}`} />
+        )}
+        <span className={`text-sm font-semibold ${stateConfig.text}`}>
+          {cookieState === 'loading' ? cookieMsg : stateConfig.label}
+        </span>
       </div>
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            {stateConfig.showSpinner && (
-              <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            )}
-            <span className={`text-[13px] font-medium ${stateConfig.text}`}>
-              {cookieState === 'loading' ? cookieMsg : stateConfig.label}
-            </span>
-          </div>
-          {cookieState === 'valid' && timeAgo && (
-            <p className="text-[12px] text-apple-tertiary mt-1">上次刷新：{timeAgo}</p>
-          )}
-          {cookieState === 'error' && (
-            <p
-              className="text-[12px] text-apple-tertiary mt-1 truncate max-w-[280px]"
-              title={cookieMsg}
-            >
-              {cookieMsg}
-            </p>
-          )}
-        </div>
-        <button
-          disabled={disabled || cookieState === 'loading'}
-          className="px-5 py-2 bg-apple-accent-light text-apple-accent hover:bg-apple-accent/15 disabled:opacity-40 rounded-[20px] text-[13px] font-medium transition-colors flex-shrink-0"
-          onClick={onRefresh}
-        >
-          {cookieState === 'loading' ? '刷新中...' : '刷新登录状态'}
-        </button>
-      </div>
+      <button
+        disabled={disabled || cookieState === 'loading'}
+        className="rounded-lg border border-apple-border-subtle bg-white px-3 py-1.5 text-sm font-medium text-apple-accent transition-colors hover:border-apple-accent/30 hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
+        onClick={onRefresh}
+      >
+        {cookieState === 'loading' ? '刷新中...' : '刷新状态'}
+      </button>
     </div>
   )
 }
@@ -325,7 +371,6 @@ function LoginTab() {
     kind: accountOperation,
     cookieState,
     cookieMessage: cookieMsg,
-    lastRefresh,
     begin: beginAccountOperation,
     isCurrent: isCurrentAccountOperation,
     startLogin,
@@ -339,6 +384,8 @@ function LoginTab() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const mounted = useRef(true)
+  const accountMenuRef = useRef<HTMLDetailsElement>(null)
+  const [credentialSaveState, setCredentialSaveState] = useState<SaveState>('saved')
   const [fieldErrors, setFieldErrors] = useState<{
     username?: string
     password?: string
@@ -395,7 +442,7 @@ function LoginTab() {
         setCookieResult(
           generation,
           'error',
-          '登录可能已完成，但无法读取最新状态，请重试。',
+          '登录可能已完成，但无法读取最新状态，请重试',
         )
         return
       }
@@ -403,7 +450,7 @@ function LoginTab() {
       if (!isCurrentAccountOperation(generation)) return
       if (!refreshedSnapshot.account.hasCookies) {
         const feedback = getUserFeedback(
-          new Error('登录完成后未检测到有效登录状态，请重试。'),
+          new Error('登录完成后未检测到有效登录状态，请重试'),
           'login',
         )
         if (isCurrentAccountOperation(generation)) {
@@ -415,7 +462,7 @@ function LoginTab() {
       }
       setCookieResult(generation, 'valid', '已就绪', Date.now())
       if (showSuccess) {
-        toast.success({ title: '登录状态已更新', message: '现在可以继续检索和下载。' })
+        toast.success({ title: '登录状态已更新', message: '现在可以继续检索和下载' })
       }
     } catch (refreshError) {
       if (!isCurrentAccountOperation(generation)) return
@@ -428,7 +475,15 @@ function LoginTab() {
   }
 
   const handleSave = async () => {
+    if (accountOperation !== 'idle') return
+
     const normalizedUsername = username.trim()
+    const credentialsUnchanged = normalizedUsername === snapshot?.account.username && !password
+    if (credentialsUnchanged && snapshot?.account.hasPassword) {
+      setCredentialSaveState('saved')
+      return
+    }
+
     const nextErrors: typeof fieldErrors = {}
     if (!normalizedUsername) nextErrors.username = '请输入用户名'
     else if (normalizedUsername.length > 256) nextErrors.username = '用户名不能超过 256 个字符'
@@ -444,9 +499,11 @@ function LoginTab() {
     }
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors(nextErrors)
+      setCredentialSaveState('editing')
       return
     }
 
+    setCredentialSaveState('saving')
     const generation = beginAccountOperation('saving', Boolean(snapshot?.account.hasCookies))
     setFieldErrors({})
     const input: UpdateCredentialsInput = password
@@ -458,11 +515,12 @@ function LoginTab() {
       })
       if (!isCurrentAccountOperation(generation)) return
       if (mounted.current) setPassword('')
-      toast.success({ title: '账号已保存', message: '正在更新登录状态。' })
+      setCredentialSaveState('saved')
       await doRefresh(false, generation)
     } catch (saveError) {
       if (!isCurrentAccountOperation(generation)) return
       const feedback = getUserFeedback(saveError, 'account-save')
+      setCredentialSaveState('error')
       toast.error(feedback)
     } finally {
       finishAccountOperation(generation)
@@ -487,8 +545,10 @@ function LoginTab() {
   }
 
   const handleClearCredentials = async () => {
+    if (accountMenuRef.current) accountMenuRef.current.open = false
     if (!window.confirm(CLEAR_CREDENTIALS_CONFIRMATION)) return
 
+    setCredentialSaveState('saving')
     const generation = beginAccountOperation('clearing', Boolean(snapshot?.account.hasCookies))
     try {
       await updateCredentials({ username: '', password: '' }, {
@@ -501,17 +561,18 @@ function LoginTab() {
         setFieldErrors({})
       }
       setCookieResult(generation, 'idle', '', null)
-      toast.success({ title: '登录信息已清除', message: '已保存的账号和登录状态均已移除。' })
+      setCredentialSaveState('saved')
+      toast.success({ title: '登录信息已清除', message: '已保存的账号和登录状态均已移除' })
     } catch (clearError) {
       if (!isCurrentAccountOperation(generation)) return
       const feedback = getUserFeedback(clearError, 'account-save')
+      setCredentialSaveState('error')
       toast.error(feedback)
     } finally {
       finishAccountOperation(generation)
     }
   }
 
-  const timeAgo = lastRefresh ? formatTimeAgo(lastRefresh) : null
   const hasStoredCredentials = Boolean(
     snapshot?.account.username
     || snapshot?.account.hasPassword
@@ -520,106 +581,130 @@ function LoginTab() {
   const saving = accountOperation === 'saving'
   const clearing = accountOperation === 'clearing'
   const accountBusy = accountOperation !== 'idle'
+  const effectiveSaveState = saving || clearing ? 'saving' : credentialSaveState
+
+  const handleCredentialsBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof HTMLElement && nextTarget.closest('[data-account-menu]')) return
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return
+    void handleSave()
+  }
+
+  const handleCredentialKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    void handleSave()
+  }
 
   return (
-    <div className="space-y-4 max-w-lg">
-      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-apple-accent flex-shrink-0" />
-          <h3 className="text-sm font-semibold text-apple-heading">登录信息</h3>
-        </div>
-        <div className="grid grid-cols-2 gap-3.5">
-          <div>
-            <label htmlFor="config-username" className="block text-[12px] font-medium text-apple-secondary mb-1.5">用户名</label>
-            <input
-              id="config-username"
-              disabled={accountBusy}
-              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              placeholder="轻小说文库用户名"
-              maxLength={257}
-              value={username}
-              aria-invalid={fieldErrors.username ? 'true' : undefined}
-              aria-describedby={fieldErrors.username ? 'config-username-error' : undefined}
-              onChange={(event) => {
-                setUsername(event.target.value)
-                if (fieldErrors.username) {
-                  setFieldErrors((current) => ({ ...current, username: undefined }))
-                }
-              }}
-            />
-            {fieldErrors.username && (
-              <p id="config-username-error" role="alert" className="mt-1 text-xs text-red-600">
-                {fieldErrors.username}
-              </p>
-            )}
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label htmlFor="config-password" className="block text-[12px] font-medium text-apple-secondary">密码</label>
-              {snapshot?.account.hasPassword && (
-                <span className="text-[11px] text-green-600">已保存密码</span>
+    <div className="max-w-4xl">
+      <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-[#fafafa]">
+        <section>
+          <div className="flex flex-col gap-4 border-b border-apple-border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-6">
+            <div className="flex items-center gap-3">
+              <h3 className="text-base font-semibold text-apple-heading">账号登录</h3>
+              <SaveStateIndicator state={effectiveSaveState} />
+            </div>
+            <div className="flex items-center gap-2">
+              <CookieStatusCard
+                cookieState={cookieState}
+                cookieMsg={cookieMsg}
+                disabled={saving || clearing || credentialSaveState === 'editing'}
+                onRefresh={() => void handleRefresh()}
+              />
+              {hasStoredCredentials && (
+                <details ref={accountMenuRef} data-account-menu className="relative">
+                  <summary
+                    aria-label="更多账号操作"
+                    className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-apple-secondary transition-colors hover:bg-apple-accent-light hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 [&::-webkit-details-marker]:hidden"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
+                      <circle cx="4" cy="10" r="1.5" />
+                      <circle cx="10" cy="10" r="1.5" />
+                      <circle cx="16" cy="10" r="1.5" />
+                    </svg>
+                  </summary>
+                  <div className="absolute right-0 top-10 z-10 min-w-40 rounded-lg border border-apple-border-subtle bg-white p-1 shadow-lg">
+                    <button
+                      type="button"
+                      disabled={accountBusy}
+                      className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:cursor-not-allowed disabled:text-red-300"
+                      onClick={() => void handleClearCredentials()}
+                    >
+                      {clearing ? '清除中...' : '清除登录信息'}
+                    </button>
+                  </div>
+                </details>
               )}
             </div>
-            <input
-              id="config-password"
-              type="password"
-              disabled={accountBusy}
-              maxLength={4097}
-              className="w-full px-3 py-2 bg-white border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              placeholder={snapshot?.account.hasPassword ? '留空则保留已保存密码' : '请输入密码'}
-              value={password}
-              aria-invalid={fieldErrors.password ? 'true' : undefined}
-              aria-describedby={fieldErrors.password ? 'config-password-error' : undefined}
-              onChange={(event) => {
-                setPassword(event.target.value)
-                if (fieldErrors.password) {
-                  setFieldErrors((current) => ({ ...current, password: undefined }))
-                }
-              }}
-            />
-            {fieldErrors.password && (
-              <p id="config-password-error" role="alert" className="mt-1 text-xs text-red-600">
-                {fieldErrors.password}
-              </p>
-            )}
           </div>
-        </div>
-        <button
-          disabled={accountBusy}
-          className="mt-4 w-full px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40 rounded-[20px] text-[13px] font-medium text-white transition-opacity"
-          onClick={() => void handleSave()}
-        >
-          {saving ? '保存中...' : '保存账号'}
-        </button>
-        {hasStoredCredentials && (
-          <button
-            type="button"
-            disabled={accountBusy}
-            className="mt-2 w-full px-6 py-2.5 border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed rounded-[20px] text-[13px] font-medium transition-colors"
-            onClick={() => void handleClearCredentials()}
-          >
-            {clearing ? '清除中...' : '清除已保存登录信息'}
-          </button>
-        )}
-        <p className="text-[12px] text-apple-tertiary mt-2">
-          保存后会自动尝试登录；密码留空会保留已保存密码。
-        </p>
+
+          <div className="px-5 py-5 lg:px-6" onBlur={handleCredentialsBlur}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label htmlFor="config-username" className="mb-2 block text-sm font-medium text-apple-heading">用户名</label>
+                <input
+                  id="config-username"
+                  disabled={accountBusy}
+                  className="w-full rounded-lg border border-apple-border-input bg-white px-3 py-2 text-sm text-apple-heading transition-colors focus:outline-none focus:border-apple-accent/40 focus:ring-2 focus:ring-apple-accent/15 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-apple-secondary"
+                  placeholder="轻小说文库用户名"
+                  maxLength={257}
+                  value={username}
+                  aria-invalid={fieldErrors.username ? 'true' : undefined}
+                  aria-describedby={fieldErrors.username ? 'config-username-error' : undefined}
+                  onChange={(event) => {
+                    setUsername(event.target.value)
+                    setCredentialSaveState('editing')
+                    if (fieldErrors.username) {
+                      setFieldErrors((current) => ({ ...current, username: undefined }))
+                    }
+                  }}
+                  onKeyDown={handleCredentialKeyDown}
+                />
+                {fieldErrors.username && (
+                  <p id="config-username-error" role="alert" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.username}
+                  </p>
+                )}
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="config-password" className="block text-sm font-medium text-apple-heading">
+                    密码{snapshot?.account.hasPassword ? '（已保存）' : ''}
+                  </label>
+                </div>
+                <input
+                  id="config-password"
+                  type="password"
+                  disabled={accountBusy}
+                  maxLength={4097}
+                  className="w-full rounded-lg border border-apple-border-input bg-white px-3 py-2 text-sm text-apple-heading transition-colors focus:outline-none focus:border-apple-accent/40 focus:ring-2 focus:ring-apple-accent/15 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-apple-secondary"
+                  placeholder={snapshot?.account.hasPassword ? '留空不修改' : '请输入密码'}
+                  value={password}
+                  aria-invalid={fieldErrors.password ? 'true' : undefined}
+                  aria-describedby={fieldErrors.password ? 'config-password-error' : undefined}
+                  onChange={(event) => {
+                    setPassword(event.target.value)
+                    setCredentialSaveState('editing')
+                    if (fieldErrors.password) {
+                      setFieldErrors((current) => ({ ...current, password: undefined }))
+                    }
+                  }}
+                  onKeyDown={handleCredentialKeyDown}
+                />
+                {fieldErrors.password && (
+                  <p id="config-password-error" role="alert" className="mt-1 text-xs text-red-600">
+                    {fieldErrors.password}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-
-      <CookieStatusCard
-        cookieState={cookieState}
-        cookieMsg={cookieMsg}
-        timeAgo={timeAgo}
-        disabled={saving || clearing}
-        onRefresh={() => void handleRefresh()}
-      />
-
-      <p className="text-[12px] text-apple-tertiary text-center">
-        登录状态失效后，点击「刷新登录状态」重新登录
-      </p>
-
     </div>
   )
+
 }
 
 function DownloadTab() {
@@ -629,6 +714,7 @@ function DownloadTab() {
   const [coverIndexError, setCoverIndexError] = useState<string | null>(null)
   const [downloadPath, setDownloadPath] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('saved')
 
   useEffect(() => {
     if (!snapshot) return
@@ -638,28 +724,53 @@ function DownloadTab() {
     setDownloadPath(snapshot.download.downloadPath)
   }, [snapshot])
 
-  const handleSave = async () => {
-    const parsedCoverIndex = Number(coverIndex)
-    if (!/^\d+$/.test(coverIndex) || !Number.isSafeInteger(parsedCoverIndex)) {
+  const saveDownloadConfig = async (nextConfig: DownloadConfig) => {
+    if (saving) return
+    if (!/^\d+$/.test(String(nextConfig.defaultCoverIndex))
+      || !Number.isSafeInteger(nextConfig.defaultCoverIndex)) {
       setCoverIndexError('封面图片索引必须为非负整数')
+      setSaveState('editing')
       return
     }
-    const input: DownloadConfig = {
-      fullTitle: titleFormat,
-      defaultCoverIndex: parsedCoverIndex,
-      downloadPath,
+    if (snapshot
+      && nextConfig.fullTitle === snapshot.download.fullTitle
+      && nextConfig.defaultCoverIndex === snapshot.download.defaultCoverIndex
+      && nextConfig.downloadPath === snapshot.download.downloadPath) {
+      setSaveState('saved')
+      return
     }
     setSaving(true)
+    setSaveState('saving')
     setCoverIndexError(null)
     try {
-      await updateDownloadConfig(input)
-      toast.success({ title: '下载设置已保存', message: '新的下载将使用当前设置。' })
+      await updateDownloadConfig(nextConfig)
+      setSaveState('saved')
     } catch (saveError) {
       const feedback = getUserFeedback(saveError, 'config-save')
+      setSaveState('error')
       toast.error(feedback)
     } finally {
       setSaving(false)
     }
+  }
+
+  const currentDownloadConfig = (): DownloadConfig | null => {
+    const parsedCoverIndex = Number(coverIndex)
+    if (!/^\d+$/.test(coverIndex) || !Number.isSafeInteger(parsedCoverIndex)) {
+      setCoverIndexError('封面图片索引必须为非负整数')
+      setSaveState('editing')
+      return null
+    }
+    return {
+      fullTitle: titleFormat,
+      defaultCoverIndex: parsedCoverIndex,
+      downloadPath,
+    }
+  }
+
+  const handleCoverIndexSave = () => {
+    const nextConfig = currentDownloadConfig()
+    if (nextConfig) void saveDownloadConfig(nextConfig)
   }
 
   const handleOpenDownloadFolder = async () => {
@@ -670,12 +781,14 @@ function DownloadTab() {
     }
   }
 
-  const hasUnsavedDownloadPath = downloadPath !== snapshot?.download.downloadPath
-
   return (
-    <div className="space-y-4 max-w-lg">
-      <h3 className="text-lg font-semibold text-apple-heading">书名格式</h3>
-      <div className="space-y-2">
+    <div className="max-w-3xl space-y-6">
+      <div className="flex items-center gap-3">
+        <h3 className="text-lg font-semibold text-apple-heading">下载选项</h3>
+        <SaveStateIndicator state={saving ? 'saving' : saveState} />
+      </div>
+      <h3 className="text-sm font-semibold text-apple-heading">书名格式</h3>
+      <div className="grid gap-3 sm:grid-cols-3">
         {TITLE_FORMATS.map((format) => {
           const examples: Record<TitleFormat, string> = {
             FULL: '败北女角太多了！(败犬女主太多了！)',
@@ -686,8 +799,17 @@ function DownloadTab() {
             <button
               key={format.value}
               type="button"
+              data-download-action
+              disabled={saving}
               aria-pressed={titleFormat === format.value}
-              onClick={() => setTitleFormat(format.value)}
+              onClick={() => {
+                setTitleFormat(format.value)
+                void saveDownloadConfig({
+                  fullTitle: format.value,
+                  defaultCoverIndex: Number(coverIndex),
+                  downloadPath,
+                })
+              }}
               className={`w-full text-left px-4 py-3 rounded-xl border cursor-pointer transition-all ${
                 titleFormat === format.value
                   ? 'border-apple-accent bg-[rgba(0,113,227,0.06)]'
@@ -699,7 +821,7 @@ function DownloadTab() {
               }`}>
                 {format.label}
               </div>
-              <div className={`text-[11px] mt-0.5 ${
+              <div className={`mt-0.5 text-[11px] ${
                 titleFormat === format.value ? 'text-apple-accent/70' : 'text-apple-tertiary'
               }`}>
                 {examples[format.value]}
@@ -715,14 +837,26 @@ function DownloadTab() {
             aria-label="封面图片索引"
             aria-invalid={coverIndexError ? 'true' : undefined}
             aria-describedby={coverIndexError ? 'cover-index-error' : undefined}
-            className="w-24 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+            disabled={saving}
+            className="w-24 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-sm text-apple-heading transition-colors focus:outline-none focus:border-apple-accent/40 focus:ring-2 focus:ring-apple-accent/15"
             value={coverIndex}
             onChange={(event) => {
               setCoverIndex(event.target.value)
+              setSaveState('editing')
               if (coverIndexError) setCoverIndexError(null)
             }}
+            onBlur={(event) => {
+              if (event.relatedTarget instanceof HTMLElement
+                && event.relatedTarget.closest('[data-download-action]')) return
+              handleCoverIndexSave()
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              handleCoverIndexSave()
+            }}
           />
-          <span className="text-xs text-apple-tertiary">0 表示第一张插图，1 表示第二张，依此类推</span>
+          <span className="text-sm text-apple-tertiary">索引从 0 开始，0 代表第一张图</span>
         </div>
         {coverIndexError && (
           <p id="cover-index-error" role="alert" className="mt-1.5 text-xs text-red-600">
@@ -733,16 +867,26 @@ function DownloadTab() {
       <div>
         <h3 className="text-sm font-semibold text-apple-heading mb-2">下载存储路径</h3>
         <div className="flex items-center gap-2">
-          <div className="flex-1 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading truncate">
+          <div className="flex-1 truncate rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-sm text-apple-heading">
             {downloadPath || <span className="text-apple-tertiary">默认下载目录</span>}
           </div>
           <button
             type="button"
-            className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light rounded-[20px] hover:bg-apple-accent/15 transition-colors"
+            data-download-action
+            disabled={saving}
+            className="flex-shrink-0 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent transition-colors hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
             onClick={async () => {
               try {
                 const path = await api.selectFolder()
-                if (path) setDownloadPath(path)
+                if (path) {
+                  setDownloadPath(path)
+                  const parsedCoverIndex = Number(coverIndex)
+                  await saveDownloadConfig({
+                    fullTitle: titleFormat,
+                    defaultCoverIndex: parsedCoverIndex,
+                    downloadPath: path,
+                  })
+                }
               } catch (selectError) {
                 toast.error(getUserFeedback(selectError, 'select-folder'))
               }
@@ -752,9 +896,10 @@ function DownloadTab() {
           </button>
           <button
             type="button"
-            disabled={hasUnsavedDownloadPath}
-            title={hasUnsavedDownloadPath ? '请先保存下载设置' : '打开当前下载目录'}
-            className="flex-shrink-0 px-4 py-2 text-[12px] font-medium text-apple-secondary bg-apple-card border border-apple-border-subtle rounded-[20px] hover:text-apple-heading disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            data-download-action
+            disabled={saving}
+            title={saving ? '保存完成后可打开目录' : '打开当前下载目录'}
+            className="flex-shrink-0 rounded-lg border border-apple-border-subtle bg-apple-card px-4 py-2 text-sm font-medium text-apple-secondary transition-colors hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-apple-tertiary"
             onClick={() => void handleOpenDownloadFolder()}
           >
             打开目录
@@ -762,25 +907,27 @@ function DownloadTab() {
           {downloadPath && (
             <button
               type="button"
+              data-download-action
               aria-label="清除文件夹路径"
+              disabled={saving}
               className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
-              onClick={() => setDownloadPath('')}
+              onClick={() => {
+                setDownloadPath('')
+                void saveDownloadConfig({
+                  fullTitle: titleFormat,
+                  defaultCoverIndex: Number(coverIndex),
+                  downloadPath: '',
+                })
+              }}
             >
               ×
             </button>
           )}
         </div>
-        <p className="text-[12px] text-apple-tertiary mt-1.5">
-          留空时，开发版使用项目 downloads 目录，安装版使用系统下载目录下的 Wenku8Downloader。修改后新下载的文件将保存到新路径，已有文件不受影响。
+        <p className="mt-1.5 text-sm text-apple-tertiary">
+          留空使用默认目录，仅影响后续下载
         </p>
       </div>
-      <button
-        disabled={saving}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40 rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-        onClick={() => void handleSave()}
-      >
-        {saving ? '保存中...' : '保存下载设置'}
-      </button>
     </div>
   )
 }
@@ -792,6 +939,7 @@ function LogTab() {
   const [maxTotalSizeMb, setMaxTotalSizeMb] = useState('200')
   const [edited, setEdited] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('saved')
 
   useEffect(() => {
     if (!snapshot) return
@@ -808,13 +956,19 @@ function LogTab() {
   )
 
   const handleSave = async () => {
-    if (!validation.value) return
+    if (!edited || saving) return
+    if (!validation.value) {
+      setSaveState('editing')
+      return
+    }
     setSaving(true)
+    setSaveState('saving')
     try {
       await updateLogConfig(validation.value)
-      toast.success({ title: '日志设置已保存', message: '新的日志限制已立即生效。' })
+      setSaveState('saved')
     } catch (saveError) {
       const feedback = getUserFeedback(saveError, 'log-save')
+      setSaveState('error')
       toast.error(feedback)
     } finally {
       setSaving(false)
@@ -835,79 +989,86 @@ function LogTab() {
       label: '保留天数',
       value: retentionDays,
       setValue: setRetentionDays,
-      hint: '超过该天数的历史日志会自动删除，范围 1–365 天。',
     },
     {
       key: 'maxFileSizeMb' as const,
       label: '单文件上限（MB）',
       value: maxFileSizeMb,
       setValue: setMaxFileSizeMb,
-      hint: '单个日志文件达到上限后会在当天创建新的分段文件，范围 1–1024 MB。',
     },
     {
       key: 'maxTotalSizeMb' as const,
       label: '目录总上限（MB）',
       value: maxTotalSizeMb,
       setValue: setMaxTotalSizeMb,
-      hint: '按最旧优先清理日志；必须至少为单文件上限的两倍，范围 2–10240 MB。',
     },
   ]
 
   return (
-    <div className="space-y-4 max-w-lg">
-      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-4">
-        <h3 className="text-sm font-semibold text-apple-heading">本地日志</h3>
-        <p className="text-[12px] text-apple-tertiary mt-1">
-          日志按天保存，错误会额外写入独立文件。日志只保存在本机，不会自动上传。
-        </p>
+    <div className="max-w-3xl space-y-6">
+      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-4 sm:flex sm:items-start sm:justify-between sm:gap-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-apple-heading">本地日志</h3>
+            <SaveStateIndicator state={saving ? 'saving' : saveState} />
+          </div>
+          <p className="mt-1 text-sm text-apple-tertiary">
+            日志仅保存在本机
+          </p>
+        </div>
         <button
           type="button"
-          className="mt-3 px-4 py-2 text-[12px] font-medium text-apple-accent bg-apple-accent-light rounded-[20px] hover:bg-apple-accent/15 transition-colors"
+          className="mt-3 flex-shrink-0 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent transition-colors hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 sm:mt-0"
           onClick={() => void handleOpenDirectory()}
         >
           打开日志目录
         </button>
       </div>
 
-      {fields.map((field) => {
-        const fieldError = edited ? validation.errors[field.key] : undefined
-        const errorId = `log-${field.key}-error`
-        return (
-          <label key={field.key} className="block">
-            <span className="block text-sm font-semibold text-apple-heading mb-2">
-              {field.label}
-            </span>
-            <input
-              aria-label={field.label}
-              aria-invalid={fieldError ? 'true' : undefined}
-              aria-describedby={fieldError ? errorId : undefined}
-              inputMode="numeric"
-              className="w-40 px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
-              value={field.value}
-              onChange={(event) => {
-                field.setValue(event.target.value)
-                setEdited(true)
-              }}
-            />
-            <span className="block text-[12px] text-apple-tertiary mt-1.5">
-              {field.hint}
-            </span>
-            {fieldError && (
-              <span id={errorId} role="alert" className="mt-1 block text-sm text-red-600">
-                {fieldError}
-              </span>
-            )}
-          </label>
-        )
-      })}
-
-      <button
-        disabled={saving || validation.value === undefined}
-        className="px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40 rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-        onClick={() => void handleSave()}
+      <div
+        className="grid gap-5 md:grid-cols-3"
+        onBlur={(event) => {
+          if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget)) return
+          void handleSave()
+        }}
       >
-        {saving ? '保存中...' : '保存日志设置'}
-      </button>
+        {fields.map((field) => {
+          const fieldError = edited ? validation.errors[field.key] : undefined
+          const errorId = `log-${field.key}-error`
+          return (
+            <label key={field.key} className="block">
+              <span className="block text-sm font-semibold text-apple-heading mb-2">
+                {field.label}
+              </span>
+              <input
+                aria-label={field.label}
+                aria-invalid={fieldError ? 'true' : undefined}
+                aria-describedby={fieldError ? errorId : undefined}
+                inputMode="numeric"
+                disabled={saving}
+                className="w-full rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-sm text-apple-heading transition-colors focus:outline-none focus:border-apple-accent/40 focus:ring-2 focus:ring-apple-accent/15"
+                value={field.value}
+                onChange={(event) => {
+                  field.setValue(event.target.value)
+                  setEdited(true)
+                  setSaveState('editing')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  void handleSave()
+                }}
+              />
+              {fieldError && (
+                <span id={errorId} role="alert" className="mt-1 block text-sm text-red-600">
+                  {fieldError}
+                </span>
+              )}
+            </label>
+          )
+        })}
+      </div>
+
     </div>
   )
 }
