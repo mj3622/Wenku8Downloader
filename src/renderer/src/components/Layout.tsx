@@ -66,29 +66,15 @@ export default function Layout() {
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) =>
-                `relative flex items-center gap-3 rounded-lg px-3 py-[7px] text-[15px] transition-colors ${
+                `flex items-center gap-3 rounded-lg px-3 py-[7px] text-[15px] transition-colors ${
                   isActive
-                    ? 'text-apple-accent font-semibold'
+                    ? 'bg-apple-accent-light text-apple-accent font-medium'
                     : 'text-apple-secondary hover:bg-apple-accent-light hover:text-apple-heading'
                 }`
               }
             >
-              {({ isActive }) => (
-                <>
-                  {/* Left border indicator */}
-                  <div
-                    className={`absolute left-0 h-4 w-[3px] rounded-full transition-colors ${
-                      isActive ? 'bg-apple-accent' : 'bg-transparent'
-                    }`}
-                  />
-                  {/* Icon */}
-                  <span className="flex-shrink-0">{item.icon}</span>
-                  {/* Label */}
-                  <span className="flex-1">{item.label}</span>
-                  {/* Active dot */}
-                  {isActive && <span className="h-1.5 w-1.5 rounded-full bg-apple-accent" />}
-                </>
-              )}
+              <span className="flex-shrink-0">{item.icon}</span>
+              <span className="flex-1">{item.label}</span>
             </NavLink>
           ))}
         </nav>
