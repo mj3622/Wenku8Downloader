@@ -35,7 +35,11 @@ vi.mock('../api/client', () => ({
   api: mocks,
 }))
 
-import type { PublicConfigSnapshot } from '../../../shared/config-types'
+import type {
+  DownloadConfig,
+  LogConfig,
+  PublicConfigSnapshot,
+} from '../../../shared/config-types'
 import ConfigPage from './ConfigPage'
 import { useConfigStore } from '../stores/configStore'
 import { useLoginOperationStore } from '../stores/loginOperationStore'
@@ -134,6 +138,20 @@ async function click(element: Element): Promise<void> {
   })
 }
 
+async function keydown(element: Element, key: string): Promise<void> {
+  await act(async () => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    await flush()
+  })
+}
+
+async function blur(element: Element): Promise<void> {
+  await act(async () => {
+    element.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }))
+    await flush()
+  })
+}
+
 async function change(input: HTMLInputElement, value: string): Promise<void> {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(
@@ -149,8 +167,14 @@ async function change(input: HTMLInputElement, value: string): Promise<void> {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getConfig.mockResolvedValue(structuredClone(snapshot))
-  mocks.updateDownloadConfig.mockResolvedValue(structuredClone(snapshot))
-  mocks.updateLogConfig.mockResolvedValue(structuredClone(snapshot))
+  mocks.updateDownloadConfig.mockImplementation(async (input: DownloadConfig) => ({
+    ...structuredClone(snapshot),
+    download: input,
+  }))
+  mocks.updateLogConfig.mockImplementation(async (input: LogConfig) => ({
+    ...structuredClone(snapshot),
+    logging: input,
+  }))
   mocks.updateCredentials.mockResolvedValue(structuredClone(snapshot))
   mocks.resetCorruptConfig.mockResolvedValue(structuredClone(snapshot))
   mocks.autoGetCookie.mockResolvedValue({ status: 'ok', message: 'ok' })
@@ -180,24 +204,51 @@ afterEach(async () => {
 })
 
 describe('ConfigPage', () => {
+  it('supports semantic tabs and keyboard navigation', async () => {
+    await renderPage()
+
+    const loginTab = button('登录')
+    const downloadTab = button('下载设置')
+    expect(loginTab.getAttribute('role')).toBe('tab')
+    expect(loginTab.getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('[role="tablist"]')).not.toBeNull()
+    for (const tab of [loginTab, downloadTab, button('日志')]) {
+      const panelId = tab.getAttribute('aria-controls')
+      expect(panelId).toBeTruthy()
+      expect(container.querySelector(`#${panelId}`)).not.toBeNull()
+    }
+    expect(container.querySelector('#config-panel-login')?.hasAttribute('hidden')).toBe(false)
+    expect(container.querySelector('#config-panel-download')?.hasAttribute('hidden')).toBe(true)
+
+    await keydown(loginTab, 'ArrowRight')
+
+    expect(downloadTab.getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(downloadTab)
+    expect(container.querySelector('#config-panel-login')?.hasAttribute('hidden')).toBe(true)
+    expect(container.querySelector('#config-panel-download')?.hasAttribute('hidden')).toBe(false)
+  })
+
   it('shows saved credential status without prefilling or rendering secrets', async () => {
     await renderPage()
 
     const password = container.querySelector('input[type="password"]') as HTMLInputElement
-    expect(container.textContent).toContain('已保存密码')
+    expect(container.textContent).toContain('密码（已保存）')
     expect(password.value).toBe('')
     expect(container.textContent).not.toContain('PHPSESSID')
     expect(container.textContent).not.toContain('jieqiUserInfo')
     expect(container.textContent).not.toContain('hidden-password')
   })
 
-  it('omits the password when saving an unchanged account with an empty field', async () => {
+  it('does not write unchanged credentials when leaving the fields', async () => {
     await renderPage()
+    const username = container.querySelector(
+      'input[placeholder="轻小说文库用户名"]',
+    ) as HTMLInputElement
 
-    await click(button('保存账号'))
+    await blur(username)
 
-    expect(mocks.updateCredentials).toHaveBeenCalledTimes(1)
-    expect(mocks.updateCredentials).toHaveBeenCalledWith({ username: 'tester' })
+    expect(mocks.updateCredentials).not.toHaveBeenCalled()
+    expect(container.querySelector('#config-panel-login [role="status"]')).toBeNull()
   })
 
   it('validates a changed username without sending an empty password', async () => {
@@ -207,7 +258,7 @@ describe('ConfigPage', () => {
     ) as HTMLInputElement
 
     await change(username, 'next-user')
-    await click(button('保存账号'))
+    await blur(username)
 
     expect(mocks.updateCredentials).not.toHaveBeenCalled()
     expect(container.textContent).toContain('用户名变更时必须提供密码')
@@ -218,8 +269,11 @@ describe('ConfigPage', () => {
   it('requires both a username and a password when no login information is stored', async () => {
     mocks.getConfig.mockResolvedValue(structuredClone(clearedSnapshot))
     await renderPage()
+    const username = container.querySelector(
+      'input[placeholder="轻小说文库用户名"]',
+    ) as HTMLInputElement
 
-    await click(button('保存账号'))
+    await keydown(username, 'Enter')
 
     expect(mocks.updateCredentials).not.toHaveBeenCalled()
     expect(container.textContent).toContain('请输入用户名')
@@ -228,30 +282,34 @@ describe('ConfigPage', () => {
     expect(invalidInputs).toHaveLength(2)
   })
 
-  it('places an unsaved username warning beside the username field before refresh', async () => {
+  it('requires a password before automatically saving a changed username', async () => {
     await renderPage()
     const username = container.querySelector(
       'input[placeholder="轻小说文库用户名"]',
     ) as HTMLInputElement
 
     await change(username, 'next-user')
-    await click(button('刷新登录状态'))
+    await blur(username)
 
-    expect(mocks.autoGetCookie).not.toHaveBeenCalled()
-    expect(username.getAttribute('aria-invalid')).toBe('true')
-    expect(container.textContent).toContain('用户名已修改，请先保存')
+    expect(mocks.updateCredentials).not.toHaveBeenCalled()
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
+    expect(password.getAttribute('aria-invalid')).toBe('true')
+    expect(container.textContent).toContain('用户名变更时必须提供密码')
   })
 
-  it('places an unsaved password warning beside the password field before refresh', async () => {
+  it('automatically saves changed credentials when leaving the fields', async () => {
     await renderPage()
     const password = container.querySelector('input[type="password"]') as HTMLInputElement
 
     await change(password, 'new-password')
-    await click(button('刷新登录状态'))
+    await blur(password)
 
-    expect(mocks.autoGetCookie).not.toHaveBeenCalled()
-    expect(password.getAttribute('aria-invalid')).toBe('true')
-    expect(container.textContent).toContain('密码已修改，请先保存')
+    expect(mocks.updateCredentials).toHaveBeenCalledWith({
+      username: 'tester',
+      password: 'new-password',
+    })
+    expect(mocks.autoGetCookie).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('#config-panel-login [role="status"]')).toBeNull()
   })
 
   it('does not report login refresh success when the latest config cannot be read', async () => {
@@ -261,7 +319,7 @@ describe('ConfigPage', () => {
       .mockRejectedValueOnce(new Error('配置服务不可用'))
     await renderPage()
 
-    await click(button('刷新登录状态'))
+    await click(button('刷新状态'))
 
     expect(mocks.autoGetCookie).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('获取失败')
@@ -279,7 +337,7 @@ describe('ConfigPage', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderPage()
 
-    await click(button('清除已保存登录信息'))
+    await click(button('清除登录信息'))
 
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(mocks.updateCredentials).toHaveBeenCalledWith({ username: '', password: '' })
@@ -301,8 +359,10 @@ describe('ConfigPage', () => {
       rejectSave = reject
     }))
     await renderPage()
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
 
-    await click(button('保存账号'))
+    await change(password, 'new-password')
+    await keydown(password, 'Enter')
     await act(async () => {
       useConfigStore.setState({ snapshot: structuredClone(clearedSnapshot) })
       await flush()
@@ -332,7 +392,7 @@ describe('ConfigPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderPage()
 
-    await click(button('清除已保存登录信息'))
+    await click(button('清除登录信息'))
     await act(async () => {
       rejectClear?.(new Error('账号设置已清除，但登录状态同步失败，请重新登录'))
       await flush()
@@ -357,7 +417,7 @@ describe('ConfigPage', () => {
     await renderPage()
     expect(useConfigStore.getState().snapshot?.account.hasCookies).toBe(true)
 
-    await click(button('刷新登录状态'))
+    await click(button('刷新状态'))
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
       await flush()
@@ -393,8 +453,8 @@ describe('ConfigPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderPage()
 
-    const refreshButton = button('刷新登录状态')
-    const clearButton = button('清除已保存登录信息')
+    const refreshButton = button('刷新状态')
+    const clearButton = button('清除登录信息')
     await act(async () => {
       // Simulate two actions already queued before React commits the disabled state.
       refreshButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -423,9 +483,8 @@ describe('ConfigPage', () => {
       resolveLogin = () => resolve({ status: 'ok', message: 'ok' })
     }))
     await renderPage()
-    const saveButton = button('保存账号')
-    const clearButton = button('清除已保存登录信息')
-    const refreshButton = button('刷新登录状态')
+    const clearButton = button('清除登录信息')
+    const refreshButton = button('刷新状态')
     const username = container.querySelector(
       'input[placeholder="轻小说文库用户名"]',
     ) as HTMLInputElement
@@ -433,7 +492,6 @@ describe('ConfigPage', () => {
 
     await click(refreshButton)
 
-    expect(saveButton.disabled).toBe(true)
     expect(clearButton.disabled).toBe(true)
     expect(refreshButton.disabled).toBe(true)
     expect(username.disabled).toBe(true)
@@ -452,8 +510,8 @@ describe('ConfigPage', () => {
     mocks.updateCredentials.mockRejectedValue(new Error('清除失败'))
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderPage()
-    const refreshButton = button('刷新登录状态')
-    const clearButton = button('清除已保存登录信息')
+    const refreshButton = button('刷新状态')
+    const clearButton = button('清除登录信息')
 
     await act(async () => {
       refreshButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -465,7 +523,7 @@ describe('ConfigPage', () => {
       await flush()
     })
 
-    expect(button('刷新登录状态').disabled).toBe(false)
+    expect(button('刷新状态').disabled).toBe(false)
     expect(container.textContent).not.toContain('正在登录')
     expect(useToastStore.getState().items).toEqual(expect.arrayContaining([
       expect.objectContaining({ tone: 'error', title: '账号保存失败' }),
@@ -478,8 +536,10 @@ describe('ConfigPage', () => {
       rejectSave = reject
     }))
     await renderPage()
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
 
-    await click(button('保存账号'))
+    await change(password, 'new-password')
+    await keydown(password, 'Enter')
     await click(button('下载设置'))
     await act(async () => {
       rejectSave?.(new Error('账号服务不可用'))
@@ -498,11 +558,11 @@ describe('ConfigPage', () => {
     }))
     await renderPage()
 
-    const saveButton = button('保存账号')
-    await click(saveButton)
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
+    await change(password, 'new-password')
+    await keydown(password, 'Enter')
     await click(button('下载设置'))
     await click(button('登录'))
-    expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('input[type="password"]') as HTMLInputElement).disabled)
       .toBe(true)
     await click(button('下载设置'))
@@ -512,9 +572,7 @@ describe('ConfigPage', () => {
     })
 
     expect(mocks.autoGetCookie).toHaveBeenCalledWith(expect.stringMatching(/^login-\d+-\d+$/))
-    expect(useToastStore.getState().items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ tone: 'success', title: '账号已保存' }),
-    ]))
+    expect(container.querySelector('#config-panel-login [role="status"]')).toBeNull()
   })
 
   it('shows progress only for the current login operation', async () => {
@@ -530,23 +588,16 @@ describe('ConfigPage', () => {
     }))
     await renderPage()
 
-    const refreshButton = button('刷新登录状态')
-    const saveButton = button('保存账号')
-    await act(async () => {
-      refreshButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      saveButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await flush()
-    })
-    const firstOperationId = mocks.autoGetCookie.mock.calls[0][0] as string
-    const secondOperationId = mocks.autoGetCookie.mock.calls[1][0] as string
+    await click(button('刷新状态'))
+    const operationId = mocks.autoGetCookie.mock.calls[0][0] as string
 
     await act(async () => {
-      onProgress?.({ operationId: firstOperationId, step: 'done', message: '旧请求已完成' })
+      onProgress?.({ operationId: 'stale-login', step: 'done', message: '旧请求已完成' })
       await flush()
     })
     expect(container.textContent).not.toContain('旧请求已完成')
     await act(async () => {
-      onProgress?.({ operationId: secondOperationId, step: 'login', message: '新请求正在登录' })
+      onProgress?.({ operationId, step: 'login', message: '新请求正在登录' })
       await flush()
     })
     expect(container.textContent).toContain('新请求正在登录')
@@ -563,12 +614,14 @@ describe('ConfigPage', () => {
       await flush()
       await flush()
     })
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
 
-    await click(button('保存账号'))
+    await change(password, 'new-password')
+    await keydown(password, 'Enter')
 
     expect(mocks.autoGetCookie).toHaveBeenCalledTimes(1)
-    expect(button('保存账号').disabled).toBe(false)
-    expect(button('刷新登录状态').disabled).toBe(false)
+    expect(password.disabled).toBe(false)
+    expect(button('刷新状态').disabled).toBe(false)
   })
 
   it('preserves account busy state and progress after leaving and returning to the page', async () => {
@@ -587,8 +640,10 @@ describe('ConfigPage', () => {
       resolveLogin = () => resolve({ status: 'ok', message: 'ok' })
     }))
     await renderPage()
+    const password = container.querySelector('input[type="password"]') as HTMLInputElement
 
-    await click(button('保存账号'))
+    await change(password, 'new-password')
+    await keydown(password, 'Enter')
     await act(async () => {
       root.render(<div>检索页</div>)
       await flush()
@@ -598,10 +653,7 @@ describe('ConfigPage', () => {
       await flush()
     })
 
-    const remountedSave = [...container.querySelectorAll('button')].find((element) => (
-      element.textContent?.includes('保存账号') || element.textContent?.includes('保存中')
-    )) as HTMLButtonElement | undefined
-    expect(remountedSave?.disabled).toBe(true)
+    expect(container.textContent).not.toContain('保存中')
     expect((container.querySelector('input[type="password"]') as HTMLInputElement).disabled)
       .toBe(true)
 
@@ -620,20 +672,22 @@ describe('ConfigPage', () => {
       resolveLogin?.()
       await flush()
     })
-    expect(remountedSave?.disabled).toBe(false)
+    expect((container.querySelector('input[type="password"]') as HTMLInputElement).disabled)
+      .toBe(false)
+    expect(container.textContent).not.toContain('保存中')
   })
 
   it('keeps saved credentials when clearing is cancelled', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     await renderPage()
 
-    await click(button('清除已保存登录信息'))
+    await click(button('清除登录信息'))
 
     expect(mocks.updateCredentials).not.toHaveBeenCalled()
-    expect(container.textContent).toContain('已保存密码')
+    expect(container.textContent).toContain('密码（已保存）')
   })
 
-  it('submits all download settings in one request', async () => {
+  it('automatically saves download setting changes', async () => {
     mocks.selectFolder.mockResolvedValue('D:\\Books')
     await renderPage()
     await click(button('下载设置'))
@@ -642,31 +696,28 @@ describe('ConfigPage', () => {
       'input[aria-label="封面图片索引"]',
     ) as HTMLInputElement
     await change(coverIndex, '2')
+    await blur(coverIndex)
     await click(button('选择文件夹'))
 
-    await click(button('保存下载设置'))
-
-    expect(mocks.updateDownloadConfig).toHaveBeenCalledTimes(1)
-    expect(mocks.updateDownloadConfig).toHaveBeenCalledWith({
+    expect(mocks.updateDownloadConfig).toHaveBeenCalledTimes(3)
+    expect(mocks.updateDownloadConfig).toHaveBeenLastCalledWith({
       fullTitle: 'OUT',
       defaultCoverIndex: 2,
       downloadPath: 'D:\\Books',
     })
   })
 
-  it('uses only Toast for transient download-save feedback', async () => {
+  it('shows inline feedback after automatically saving download settings', async () => {
     await renderPage()
     await click(button('下载设置'))
 
-    await click(button('保存下载设置'))
+    await click(button('译名'))
 
-    expect(useToastStore.getState().items[0]).toMatchObject({
-      tone: 'success',
-      title: '下载设置已保存',
-    })
-    const duplicateLiveMessage = [...container.querySelectorAll('[role="status"]')]
-      .some((element) => element.textContent?.includes('下载设置已保存'))
-    expect(duplicateLiveMessage).toBe(false)
+    const saveStatus = container.querySelector(
+      '#config-panel-download [role="status"]',
+    )
+    expect(saveStatus).toBeNull()
+    expect(useToastStore.getState().items).toHaveLength(0)
   })
 
   it('shows an accessible field error for an invalid cover index', async () => {
@@ -677,7 +728,7 @@ describe('ConfigPage', () => {
     ) as HTMLInputElement
     await change(coverIndex, '-1')
 
-    await click(button('保存下载设置'))
+    await blur(coverIndex)
 
     expect(mocks.updateDownloadConfig).not.toHaveBeenCalled()
     expect(coverIndex.getAttribute('aria-invalid')).toBe('true')
@@ -710,7 +761,7 @@ describe('ConfigPage', () => {
     await change(maxFileSize, '64')
     await change(maxTotalSize, '256')
 
-    await click(button('保存日志设置'))
+    await blur(maxTotalSize)
 
     expect(mocks.updateLogConfig).toHaveBeenCalledWith({
       retentionDays: 14,
@@ -729,7 +780,9 @@ describe('ConfigPage', () => {
 
     expect(container.textContent).toContain('目录总上限必须至少为单文件上限的两倍')
     expect(maxTotalSize.getAttribute('aria-invalid')).toBe('true')
-    expect(button('保存日志设置').disabled).toBe(true)
+    await blur(maxTotalSize)
+    expect(container.querySelector('#config-panel-logging [role="status"]')?.textContent)
+      .toBe('未保存')
     expect(mocks.updateLogConfig).not.toHaveBeenCalled()
   })
 
@@ -764,7 +817,7 @@ describe('ConfigPage', () => {
     await click(button('重试'))
 
     expect(mocks.getConfig).toHaveBeenCalledTimes(2)
-    expect(container.textContent).toContain('保存账号')
+    expect(container.textContent).toContain('账号登录')
   })
 
   it('requires confirmation before resetting a corrupt configuration', async () => {

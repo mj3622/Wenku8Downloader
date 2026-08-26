@@ -1,7 +1,17 @@
 import { Link } from 'react-router-dom'
+import {
+  IconBook2,
+  IconBrandGithub,
+  IconChevronRight,
+  IconPhoto,
+  IconRefresh,
+  IconStack2,
+} from '@tabler/icons-react'
 import { api } from '../api/client'
 import { toast } from '../stores/toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
+
+const GITHUB_URL = 'https://github.com/mj3622/Wenku8Downloader'
 
 export default function HomePage() {
   const openExternal = async (url: string): Promise<void> => {
@@ -13,125 +23,68 @@ export default function HomePage() {
   }
 
   return (
-    <div className="max-w-2xl">
-      {/* 版本号 + GitHub */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="inline-block px-2.5 py-0.5 rounded-full bg-apple-accent-light text-apple-accent text-[11px] font-medium">
-          v2.0.0
-        </span>
-        <a
-          onClick={(event) => {
-            event.preventDefault()
-            void openExternal('https://github.com/mj3622/Wenku8Downloader')
-          }}
-          href="https://github.com/mj3622/Wenku8Downloader"
-          className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors cursor-pointer"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
-          GitHub 仓库
-        </a>
-      </div>
+    <div className="max-w-5xl pb-8">
+      <section className="rounded-2xl border border-apple-border-subtle bg-white px-6 py-6 lg:px-8 lg:py-7">
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-apple-accent-light px-2.5 py-1 text-xs font-medium text-apple-accent">
+            v2.0.0
+          </span>
+          <a
+            onClick={(event) => {
+              event.preventDefault()
+              void openExternal(GITHUB_URL)
+            }}
+            href={GITHUB_URL}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-apple-secondary transition-colors hover:bg-apple-bg hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+          >
+            <IconBrandGithub aria-hidden="true" size={16} stroke={1.8} />
+            GitHub 仓库
+          </a>
+        </div>
 
-      {/* Hero */}
-      <div className="mb-6">
-        <h1 className="text-[30px] font-bold text-apple-heading tracking-tight mb-4">
+        <h1 className="mb-3 text-[30px] font-bold tracking-tight text-apple-heading">
           轻小说文库下载器
         </h1>
-        <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-        <p className="text-[14px] text-apple-body whitespace-nowrap">
-          一款桌面端轻小说下载工具，支持按编号、作者、书名检索作品，并导出为 EPUB 格式，同时支持插图下载。
+        <p className="max-w-3xl text-sm leading-6 text-apple-body">
+          按编号、作者或书名检索作品，导出 EPUB 或单独下载插图
         </p>
-      </div>
 
-      {/* 操作按钮 */}
-      <div className="flex gap-3 mb-10">
-        <Link
-          to="/search"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-apple-accent text-white text-[13px] font-semibold text-center hover:opacity-90 transition-opacity"
-        >
-          检索作品
-        </Link>
-        <Link
-          to="/download"
-          className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
-        >
-          下载历史
-        </Link>
-        <Link
-          to="/config"
-          className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
-        >
-          配置
-        </Link>
-      </div>
+      </section>
 
-      {/* 快速入门 */}
-      <section className="mb-10">
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">快速入门</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="space-y-3">
+      <section aria-labelledby="getting-started-title" className="mt-8">
+        <SectionTitle id="getting-started-title">快速入门</SectionTitle>
+        <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-apple-card p-1.5 lg:grid lg:grid-cols-3">
           <Step index={1} title="配置登录信息" to="/config">
-            首次使用请先在「配置」页面填写文库账号密码，保存后会自动登录。可在「下载设置」中自定义文件保存路径。
+            填写文库账号并确认登录状态，也可设置文件保存目录
           </Step>
           <Step index={2} title="检索作品" to="/search">
-            进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
+            按书籍编号、作者或书名检索，选择目标作品查看详情
           </Step>
           <Step index={3} title="下载小说" to="/download">
-            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载完成后可在「下载历史」中点击文件夹图标打开文件所在目录。
+            下载整本、分卷或插图，完成后可从下载历史打开目录
           </Step>
         </div>
       </section>
 
-      {/* 功能概览 */}
-      <section className="mb-10">
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">功能概览</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="grid grid-cols-2 gap-3">
-          <FeatureCard
-            title="EPUB 整本下载"
-            desc="将所有卷合并导出为一个 EPUB 文件，包含封面、插图与目录"
-          />
-          <FeatureCard
-            title="分卷下载"
-            desc="按卷分别下载，每卷生成独立的 EPUB 文件，方便分册阅读"
-          />
-          <FeatureCard
-            title="插图下载"
-            desc="单独提取并下载指定卷的插图图片，适合收藏高清原图"
-          />
-          <FeatureCard
-            title="自动更新登录状态"
-            desc="使用已保存的账号登录轻小说文库，并更新检索和下载所需的登录状态"
-          />
+      <section aria-labelledby="features-title" className="mt-8">
+        <SectionTitle id="features-title">功能概览</SectionTitle>
+        <div className="grid gap-x-10 gap-y-6 rounded-xl border border-apple-border-subtle bg-apple-card px-5 py-5 sm:grid-cols-2 lg:px-6">
+          <Feature icon="book" title="EPUB 整本下载" desc="合并卷册、封面、插图与目录" />
+          <Feature icon="layers" title="分卷下载" desc="每卷独立导出为 EPUB" />
+          <Feature icon="image" title="插图下载" desc="单独保存指定卷插图" />
+          <Feature icon="refresh" title="自动更新登录状态" desc="使用已保存账号自动更新" />
         </div>
       </section>
 
-      {/* 提示 */}
-      <section>
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">提示</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="rounded-xl border border-apple-border-subtle bg-apple-card p-4">
-          <ul className="text-[12px] text-apple-secondary space-y-1.5 leading-relaxed">
-            <li>
-              · 本工具仅支持{' '}
-              <strong className="text-apple-heading">
-                轻小说文库 (<a onClick={(event) => {
-                  event.preventDefault()
-                  void openExternal('https://www.wenku8.net')
-                }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
-              </strong>{' '}
-              的内容下载
-            </li>
-            <li>· 登录状态会定期失效，下载失败时可前往配置页重新登录</li>
-            <li>
-              · EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径
-            </li>
-          </ul>
-        </div>
-      </section>
     </div>
+  )
+}
+
+function SectionTitle({ id, children }: { id: string; children: string }) {
+  return (
+    <h2 id={id} className="mb-3 text-lg font-semibold tracking-tight text-apple-heading">
+      {children}
+    </h2>
   )
 }
 
@@ -144,28 +97,57 @@ function Step({ index, title, to, children }: {
   return (
     <Link
       to={to}
-      className="block p-4 rounded-xl border border-apple-border-subtle bg-apple-card
-                 hover:border-apple-accent/20 transition-all"
+      className="group relative flex gap-4 rounded-lg px-4 py-3.5 before:pointer-events-none before:absolute before:-inset-x-1.5 before:inset-y-0 before:rounded-lg before:bg-[linear-gradient(90deg,transparent,rgba(0,113,227,0.05)_7%,rgba(0,113,227,0.05)_93%,transparent)] before:opacity-0 before:transition-opacity before:duration-200 after:pointer-events-none after:absolute after:bottom-0 after:left-4 after:right-4 after:h-px after:bg-gradient-to-r after:from-transparent after:via-apple-border-subtle after:to-transparent after:content-[''] last:after:hidden hover:before:opacity-100 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 lg:after:bottom-4 lg:after:left-auto lg:after:right-0 lg:after:top-4 lg:after:h-auto lg:after:w-px lg:after:bg-gradient-to-b"
     >
-      <div className="flex items-start gap-4">
-        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-apple-accent-light text-apple-accent
-                         text-[13px] font-semibold flex items-center justify-center mt-0.5">
-          {index}
+      <span className="relative z-[1] flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-apple-accent-light text-sm font-semibold text-apple-accent transition-[transform,box-shadow] duration-200 ease-out group-hover:scale-[1.02] group-hover:ring-1 group-hover:ring-inset group-hover:ring-apple-accent/20">
+        {index}
+      </span>
+      <span className="relative z-[1] min-w-0 pr-3">
+        <span className="mb-2 block origin-left text-sm font-semibold text-apple-heading transition-[color,transform] duration-200 ease-out group-hover:scale-[1.02] group-hover:text-apple-accent">
+          {title}
         </span>
-        <div>
-          <h4 className="text-[14px] font-semibold text-apple-heading mb-1">{title}</h4>
-          <p className="text-[12px] text-apple-secondary leading-relaxed">{children}</p>
-        </div>
-      </div>
+        <span className="block origin-left text-sm leading-6 text-apple-secondary transition-transform duration-200 ease-out group-hover:scale-[1.02]">
+          {children}
+        </span>
+      </span>
+      <IconChevronRight
+        aria-hidden="true"
+        size={18}
+        stroke={1.8}
+        className="absolute right-4 top-1/2 z-[1] -translate-y-1/2 text-apple-tertiary transition-all duration-200 ease-out group-hover:translate-x-0.5 group-hover:scale-[1.02] group-hover:text-apple-accent"
+      />
     </Link>
   )
 }
 
-function FeatureCard({ title, desc }: { title: string; desc: string }) {
+type FeatureIcon = 'book' | 'layers' | 'image' | 'refresh'
+
+const FEATURE_ICONS = {
+  book: IconBook2,
+  layers: IconStack2,
+  image: IconPhoto,
+  refresh: IconRefresh,
+} as const
+
+function Feature({
+  icon,
+  title,
+  desc,
+}: {
+  icon: FeatureIcon
+  title: string
+  desc: string
+}) {
+  const Glyph = FEATURE_ICONS[icon]
   return (
-    <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card">
-      <h4 className="text-[13px] font-semibold text-apple-heading mb-1">{title}</h4>
-      <p className="text-[12px] text-apple-secondary leading-relaxed">{desc}</p>
+    <div className="flex gap-3">
+      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-apple-bg text-apple-secondary">
+        <Glyph aria-hidden="true" size={20} stroke={1.7} />
+      </span>
+      <div>
+        <h3 className="text-sm font-semibold text-apple-heading">{title}</h3>
+        <p className="mt-1 text-sm leading-5 text-apple-secondary">{desc}</p>
+      </div>
     </div>
   )
 }
