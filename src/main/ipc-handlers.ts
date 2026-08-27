@@ -1,7 +1,6 @@
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { mkdir } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import type { Book } from './book'
 import { CookieService } from './cookie-service'
 import {
   validateCredentialsInput,
@@ -9,25 +8,21 @@ import {
 } from './config/config-service'
 import { validateDownloadConfig, validateLogConfig } from './config/config-schema'
 import type { WebCrawler } from './crawler'
-import {
-  Downloader,
-  NoUsableDownloadContentError,
-  resolveDownloadRoot,
-  type DownloaderBook,
-  type DownloadRuntimeConfig,
-} from './downloader'
+import { resolveDownloadRoot, type DownloadRuntimeConfig } from './downloader'
+import type { DownloadManager } from './download-manager'
+import type { DownloadExecutorBook } from './download-executor'
 import { resolveWithin } from './path-safety'
 import {
   validateBookId,
+  validateDownloadHistoryScope,
+  validateDownloadTaskId,
+  validateEnqueueDownloadInput,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
-  validateOptionalTaskId,
-  validateOptionalVolumeName,
   validateSearchQuery,
 } from './ipc-validation'
 import type { LogContext } from './logging/file-logger'
-import type { DownloadResult } from '../shared/ipc-types'
 import { configureLogger, getLogDirectory, logger } from './logging/logger'
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
 
@@ -38,7 +33,7 @@ function requirePayload(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-export type IpcBook = DownloaderBook & Pick<Book, 'pictureUrls'>
+export type IpcBook = DownloadExecutorBook
 
 export interface IpcServices {
   config: Pick<
@@ -61,43 +56,17 @@ export interface IpcServices {
     get(bookId: string): Promise<IpcBook>
     clear(): void
   }
-}
-
-function completedDownloadResult(warnings: string[]): DownloadResult {
-  const uniqueWarnings = [...new Set(warnings)]
-  return uniqueWarnings.length > 0
-    ? {
-        status: 'ok',
-        message: '下载完成，但有部分内容缺失',
-        warnings: uniqueWarnings,
-      }
-    : { status: 'ok', message: '下载完成' }
-}
-
-function downloadLogContext(
-  value: unknown,
-  type: 'epub' | 'images',
-): LogContext {
-  const context: LogContext = { type }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return context
-
-  try {
-    const record = value as Record<string, unknown>
-    for (const key of ['bookId', 'volumeName', 'taskId'] as const) {
-      if (typeof record[key] === 'string') context[key] = record[key]
-    }
-  } catch {
-    // Diagnostic context must never make an IPC request fail.
-  }
-  return context
-}
-
-function preferredDownloadOperationId(value: unknown): string | undefined {
-  try {
-    return validateOptionalTaskId(value)
-  } catch {
-    return undefined
-  }
+  downloads: Pick<
+    DownloadManager,
+    | 'getSnapshot'
+    | 'enqueue'
+    | 'cancel'
+    | 'retry'
+    | 'remove'
+    | 'clearHistory'
+    | 'importLegacyHistory'
+    | 'subscribe'
+  >
 }
 
 async function runLoggedOperation<T>(
@@ -145,6 +114,16 @@ function getDownloadRuntimeConfig(services: IpcServices): DownloadRuntimeConfig 
 
 export function registerIpcHandlers(services: IpcServices): void {
   const rendererErrorReporter = new RendererErrorReporter({ logger })
+  services.downloads.subscribe((stateEvent) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue
+      try {
+        window.webContents.send('download:state-changed', stateEvent)
+      } catch {
+        // A closing renderer must not affect downloads in the main process.
+      }
+    }
+  })
 
   ipcMain.handle('config:get', () => runLoggedOperation(
     'config.get',
@@ -280,106 +259,56 @@ export function registerIpcHandlers(services: IpcServices): void {
     })
   })
 
-  ipcMain.handle('download:epub', (event, rawPayload: unknown) => {
-    const context = downloadLogContext(rawPayload, 'epub')
-    const preferredOperationId = preferredDownloadOperationId(context.taskId)
-    return runLoggedOperation('download.novel', context, async (operationId) => {
-      const payload = requirePayload(rawPayload)
-      const taskId = validateOptionalTaskId(payload.taskId)
-      const bookId = validateBookId(payload.bookId)
-      const volumeName = validateOptionalVolumeName(payload.volumeName)
-      Object.assign(context, { bookId, volumeName, taskId, operationId })
-      const runtimeConfig = getDownloadRuntimeConfig(services)
-      const book = await services.books.get(bookId)
-      context.title = book.basicInfo['标题']
-      if (volumeName && !book.volumes[volumeName]) throw new Error(`未找到卷: ${volumeName}`)
-      const downloader = new Downloader(services.crawler, runtimeConfig, { operationId, taskId })
-      downloader.setOnProgress((progress) => {
-        event.sender.send('download:progress', { taskId, ...progress })
-      })
-      await downloader.downloadNovel(book, volumeName)
-      return completedDownloadResult(downloader.getWarnings())
-    }, { operationId: preferredOperationId })
+  ipcMain.handle('download:get-snapshot', () => runLoggedOperation(
+    'download.get-snapshot',
+    {},
+    () => services.downloads.getSnapshot(),
+    { logStart: false, logSuccess: false },
+  ))
+
+  ipcMain.handle('download:enqueue', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.enqueue', context, () => {
+      const input = validateEnqueueDownloadInput(requirePayload(rawPayload))
+      Object.assign(context, { bookId: input.bookId, type: input.type, volumeName: input.volume })
+      return services.downloads.enqueue(input)
+    })
   })
 
-  ipcMain.handle('download:images', (event, rawPayload: unknown) => {
-    const context = downloadLogContext(rawPayload, 'images')
-    const preferredOperationId = preferredDownloadOperationId(context.taskId)
-    return runLoggedOperation('download.pictures', context, async (operationId) => {
-      const payload = requirePayload(rawPayload)
-      const taskId = validateOptionalTaskId(payload.taskId)
-      const bookId = validateBookId(payload.bookId)
-      const volumeName = validateOptionalVolumeName(payload.volumeName)
-      Object.assign(context, { bookId, volumeName, taskId, operationId })
-      const runtimeConfig = getDownloadRuntimeConfig(services)
-      const book = await services.books.get(bookId)
-      context.title = book.basicInfo['标题']
-      const downloader = new Downloader(services.crawler, runtimeConfig, { operationId, taskId })
-      downloader.setOnProgress((progress) => {
-        event.sender.send('download:progress', { taskId, ...progress })
+  for (const [channel, eventName, command] of [
+    ['download:cancel', 'download.cancel', services.downloads.cancel],
+    ['download:retry', 'download.retry', services.downloads.retry],
+    ['download:remove', 'download.remove', services.downloads.remove],
+  ] as const) {
+    ipcMain.handle(channel, (_event, rawPayload: unknown) => {
+      const context: LogContext = {}
+      return runLoggedOperation(eventName, context, () => {
+        const taskId = validateDownloadTaskId(requirePayload(rawPayload).taskId)
+        context.taskId = taskId
+        return command.call(services.downloads, taskId)
       })
-      if (volumeName) {
-        const volumeIndex = Object.keys(book.volumes).indexOf(volumeName)
-        const urls = await book.getChapterImageUrls(volumeName)
-        if (volumeIndex < 0 || !urls?.length) {
-          throw new NoUsableDownloadContentError(`该卷没有可保存的插图: ${volumeName}`)
-        }
-        await downloader.downloadPictures(
-          urls,
-          volumeName,
-          book.basicInfo['标题'],
-          book.bookId,
-          volumeIndex,
-        )
-      } else {
-        if (Object.keys(book.pictureUrls).length === 0) {
-          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
-        }
-        const warnings: string[] = []
-        let firstIllustrationError: unknown
-        let completedVolumes = 0
-        for (const volume of Object.keys(book.pictureUrls)) {
-          let urls: string[] | null
-          try {
-            urls = await book.getChapterImageUrls(volume)
-          } catch (error) {
-            firstIllustrationError ??= error
-            logger.error(
-              'download.illustration-page.failed',
-              '插图页读取失败，继续处理其他分卷',
-              error,
-              { ...context, volumeName: volume },
-            )
-            warnings.push(`“${volume}”的插图页无法读取，已跳过该卷。`)
-            continue
-          }
-          if (!urls?.length) {
-            warnings.push(`“${volume}”没有可保存的插图。`)
-            continue
-          }
-          const volumeIndex = Object.keys(book.volumes).indexOf(volume)
-          try {
-            await downloader.downloadPictures(
-              urls,
-              volume,
-              book.basicInfo['标题'],
-              book.bookId,
-              volumeIndex,
-            )
-            completedVolumes++
-          } catch (error) {
-            if (!(error instanceof NoUsableDownloadContentError)) throw error
-            warnings.push(`“${volume}”没有可保存的插图。`)
-          }
-        }
-        if (completedVolumes === 0) {
-          if (firstIllustrationError !== undefined) throw firstIllustrationError
-          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
-        }
-        return completedDownloadResult([...downloader.getWarnings(), ...warnings])
+    })
+  }
+
+  ipcMain.handle('download:clear-history', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.clear-history', context, () => {
+      const scope = validateDownloadHistoryScope(requirePayload(rawPayload).scope)
+      context.scope = scope
+      return services.downloads.clearHistory(scope)
+    })
+  })
+
+  ipcMain.handle('download:import-legacy-history', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.import-legacy-history', context, () => {
+      const tasks = requirePayload(rawPayload).tasks
+      if (!Array.isArray(tasks) || tasks.length > 5_000) {
+        throw new Error('旧下载历史格式无效')
       }
-      return completedDownloadResult(downloader.getWarnings())
-    }, { operationId: preferredOperationId })
+      context.taskCount = tasks.length
+      return services.downloads.importLegacyHistory(tasks)
+    })
   })
 
   ipcMain.handle('shell:openExternal', (_event, rawUrl: unknown) => {

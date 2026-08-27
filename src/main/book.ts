@@ -1,5 +1,6 @@
 import type { WebCrawler } from './crawler'
 import type { TitleFormat } from '../shared/config-types'
+import { formatBookTitle } from '../shared/title-format'
 import type { BasicInfo, Chapter } from './types'
 
 export class Book {
@@ -26,22 +27,28 @@ export class Book {
     this.crawler = crawler
   }
 
-  static async create(bookId: string, crawler: WebCrawler): Promise<Book> {
+  static async create(
+    bookId: string,
+    crawler: WebCrawler,
+    signal?: AbortSignal,
+  ): Promise<Book> {
     const book = new Book(bookId, crawler)
 
     // 顺序与 Python 一致：章节 → 图片映射 → 基本信息
-    const [baseUrl, volumes] = await book.fetchChapters()
+    const [baseUrl, volumes] = await book.fetchChapters(signal)
     book.baseChapterUrl = baseUrl
     book.volumes = volumes
     book.pictureUrls = book.buildPictureUrlMap()
-    book.basicInfo = await book.fetchBasicInfo()
+    book.basicInfo = await book.fetchBasicInfo(signal)
 
     return book
   }
 
-  private async fetchChapters(): Promise<[string, Record<string, Chapter[]>]> {
+  private async fetchChapters(
+    signal?: AbortSignal,
+  ): Promise<[string, Record<string, Chapter[]>]> {
     const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl)
+    const $ = await this.crawler.fetch(bookUrl, true, signal)
 
     // 找到 "小说目录" 链接
     let chapterIndexUrl = ''
@@ -57,7 +64,7 @@ export class Book {
       throw new Error('未找到小说目录链接')
     }
 
-    const index$ = await this.crawler.fetch(chapterIndexUrl)
+    const index$ = await this.crawler.fetch(chapterIndexUrl, true, signal)
     const baseUrl = chapterIndexUrl.replace(/index\.htm$/, '')
 
     const volumes: Record<string, Chapter[]> = {}
@@ -96,9 +103,9 @@ export class Book {
     return map
   }
 
-  private async fetchBasicInfo(): Promise<BasicInfo> {
+  private async fetchBasicInfo(signal?: AbortSignal): Promise<BasicInfo> {
     const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl)
+    const $ = await this.crawler.fetch(bookUrl, true, signal)
 
     const contentDiv = $('#content')
     const table = contentDiv.find('table').first()
@@ -159,13 +166,16 @@ export class Book {
     }
   }
 
-  async getChapterImageUrls(volumeName?: string): Promise<string[] | null> {
+  async getChapterImageUrls(
+    volumeName?: string,
+    signal?: AbortSignal,
+  ): Promise<string[] | null> {
     if (!volumeName) return null
     const pictureUrl = this.pictureUrls[volumeName]
     if (!pictureUrl) return null
 
     const url = `${this.baseChapterUrl}${pictureUrl}`
-    const $ = await this.crawler.fetch(url)
+    const $ = await this.crawler.fetch(url, true, signal)
     const urls: string[] = []
 
     $('img').each((_i, img) => {
@@ -176,22 +186,15 @@ export class Book {
     return urls.length > 0 ? urls : null
   }
 
-  async getCoverContent(): Promise<Buffer> {
+  async getCoverContent(signal?: AbortSignal): Promise<Buffer> {
     const coverUrl = this.basicInfo['cover']
     if (!coverUrl) throw new Error('无封面图片')
-    const content = await this.crawler.getImageContent(coverUrl)
+    const content = await this.crawler.getImageContent(coverUrl, 3, undefined, signal)
     if (!content || content.byteLength === 0) throw new Error('封面下载失败')
     return content
   }
 
   getFormattedTitle(format: TitleFormat): string {
-    const title = this.basicInfo['标题']
-    if (format === 'FULL') return title
-
-    const match = title.match(/^(.*?)\((.*?)\)$/)
-    if (!match) return title
-
-    if (format === 'OUT') return match[1].trim()
-    return match[2].trim()
+    return formatBookTitle(this.basicInfo['标题'], format)
   }
 }

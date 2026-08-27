@@ -1,235 +1,184 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import type {
+  DownloadHistoryScope,
+  DownloadSnapshot,
+  DownloadStateEvent,
+  DownloadTask,
+  EnqueueDownloadInput,
+} from '../../../shared/ipc-types'
 import { api } from '../api/client'
 import { toast } from './toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
 
-export type DownloadTask = {
-  id: string
-  bookId: string
-  title: string
-  cover?: string
-  type: 'epub_full' | 'epub_volume' | 'images'
-  volume?: string
-  status: 'pending' | 'downloading' | 'completed' | 'failed'
-  progress: number
-  phase?: string
-  error?: string
-  warning?: string
-  createdAt: number
-}
-
-let nextId = 1
-function uid(): string {
-  return `dl-${Date.now()}-${nextId++}`
-}
-
-type TaskUpdatePatch = Partial<Pick<
-  DownloadTask,
-  'status' | 'progress' | 'phase' | 'error' | 'warning'
->>
-
-type DownloadState = {
+interface DownloadState {
   tasks: DownloadTask[]
-  downloadEpub: (bookId: string, title: string, cover?: string, volumeName?: string) => void
-  downloadImages: (bookId: string, title: string, cover?: string, volumeName?: string) => void
-  removeTask: (id: string) => void
-  clearCompleted: () => void
-  clearHistory: () => void
-  retryTask: (id: string) => boolean
-  updateTask: (id: string, patch: TaskUpdatePatch) => void
+  revision: number
+  initialized: boolean
+  loading: boolean
+  error?: string
+  storageWarning?: string
+  lastTransitionRevision: number
+  applySnapshot(snapshot: DownloadSnapshot): void
+  applyEvent(event: DownloadStateEvent): void
+  setInitializationError(error: unknown): void
+  downloadEpub(bookId: string, title: string, cover?: string, volumeName?: string): void
+  downloadImages(bookId: string, title: string, cover?: string, volumeName?: string): void
+  cancelTask(id: string): void
+  retryTask(id: string): void
+  removeTask(id: string): void
+  clearCompleted(): void
+  clearHistory(): void
 }
 
-// 模块级队列和调度锁
-const pendingQueue: DownloadTask[] = []
-let isExecuting = false
-
-function summarizeWarnings(warnings: string[] | undefined): string | undefined {
-  if (!warnings?.length) return undefined
-  const safeWarnings = [...new Set(
-    warnings.map((warning) => getUserFeedback(warning, 'download-warning').message),
-  )]
-  if (safeWarnings.length === 0) return undefined
-  if (safeWarnings.length === 1) return safeWarnings[0]
-  return `${safeWarnings[0]} 另外还有 ${safeWarnings.length - 1} 项内容未能完整保存。`
+function cloneTasks(tasks: DownloadTask[]): DownloadTask[] {
+  return tasks.map((task) => ({ ...task }))
 }
 
-function sanitizePersistedTask(value: unknown): DownloadTask | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const task = value as DownloadTask
-  return {
-    ...task,
-    error: task.error
-      ? getUserFeedback(task.error, 'download').message
-      : undefined,
-    warning: task.warning
-      ? getUserFeedback(task.warning, 'download-warning').message
-      : undefined,
-  }
+function showStorageWarning(previous: string | undefined, snapshot: DownloadSnapshot): void {
+  if (!snapshot.storageWarning || snapshot.storageWarning === previous) return
+  toast.warning({
+    title: '下载状态暂未保存',
+    message: snapshot.storageWarning,
+  })
 }
 
-async function executeNext(): Promise<void> {
-  if (isExecuting || pendingQueue.length === 0) return
-  isExecuting = true
+function showTransition(event: DownloadStateEvent): void {
+  const transition = event.transition
+  if (!transition) return
+  const task = event.snapshot.tasks.find((item) => item.id === transition.taskId)
+  if (!task) return
 
-  const task = pendingQueue.shift()!
-  const store = useDownloadStore.getState()
-  store.updateTask(task.id, { status: 'downloading', phase: '开始下载...' })
-
-  try {
-    const result = task.type === 'images'
-      ? await api.downloadImages(task.bookId, task.volume, task.id)
-      : await api.downloadEpub(task.bookId, task.volume, task.id)
-    const warning = summarizeWarnings(result.warnings)
-    store.updateTask(task.id, {
-      status: 'completed',
-      progress: 100,
-      phase: warning ? '下载完成，但有部分内容缺失' : '下载完成',
-      error: undefined,
-      warning,
-    })
-    if (warning) {
-      toast.warning({ title: '下载完成，但有提醒', message: warning })
+  if (transition.to === 'pending') {
+    toast.info({ title: '已加入下载队列', message: `${task.title} 将按顺序下载。` })
+  } else if (transition.to === 'completed') {
+    if (task.warning) {
+      toast.warning({ title: '下载完成，但有提醒', message: task.warning })
     } else {
       toast.success({ title: '下载完成', message: `${task.title} 已保存。` })
     }
-  } catch (e) {
-    const feedback = getUserFeedback(e, 'download')
-    store.updateTask(task.id, {
-      status: 'failed',
-      phase: '下载失败',
-      error: feedback.message,
-      warning: undefined,
-    })
-    toast.error(feedback)
-  } finally {
-    isExecuting = false
-    void executeNext()
+  } else if (transition.to === 'failed') {
+    toast.error(getUserFeedback(task.error, 'download'))
+  } else if (transition.to === 'cancelled') {
+    toast.info({ title: '下载已取消', message: `${task.title} 的下载任务已取消。` })
+  } else if (transition.to === 'interrupted') {
+    toast.warning({ title: '下载已中断', message: `${task.title} 可以从下载记录中重新加入队列。` })
   }
 }
 
-// 注册一次进度事件监听（模块加载时）
-let progressRegistered = false
+async function runCommand(operation: () => Promise<DownloadSnapshot>): Promise<void> {
+  try {
+    const snapshot = await operation()
+    useDownloadStore.getState().applySnapshot(snapshot)
+  } catch (error) {
+    toast.error(getUserFeedback(error, 'download'))
+  }
+}
 
-export const useDownloadStore = create<DownloadState>()(
-  persist(
-    (set, get) => {
-      if (!progressRegistered) {
-        progressRegistered = true
-        try {
-          api.getDownloadProgress((data) => {
-            set((s) => ({
-              tasks: s.tasks.map((t) =>
-                t.id === data.taskId
-                  ? { ...t, progress: data.total > 0 ? Math.round((data.current / data.total) * 100) : 0, phase: data.phase }
-                  : t
-              ),
-            }))
-          })
-        } catch (error) {
-          progressRegistered = false
-          toast.error(getUserFeedback(error, 'download'))
-        }
+export const useDownloadStore = create<DownloadState>((set, get) => ({
+  tasks: [],
+  revision: -1,
+  initialized: false,
+  loading: true,
+  error: undefined,
+  storageWarning: undefined,
+  lastTransitionRevision: -1,
+
+  applySnapshot: (snapshot) => {
+    if (snapshot.revision < get().revision) return
+    if (snapshot.revision === get().revision) {
+      const previousWarning = get().storageWarning
+      if (snapshot.storageWarning !== previousWarning) {
+        set({ storageWarning: snapshot.storageWarning })
+        showStorageWarning(previousWarning, snapshot)
       }
+      return
+    }
+    const previousWarning = get().storageWarning
+    set({
+      tasks: cloneTasks(snapshot.tasks),
+      revision: snapshot.revision,
+      initialized: true,
+      loading: false,
+      error: undefined,
+      storageWarning: snapshot.storageWarning,
+    })
+    showStorageWarning(previousWarning, snapshot)
+  },
 
-      return {
-        tasks: [],
-
-        updateTask: (id: string, patch: TaskUpdatePatch) => {
-          set((s) => ({
-            tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-          }))
-        },
-
-        downloadEpub: (bookId, title, cover, volumeName) => {
-          const task: DownloadTask = {
-            id: uid(),
-            bookId,
-            title,
-            cover,
-            type: volumeName ? 'epub_volume' : 'epub_full',
-            volume: volumeName,
-            status: 'pending',
-            progress: 0,
-            phase: '等待下载...',
-            createdAt: Date.now(),
-          }
-          set((s) => ({ tasks: [task, ...s.tasks] }))
-          pendingQueue.push(task)
-          toast.info({ title: '已加入下载队列', message: `${title} 将按顺序下载。` })
-          void executeNext()
-        },
-
-        downloadImages: (bookId, title, cover, volumeName) => {
-          const task: DownloadTask = {
-            id: uid(),
-            bookId,
-            title,
-            cover,
-            type: 'images',
-            volume: volumeName,
-            status: 'pending',
-            progress: 0,
-            phase: '等待下载...',
-            createdAt: Date.now(),
-          }
-          set((s) => ({ tasks: [task, ...s.tasks] }))
-          pendingQueue.push(task)
-          toast.info({ title: '已加入下载队列', message: `${title} 的插图将按顺序下载。` })
-          void executeNext()
-        },
-
-        removeTask: (id) => {
-          const idx = pendingQueue.findIndex((t) => t.id === id)
-          if (idx >= 0) pendingQueue.splice(idx, 1)
-          set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
-        },
-
-        clearCompleted: () => {
-          set((s) => ({ tasks: s.tasks.filter((t) => t.status !== 'completed') }))
-        },
-
-        clearHistory: () => {
-          set((s) => ({
-            tasks: s.tasks.filter((t) => t.status === 'pending' || t.status === 'downloading'),
-          }))
-        },
-
-        retryTask: (id) => {
-          const task = get().tasks.find((t) => t.id === id)
-          if (!task || task.status !== 'failed') {
-            toast.warning({
-              title: '无法重试下载',
-              message: '这条记录不存在或当前状态不需要重试。',
-            })
-            return false
-          }
-          set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }))
-          if (task.type === 'images') {
-            get().downloadImages(task.bookId, task.title, task.cover, task.volume)
-          } else {
-            get().downloadEpub(task.bookId, task.title, task.cover, task.volume)
-          }
-          return true
-        },
+  applyEvent: (event) => {
+    const current = get()
+    if (event.snapshot.revision < current.revision) return
+    const shouldShowTransition = event.transition !== undefined
+      && event.snapshot.revision > current.lastTransitionRevision
+    if (event.snapshot.revision === current.revision) {
+      const previousWarning = current.storageWarning
+      if (event.snapshot.storageWarning !== previousWarning) {
+        set({ storageWarning: event.snapshot.storageWarning })
+        showStorageWarning(previousWarning, event.snapshot)
       }
-    },
-    {
-      name: 'wenku8-download-history',
-      // 只持久化已完成和失败的任务（运行中的任务重启后不恢复）
-      partialize: (state) => ({
-        tasks: state.tasks.filter((t) => t.status === 'completed' || t.status === 'failed'),
-      }),
-      version: 2,
-      migrate: (persistedState) => {
-        const state = persistedState as { tasks?: unknown[] }
-        return {
-          ...state,
-          tasks: Array.isArray(state.tasks)
-            ? state.tasks.map(sanitizePersistedTask).filter((task): task is DownloadTask => task !== null)
-            : [],
-        }
-      },
-    },
-  ),
-)
+      if (shouldShowTransition) {
+        set({ lastTransitionRevision: event.snapshot.revision })
+        showTransition(event)
+      }
+      return
+    }
+    const previousWarning = current.storageWarning
+    set({
+      tasks: cloneTasks(event.snapshot.tasks),
+      revision: event.snapshot.revision,
+      initialized: true,
+      loading: false,
+      error: undefined,
+      storageWarning: event.snapshot.storageWarning,
+      lastTransitionRevision: shouldShowTransition
+        ? event.snapshot.revision
+        : current.lastTransitionRevision,
+    })
+    showStorageWarning(previousWarning, event.snapshot)
+    if (shouldShowTransition) showTransition(event)
+  },
+
+  setInitializationError: (error) => {
+    const feedback = getUserFeedback(error, 'download')
+    const hasSynchronizedTasks = get().initialized && get().tasks.length > 0
+    set({
+      initialized: true,
+      loading: false,
+      error: hasSynchronizedTasks ? undefined : feedback.message,
+    })
+    toast.error(feedback)
+  },
+
+  downloadEpub: (bookId, title, cover, volumeName) => {
+    const input: EnqueueDownloadInput = {
+      bookId,
+      title,
+      ...(cover === undefined ? {} : { cover }),
+      type: volumeName ? 'epub_volume' : 'epub_full',
+      ...(volumeName === undefined ? {} : { volume: volumeName }),
+    }
+    void runCommand(() => api.enqueueDownload(input))
+  },
+
+  downloadImages: (bookId, title, cover, volumeName) => {
+    const input: EnqueueDownloadInput = {
+      bookId,
+      title,
+      ...(cover === undefined ? {} : { cover }),
+      type: 'images',
+      ...(volumeName === undefined ? {} : { volume: volumeName }),
+    }
+    void runCommand(() => api.enqueueDownload(input))
+  },
+
+  cancelTask: (id) => { void runCommand(() => api.cancelDownload(id)) },
+  retryTask: (id) => { void runCommand(() => api.retryDownload(id)) },
+  removeTask: (id) => { void runCommand(() => api.removeDownload(id)) },
+  clearCompleted: () => {
+    void runCommand(() => api.clearDownloadHistory('completed'))
+  },
+  clearHistory: () => {
+    const scope: DownloadHistoryScope = 'terminal'
+    void runCommand(() => api.clearDownloadHistory(scope))
+  },
+}))
