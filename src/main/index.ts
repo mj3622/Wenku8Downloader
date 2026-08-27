@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { initializeAppServices } from './app-services'
+import { initializeAppServices, type AppServices } from './app-services'
+import { registerDownloadCloseGuard } from './download-close-guard'
 import { registerIpcHandlers } from './ipc-handlers'
 import { DEFAULT_LOG_CONFIG } from './config/config-schema'
 import { registerAppLogging, registerProcessLogging, registerWebContentsLogging } from './logging/electron-events'
 import { initializeLogger, logger } from './logging/logger'
 import { sanitizeLogLine } from './logging/redaction'
+import { registerSingleInstanceGuard } from './single-instance'
 
 try {
   app.setAppLogsPath()
@@ -42,7 +44,7 @@ function getIconPath(): string {
   return devPath
 }
 
-function createWindow(): void {
+function createWindow(services: AppServices): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -58,6 +60,7 @@ function createWindow(): void {
     },
   })
 
+  registerDownloadCloseGuard(mainWindow, services.downloads)
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   registerWebContentsLogging(mainWindow.webContents, mainWindow.id)
@@ -69,19 +72,26 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(async () => {
-  if (process.platform === 'win32') {
-    Menu.setApplicationMenu(null)
-  }
-  const services = await initializeAppServices()
-  registerIpcHandlers(services)
-  createWindow()
-}).catch((error) => {
-  logger.error('app.startup-failed', '应用启动失败', error)
-  dialog.showErrorBox('启动失败', '登录状态同步失败，请重启应用')
+if (!registerSingleInstanceGuard()) {
   app.quit()
-})
+} else {
+  app.whenReady().then(async () => {
+    if (process.platform === 'win32') {
+      Menu.setApplicationMenu(null)
+    }
+    const services = await initializeAppServices()
+    registerIpcHandlers(services)
+    createWindow(services)
+  }).catch((error) => {
+    logger.error('app.startup-failed', '应用启动失败', error)
+    dialog.showErrorBox(
+      '启动失败',
+      '应用数据或登录状态无法初始化，请检查数据目录权限后重启应用。',
+    )
+    app.quit()
+  })
 
-app.on('window-all-closed', () => {
-  app.quit()
-})
+  app.on('window-all-closed', () => {
+    app.quit()
+  })
+}

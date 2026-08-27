@@ -15,6 +15,7 @@ vi.mock('./logging/logger', () => ({ logger: logMocks }))
 
 import { DownloadRateLimiter } from './download-rate-limiter'
 import { Book } from './book'
+import { DownloadCancelledError } from './download-cancellation'
 import {
   asyncPool,
   atomicWriteDownloadFile,
@@ -123,6 +124,71 @@ describe('atomicWriteDownloadFile', () => {
 })
 
 describe('Downloader.downloadPictures', () => {
+  it('keeps completion when cancellation arrives after the final image is committed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-final-picture-'))
+    const controller = new AbortController()
+    const getImageContent = vi.fn(async () => Buffer.from('image'))
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent }),
+      runtimeConfig(root),
+      { rateLimiter: new DownloadRateLimiter(), signal: controller.signal },
+    )
+    downloader.setOnProgress(({ current, total }) => {
+      if (current === total) controller.abort()
+    })
+
+    try {
+      await expect(downloader.downloadPictures(
+        ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )).resolves.toBeUndefined()
+
+      expect(getImageContent).toHaveBeenCalledTimes(2)
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '1.jpg')))
+        .resolves.toEqual(Buffer.from('image'))
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '2.jpg')))
+        .resolves.toEqual(Buffer.from('image'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps completed files and stops before the next image after cancellation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-cancel-pictures-'))
+    const controller = new AbortController()
+    const rateLimiter = new DownloadRateLimiter()
+    rateLimiter.record(429)
+    const getImageContent = vi.fn(async () => Buffer.from('image'))
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent }),
+      runtimeConfig(root),
+      { rateLimiter, signal: controller.signal },
+    )
+    downloader.setOnProgress(({ current }) => {
+      if (current === 1) controller.abort()
+    })
+
+    try {
+      await expect(downloader.downloadPictures(
+        ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )).rejects.toBeInstanceOf(DownloadCancelledError)
+
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '1.jpg')))
+        .resolves.toEqual(Buffer.from('image'))
+      await expect(readFile(join(root, 'pics', '100_测试作品', '1_第一卷', '2.jpg')))
+        .rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('keeps successfully downloaded images and records a warning for partial failures', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-pictures-'))
     const getImageContent = vi.fn(async (url: string) => (
@@ -793,6 +859,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 describe('asyncPool', () => {
+  it('stops scheduling items after cancellation', async () => {
+    const controller = new AbortController()
+    const started: number[] = []
+    const task = asyncPool(1, [1, 2, 3], async (item) => {
+      started.push(item)
+      if (item === 1) controller.abort()
+      return item
+    }, controller.signal)
+
+    await expect(task).rejects.toBeInstanceOf(DownloadCancelledError)
+    expect(started).toEqual([1])
+  })
+
   it('保持结果顺序与输入一致', async () => {
     const items = [3, 1, 4, 1, 5]
     const results = await asyncPool(2, items, async (n) => {

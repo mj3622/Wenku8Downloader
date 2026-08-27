@@ -8,6 +8,7 @@ import { useToastStore } from '../stores/toastStore'
 
 let container: HTMLDivElement
 let root: Root
+const originalElectronApi = window.electronAPI
 const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 const originalActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
 
@@ -26,12 +27,32 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
+  Object.defineProperty(window, 'electronAPI', {
+    configurable: true,
+    value: {
+      getDownloadSnapshot: async () => ({
+        revision: 0,
+        tasks: [],
+        legacyImportCompleted: true,
+      }),
+      importLegacyDownloadHistory: async () => ({
+        revision: 1,
+        tasks: [],
+        legacyImportCompleted: true,
+      }),
+      onDownloadStateChanged: () => () => undefined,
+    } as unknown as Window['electronAPI'],
+  })
 })
 
 afterEach(async () => {
   await act(async () => root.unmount())
   container.remove()
   window.location.hash = ''
+  Object.defineProperty(window, 'electronAPI', {
+    configurable: true,
+    value: originalElectronApi,
+  })
 })
 
 describe('App routing', () => {

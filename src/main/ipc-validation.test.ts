@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
+  validateDownloadHistoryScope,
+  validateDownloadTaskId,
+  validateEnqueueDownloadInput,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
@@ -39,6 +42,63 @@ describe('IPC validation', () => {
     expect(validateLoginOperationId('login-1720000000000-3')).toBe('login-1720000000000-3')
     expect(() => validateLoginOperationId('../login-1-1')).toThrow('登录请求')
     expect(() => validateLoginOperationId('dl-1-1')).toThrow('登录请求')
+  })
+
+  it.each([
+    '550e8400-e29b-41d4-a716-446655440000',
+    'dl-1720000000000-3',
+  ])('accepts a supported download task ID: %s', (taskId) => {
+    expect(validateDownloadTaskId(taskId)).toBe(taskId)
+  })
+
+  it('rejects arbitrary download task IDs', () => {
+    expect(() => validateDownloadTaskId('../task')).toThrow('下载任务')
+    expect(() => validateDownloadTaskId('legacy-1')).toThrow('下载任务')
+  })
+
+  it('validates and normalizes download enqueue input', () => {
+    expect(validateEnqueueDownloadInput({
+      bookId: '3057',
+      title: '  测试作品  ',
+      cover: 'https://example.com/cover.jpg',
+      type: 'epub_volume',
+      volume: '第一卷',
+      ignored: true,
+    })).toEqual({
+      bookId: '3057',
+      title: '测试作品',
+      cover: 'https://example.com/cover.jpg',
+      type: 'epub_volume',
+      volume: '第一卷',
+    })
+  })
+
+  it('requires a volume for volume downloads', () => {
+    expect(() => validateEnqueueDownloadInput({
+      bookId: '3057',
+      title: '测试作品',
+      type: 'epub_volume',
+    })).toThrow('分卷')
+  })
+
+  it('rejects malformed download enqueue fields', () => {
+    expect(() => validateEnqueueDownloadInput({
+      bookId: '3057',
+      title: '测试作品',
+      type: 'unsupported',
+    })).toThrow('下载类型')
+    expect(() => validateEnqueueDownloadInput({
+      bookId: '3057',
+      title: '测试作品',
+      type: 'epub_full',
+      cover: 'file:///tmp/cover.png',
+    })).toThrow('封面')
+  })
+
+  it('accepts only known download history scopes', () => {
+    expect(validateDownloadHistoryScope('completed')).toBe('completed')
+    expect(validateDownloadHistoryScope('terminal')).toBe('terminal')
+    expect(() => validateDownloadHistoryScope('everything')).toThrow('清理范围')
   })
 
   it('accepts bounded renderer error reports', () => {

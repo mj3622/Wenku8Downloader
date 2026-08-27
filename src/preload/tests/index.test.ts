@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type {
+  DownloadApi,
+  DownloadStateEvent,
+  EnqueueDownloadInput,
+} from '../../shared/ipc-types'
 
 const mocks = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
@@ -20,10 +25,8 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = {
+type ExposedApi = DownloadApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) => Promise<unknown>
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<unknown>
 }
 
 const exposedApi = (
@@ -32,6 +35,8 @@ const exposedApi = (
 
 beforeEach(() => {
   mocks.invoke.mockReset()
+  mocks.on.mockReset()
+  mocks.removeListener.mockReset()
 })
 
 describe('preload download boundary', () => {
@@ -45,22 +50,51 @@ describe('preload download boundary', () => {
     })
   })
 
-  it.each([
-    ['downloadEpub', 'download:epub'],
-    ['downloadImages', 'download:images'],
-  ] as const)('forwards %s payloads and returns the structured result', async (method, channel) => {
-    const result = {
-      status: 'ok',
-      message: '下载完成，但有部分内容缺失',
-      warnings: ['封面未能下载'],
-    }
+  it('forwards snapshot and enqueue commands', async () => {
+    const result = { revision: 1, tasks: [], legacyImportCompleted: false }
     mocks.invoke.mockResolvedValue(result)
-
-    await expect(exposedApi[method]('3057', '第一卷', 'dl-123-1')).resolves.toBe(result)
-    expect(mocks.invoke).toHaveBeenCalledWith(channel, {
+    const input: EnqueueDownloadInput = {
       bookId: '3057',
-      volumeName: '第一卷',
-      taskId: 'dl-123-1',
-    })
+      title: '测试作品',
+      type: 'epub_volume',
+      volume: '第一卷',
+    }
+
+    await expect(exposedApi.getDownloadSnapshot()).resolves.toBe(result)
+    await expect(exposedApi.enqueueDownload(input)).resolves.toBe(result)
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'download:get-snapshot')
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'download:enqueue', input)
+  })
+
+  it('forwards task and history mutation payloads', async () => {
+    mocks.invoke.mockResolvedValue({ revision: 1, tasks: [], legacyImportCompleted: true })
+    const taskId = 'dl-1720000000000-3'
+
+    await exposedApi.cancelDownload(taskId)
+    await exposedApi.retryDownload(taskId)
+    await exposedApi.removeDownload(taskId)
+    await exposedApi.clearDownloadHistory('terminal')
+    await exposedApi.importLegacyDownloadHistory([{ id: taskId }])
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['download:cancel', { taskId }],
+      ['download:retry', { taskId }],
+      ['download:remove', { taskId }],
+      ['download:clear-history', { scope: 'terminal' }],
+      ['download:import-legacy-history', { tasks: [{ id: taskId }] }],
+    ])
+  })
+
+  it('removes exactly the download-state listener it registered', () => {
+    const callback = vi.fn<(event: DownloadStateEvent) => void>()
+    const cleanup = exposedApi.onDownloadStateChanged(callback)
+    const listener = mocks.on.mock.calls[0]?.[1]
+
+    const event = { snapshot: { revision: 1, tasks: [], legacyImportCompleted: true } }
+    listener({}, event)
+    expect(callback).toHaveBeenCalledWith(event)
+
+    cleanup()
+    expect(mocks.removeListener).toHaveBeenCalledWith('download:state-changed', listener)
   })
 })

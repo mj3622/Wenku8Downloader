@@ -7,7 +7,10 @@ import type {
 } from '../shared/config-types'
 import type {
   CookieProgress,
-  DownloadResult,
+  DownloadApi,
+  DownloadHistoryScope,
+  DownloadStateEvent,
+  EnqueueDownloadInput,
   OpenFolderTarget,
   RendererErrorReport,
 } from '../shared/ipc-types'
@@ -23,28 +26,41 @@ const configApi: ConfigApi = {
   resetCorruptConfig: () => ipcRenderer.invoke('config:reset-corrupt'),
 }
 
+const downloadApi: DownloadApi = {
+  getDownloadSnapshot: () => ipcRenderer.invoke('download:get-snapshot'),
+  enqueueDownload: (input: EnqueueDownloadInput) =>
+    ipcRenderer.invoke('download:enqueue', input),
+  cancelDownload: (taskId: string) =>
+    ipcRenderer.invoke('download:cancel', { taskId }),
+  retryDownload: (taskId: string) =>
+    ipcRenderer.invoke('download:retry', { taskId }),
+  removeDownload: (taskId: string) =>
+    ipcRenderer.invoke('download:remove', { taskId }),
+  clearDownloadHistory: (scope: DownloadHistoryScope) =>
+    ipcRenderer.invoke('download:clear-history', { scope }),
+  importLegacyDownloadHistory: (tasks: unknown[]) =>
+    ipcRenderer.invoke('download:import-legacy-history', { tasks }),
+  onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: DownloadStateEvent) => callback(event)
+    ipcRenderer.on('download:state-changed', listener)
+    return () => ipcRenderer.removeListener('download:state-changed', listener)
+  },
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   ...configApi,
+  ...downloadApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
   getBook: (bookId: string) => ipcRenderer.invoke('book:get', { bookId }),
   getBookImages: (bookId: string) => ipcRenderer.invoke('book:images', { bookId }),
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string): Promise<DownloadResult> =>
-    ipcRenderer.invoke('download:epub', { bookId, volumeName, taskId }),
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string): Promise<DownloadResult> =>
-    ipcRenderer.invoke('download:images', { bookId, volumeName, taskId }),
   onCookieProgress: (callback: (data: CookieProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: CookieProgress) => callback(data)
     ipcRenderer.on('cookie:progress', listener)
     return () => ipcRenderer.removeListener('cookie:progress', listener)
-  },
-  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, data: { taskId: string; current: number; total: number; phase: string }) => callback(data)
-    ipcRenderer.on('download:progress', listener)
-    return () => ipcRenderer.removeListener('download:progress', listener)
   },
   openFolder: (target: OpenFolderTarget) => ipcRenderer.invoke('shell:openFolder', target),
   openLogFolder: () => ipcRenderer.invoke('logs:open-directory'),
