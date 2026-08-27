@@ -9,6 +9,11 @@ import {
 } from './config/secret-types'
 import type { SearchResult } from './types'
 import { sleep } from './utils'
+import {
+  sleepWithSignal,
+  throwIfDownloadCancelled,
+  withRequestTimeout,
+} from './download-cancellation'
 import { logger } from './logging/logger'
 import { sanitizeLogText } from './logging/redaction'
 
@@ -127,9 +132,13 @@ export class WebCrawler {
     }
   }
 
-  async fetch(url: string): Promise<CheerioDocument>
-  async fetch(url: string, parse: false): Promise<Buffer>
-  async fetch(url: string, parse: boolean = true): Promise<CheerioDocument | Buffer> {
+  async fetch(url: string, parse?: true, signal?: AbortSignal): Promise<CheerioDocument>
+  async fetch(url: string, parse: false, signal?: AbortSignal): Promise<Buffer>
+  async fetch(
+    url: string,
+    parse: boolean = true,
+    signal?: AbortSignal,
+  ): Promise<CheerioDocument | Buffer> {
     // Resolve relative URLs against base
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
@@ -147,6 +156,7 @@ export class WebCrawler {
     }
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      throwIfDownloadCancelled(signal)
       try {
         const headers: Record<string, string> = {
           ...COMMON_HEADERS,
@@ -157,7 +167,7 @@ export class WebCrawler {
           method: 'GET',
           headers,
           redirect: 'follow',
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
         lastStatus = resp.status
 
@@ -182,6 +192,7 @@ export class WebCrawler {
           return Buffer.from(await resp.arrayBuffer())
         }
       } catch (err) {
+        throwIfDownloadCancelled(signal)
         lastError = normalizeError(err)
         if (attempt < maxRetries - 1) {
           logger.warn('network.request.retry', '网页请求失败，准备重试', {
@@ -193,7 +204,7 @@ export class WebCrawler {
             backoffMs: 8000,
             error: sanitizeLogText(lastError.message),
           })
-          await sleep(8000)
+          await sleepWithSignal(8000, signal)
           // Re-inject cookies on retry
           await this.injectCookies()
         }
@@ -331,12 +342,14 @@ export class WebCrawler {
     url: string,
     maxRetries = 3,
     onResponseStatus?: (status: number) => void,
+    signal?: AbortSignal,
   ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
     let lastError: string | null = null
     let lastCause: Error | null = null
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      throwIfDownloadCancelled(signal)
       try {
         const resp = await net.fetch(url, {
           method: 'GET',
@@ -344,7 +357,7 @@ export class WebCrawler {
             ...COMMON_HEADERS,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
         if (resp.ok) {
           const content = Buffer.from(await resp.arrayBuffer())
@@ -365,9 +378,10 @@ export class WebCrawler {
             maxAttempts: maxRetries,
             backoffMs,
           })
-          await sleep(backoffMs)
+          await sleepWithSignal(backoffMs, signal)
         }
       } catch (err) {
+        throwIfDownloadCancelled(signal)
         lastCause = normalizeError(err)
         lastError = lastCause.message
         const is429 = lastError.includes('429')
@@ -381,7 +395,7 @@ export class WebCrawler {
             backoffMs,
             error: sanitizeLogText(lastError),
           })
-          await sleep(backoffMs)
+          await sleepWithSignal(backoffMs, signal)
         }
       }
     }
@@ -500,4 +514,3 @@ export class WebCrawler {
     return results
   }
 }
-

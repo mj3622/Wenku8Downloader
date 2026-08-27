@@ -1,5 +1,9 @@
 import {
+  DOWNLOAD_TASK_TYPES,
   OPEN_FOLDER_TARGETS,
+  type DownloadHistoryScope,
+  type DownloadTaskType,
+  type EnqueueDownloadInput,
   type OpenFolderTarget,
   type RendererErrorReport,
 } from '../shared/ipc-types'
@@ -9,6 +13,8 @@ const MAX_RENDERER_MESSAGE = 8 * 1024
 const MAX_RENDERER_STACK = 32 * 1024
 const MAX_RENDERER_SOURCE = 4 * 1024
 const MAX_RENDERER_REPORT = 64 * 1024
+const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
 
 export function validateBookId(value: unknown): string {
   if (typeof value !== 'string' || !/^\d{1,12}$/.test(value)) {
@@ -70,6 +76,83 @@ export function validateOptionalTaskId(value: unknown): string | undefined {
 export function validateLoginOperationId(value: unknown): string {
   if (typeof value !== 'string' || !/^login-\d{1,16}-\d{1,10}$/.test(value)) {
     throw new Error('登录请求已失效，请重新刷新登录状态')
+  }
+  return value
+}
+
+export function validateDownloadTaskId(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || (!UUID_TASK_ID.test(value) && !LEGACY_TASK_ID.test(value))
+  ) {
+    throw new Error('下载任务信息无效，请刷新页面后重试')
+  }
+  return value
+}
+
+function validateBoundedString(
+  value: unknown,
+  label: string,
+  maxLength: number,
+): string {
+  if (typeof value !== 'string') throw new Error(`${label}格式无效`)
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maxLength) {
+    throw new Error(`${label}长度无效`)
+  }
+  return normalized
+}
+
+export function validateEnqueueDownloadInput(value: unknown): EnqueueDownloadInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  const bookId = validateBookId(record.bookId)
+  const title = validateBoundedString(record.title, '作品标题', 500)
+  if (
+    typeof record.type !== 'string'
+    || !DOWNLOAD_TASK_TYPES.includes(record.type as DownloadTaskType)
+  ) {
+    throw new Error('下载类型无效')
+  }
+  const type = record.type as DownloadTaskType
+  let cover: string | undefined
+  if (record.cover !== undefined && record.cover !== null && record.cover !== '') {
+    const rawCover = validateBoundedString(record.cover, '封面地址', 2048)
+    let parsed: URL
+    try {
+      parsed = new URL(rawCover)
+    } catch {
+      throw new Error('封面地址格式无效')
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('封面地址格式无效')
+    }
+    cover = parsed.toString()
+  }
+
+  let volume: string | undefined
+  if (record.volume !== undefined && record.volume !== null && record.volume !== '') {
+    volume = validateBoundedString(record.volume, '分卷信息', 200)
+  }
+  if (type === 'epub_volume' && volume === undefined) {
+    throw new Error('分卷下载必须指定分卷')
+  }
+  if (type === 'epub_full') volume = undefined
+
+  return {
+    bookId,
+    title,
+    ...(cover === undefined ? {} : { cover }),
+    type,
+    ...(volume === undefined ? {} : { volume }),
+  }
+}
+
+export function validateDownloadHistoryScope(value: unknown): DownloadHistoryScope {
+  if (value !== 'completed' && value !== 'terminal') {
+    throw new Error('下载历史清理范围无效')
   }
   return value
 }

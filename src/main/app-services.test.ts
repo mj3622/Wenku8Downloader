@@ -61,6 +61,7 @@ describe('createAppServices', () => {
 
     try {
       const configDir = join(root, '.dev-user-data', 'config')
+      const taskStatePath = join(root, '.dev-user-data', 'state', 'download-tasks.json')
       const { createAppServices } = await import('./app-services')
       await expect(stat(configDir)).rejects.toThrow()
 
@@ -70,6 +71,7 @@ describe('createAppServices', () => {
         'secrets.enc',
         'settings.toml',
       ])
+      await expect(stat(taskStatePath)).rejects.toThrow()
     } finally {
       process.chdir(originalCwd)
       await rm(root, { recursive: true, force: true })
@@ -98,6 +100,12 @@ describe('createAppServices', () => {
       releaseFirstRemoval()
       const services = await initialization
 
+      await expect(stat(join(
+        root,
+        '.dev-user-data',
+        'state',
+        'download-tasks.json',
+      ))).resolves.toBeDefined()
       expect(mocks.configureLogger).toHaveBeenCalledWith(services.config.getLogSnapshot())
       expect(mocks.configureLogger.mock.invocationCallOrder[0])
         .toBeLessThan(mocks.removeCookie.mock.invocationCallOrder[0])

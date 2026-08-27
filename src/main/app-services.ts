@@ -7,12 +7,16 @@ import { ElectronSafeStorageCodec } from './config/secret-codec'
 import { SecretStore } from './config/secret-store'
 import { SettingsStore } from './config/settings-store'
 import { WebCrawler } from './crawler'
+import { createDownloadExecutor } from './download-executor'
+import { DownloadManager } from './download-manager'
+import { DownloadTaskStore, resolveDownloadTaskPath } from './download-task-store'
 import { configureLogger, logger } from './logging/logger'
 
 export interface AppServices {
   config: ConfigService
   crawler: WebCrawler
   books: BookService
+  downloads: DownloadManager
 }
 
 export function createAppServices(): AppServices {
@@ -33,8 +37,28 @@ export function createAppServices(): AppServices {
   })
   const crawler = new WebCrawler(config)
   const books = new BookService((bookId) => Book.create(bookId, crawler))
+  const environment = {
+    isPackaged: app.isPackaged,
+    downloadsPath: app.getPath('downloads'),
+    devRoot: process.cwd(),
+  }
+  const executor = createDownloadExecutor({
+    config,
+    crawler,
+    loadBook: (bookId, signal) => Book.create(bookId, crawler, signal),
+    environment,
+  })
+  const taskPath = resolveDownloadTaskPath({
+    isPackaged: app.isPackaged,
+    userDataPath: app.getPath('userData'),
+    devRoot: process.cwd(),
+  })
+  const downloads = new DownloadManager({
+    store: new DownloadTaskStore(taskPath),
+    executor,
+  })
 
-  return { config, crawler, books }
+  return { config, crawler, books, downloads }
 }
 
 export async function initializeAppServices(): Promise<AppServices> {
@@ -68,6 +92,7 @@ export async function initializeAppServices(): Promise<AppServices> {
       },
     )
   }
+  services.downloads.initialize()
   await services.crawler.syncCookies()
   return services
 }

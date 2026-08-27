@@ -8,6 +8,7 @@ import ConfigPage from './pages/ConfigPage'
 import NotFoundPage from './pages/NotFoundPage'
 import ToastViewport from './components/ToastViewport'
 import GlobalErrorListener from './components/GlobalErrorListener'
+import DownloadStateListener from './components/DownloadStateListener'
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
       </HashRouter>
       <ToastViewport />
       <GlobalErrorListener />
+      <DownloadStateListener />
     </>
   )
 }
