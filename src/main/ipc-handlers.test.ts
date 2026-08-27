@@ -20,11 +20,26 @@ const mocks = vi.hoisted(() => {
     openPath: vi.fn(async () => ''),
     showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     mkdir: vi.fn(async () => undefined),
-    setOnProgress: vi.fn(),
-    downloadNovel: vi.fn(async () => undefined),
-    downloadPictures: vi.fn(async () => undefined),
-    downloaderConfigs: [] as unknown[],
-    downloaderWarnings: [] as string[],
+    browserWindows: [] as Array<{
+      isDestroyed: () => boolean
+      webContents: { isDestroyed: () => boolean; send: ReturnType<typeof vi.fn> }
+    }>,
+    downloadSubscriber: undefined as ((event: unknown) => void) | undefined,
+    getDownloadSnapshot: vi.fn(() => ({
+      revision: 1,
+      tasks: [],
+      legacyImportCompleted: false,
+    })),
+    enqueueDownload: vi.fn(),
+    cancelDownload: vi.fn(),
+    retryDownload: vi.fn(),
+    removeDownload: vi.fn(),
+    clearDownloadHistory: vi.fn(),
+    importLegacyDownloadHistory: vi.fn(),
+    subscribeDownloads: vi.fn((listener: (event: unknown) => void) => {
+      mocks.downloadSubscriber = listener
+      return vi.fn()
+    }),
     acquireCookie: vi.fn(async (
       _onProgress?: (progress: { step: string; message: string }) => void,
     ) => ({ loginCookies: {} })),
@@ -43,6 +58,7 @@ vi.mock('electron', () => ({
     isPackaged: true,
     getPath: vi.fn((name: string) => name === 'downloads' ? mocks.downloadsPath : 'unused'),
   },
+  BrowserWindow: { getAllWindows: () => mocks.browserWindows },
   ipcMain: { handle: mocks.handle, on: mocks.on },
   shell: { openExternal: mocks.openExternal, openPath: mocks.openPath },
   dialog: { showOpenDialog: mocks.showOpenDialog },
@@ -64,23 +80,6 @@ vi.mock('./cookie-service', () => ({
     acquire = mocks.acquireCookie
   },
 }))
-
-vi.mock('./downloader', async (importOriginal) => {
-  const original = await importOriginal<typeof import('./downloader')>()
-  return {
-    ...original,
-    Downloader: class {
-      constructor(_crawler: unknown, runtimeConfig: unknown) {
-        mocks.downloaderConfigs.push(runtimeConfig)
-      }
-
-      setOnProgress = mocks.setOnProgress
-      downloadNovel = mocks.downloadNovel
-      downloadPictures = mocks.downloadPictures
-      getWarnings = () => [...mocks.downloaderWarnings]
-    },
-  }
-})
 
 import { registerIpcHandlers } from './ipc-handlers'
 
@@ -128,8 +127,6 @@ function createBookFixture() {
   } satisfies IpcBook
 }
 
-type BookFixture = ReturnType<typeof createBookFixture>
-
 function createServices(
   bookPromise: Promise<IpcBook> = Promise.resolve(createBookFixture()),
 ): IpcServices {
@@ -161,6 +158,16 @@ function createServices(
       get: vi.fn(() => bookPromise),
       clear: vi.fn(),
     },
+    downloads: {
+      getSnapshot: mocks.getDownloadSnapshot,
+      enqueue: mocks.enqueueDownload,
+      cancel: mocks.cancelDownload,
+      retry: mocks.retryDownload,
+      remove: mocks.removeDownload,
+      clearHistory: mocks.clearDownloadHistory,
+      importLegacyHistory: mocks.importLegacyDownloadHistory,
+      subscribe: mocks.subscribeDownloads,
+    },
   } satisfies IpcServices
 }
 
@@ -175,8 +182,8 @@ let services: IpcServices
 beforeEach(() => {
   mocks.handlers.clear()
   mocks.listeners.clear()
-  mocks.downloaderConfigs.length = 0
-  mocks.downloaderWarnings.length = 0
+  mocks.browserWindows.length = 0
+  mocks.downloadSubscriber = undefined
   vi.clearAllMocks()
   services = createServices()
   registerIpcHandlers(services)
@@ -428,7 +435,11 @@ describe('registerIpcHandlers application operations', () => {
   it('rejects invalid payloads before external side effects', async () => {
     await expect(invoke('search:title', {}, { query: '' })).rejects.toThrow('请输入 1 到 100 个字符')
     await expect(invoke('book:get', {}, { bookId: '../3057' })).rejects.toThrow('作品编号')
-    await expect(invoke('download:epub', {}, { bookId: 'not-a-book' })).rejects.toThrow('作品编号')
+    await expect(invoke('download:enqueue', {}, {
+      bookId: 'not-a-book',
+      title: '测试作品',
+      type: 'epub_full',
+    })).rejects.toThrow('作品编号')
     await expect(invoke('shell:openExternal', {}, 'http://wenku8.net')).rejects.toThrow('允许范围')
     await expect(invoke('shell:openFolder', {}, '../config')).rejects.toThrow('下载文件夹')
 
@@ -436,211 +447,66 @@ describe('registerIpcHandlers application operations', () => {
     expect(services.books.get).not.toHaveBeenCalled()
     expect(mocks.openExternal).not.toHaveBeenCalled()
     expect(mocks.openPath).not.toHaveBeenCalled()
-    expect(mocks.downloadNovel).not.toHaveBeenCalled()
+    expect(mocks.enqueueDownload).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['download:epub', null, 'download.novel.failed'],
-    ['download:images', { bookId: '3057', taskId: 'invalid-task' }, 'download.pictures.failed'],
-  ] as const)('logs malformed download payloads for %s without starting work', async (
-    channel,
-    payload,
-    failedEvent,
-  ) => {
-    await expect(invoke(channel, { sender: { send: vi.fn() } }, payload)).rejects.toThrow()
-
-    expect(mocks.logger.error).toHaveBeenCalledWith(
-      failedEvent,
-      expect.any(String),
-      expect.any(Error),
-      expect.objectContaining({
-        operationId: expect.any(String),
-        durationMs: expect.any(Number),
-      }),
-    )
-    expect(mocks.downloadNovel).not.toHaveBeenCalled()
-    expect(mocks.downloadPictures).not.toHaveBeenCalled()
-  })
-
-  it('passes a stable runtime snapshot and task progress into downloads', async () => {
-    const send = vi.fn()
-
-    await invoke(
-      'download:epub',
-      { sender: { send } },
-      { bookId: '3057', volumeName: '第一卷', taskId: 'dl-123-1' },
-    )
-
-    expect(mocks.downloaderConfigs).toEqual([{
-      ...publicSnapshot.download,
-      rootPath: resolve(mocks.downloadsPath, 'Wenku8Downloader'),
-    }])
-    expect(mocks.downloadNovel).toHaveBeenCalledWith(
-      expect.objectContaining({ bookId: '3057' }),
-      '第一卷',
-    )
-    const onProgress = mocks.setOnProgress.mock.calls[0]?.[0] as (
-      progress: { current: number; total: number; phase: string }
-    ) => void
-    onProgress({ current: 1, total: 2, phase: '正在下载' })
-    expect(send).toHaveBeenCalledWith('download:progress', {
-      taskId: 'dl-123-1',
-      current: 1,
-      total: 2,
-      phase: '正在下载',
-    })
-    expect(mocks.logger.info).toHaveBeenCalledWith(
-      'download.novel.started',
-      expect.any(String),
-      expect.objectContaining({
-        taskId: 'dl-123-1',
-        operationId: 'dl-123-1',
-        bookId: '3057',
-        volumeName: '第一卷',
-      }),
-    )
-  })
-
-  it('returns safe partial-success warnings from EPUB downloads', async () => {
-    mocks.downloaderWarnings.push('封面未能下载，正文内容仍已保存。')
-
-    const result = await invoke(
-      'download:epub',
-      { sender: { send: vi.fn() } },
-      { bookId: '3057', taskId: 'dl-123-1' },
-    )
-
-    expect(result).toEqual({
-      status: 'ok',
-      message: '下载完成，但有部分内容缺失',
-      warnings: ['封面未能下载，正文内容仍已保存。'],
-    })
-  })
-
-  it('rejects an all-volume image request when no volume produces output', async () => {
-    const book: IpcBook = {
-      ...createBookFixture(),
-      getChapterImageUrls: vi.fn(async () => null),
-    }
-    mocks.handlers.clear()
-    services = createServices(Promise.resolve(book))
-    registerIpcHandlers(services)
-
-    await expect(invoke(
-      'download:images',
-      { sender: { send: vi.fn() } },
-      { bookId: '3057', taskId: 'dl-123-1' },
-    )).rejects.toThrow('没有可保存的插图')
-
-    expect(mocks.downloadPictures).not.toHaveBeenCalled()
-  })
-
-  it('preserves the first illustration-page error when every volume fails to load', async () => {
-    const firstError = new Error('登录状态已失效，请重新登录后重试')
-    const book: IpcBook = {
-      ...createBookFixture(),
-      volumes: {
-        '第一卷': [{ name: '插图', link: 'first.htm' }],
-        '第二卷': [{ name: '插图', link: 'second.htm' }],
-      },
-      pictureUrls: {
-        '第一卷': 'first.htm',
-        '第二卷': 'second.htm',
-      },
-      getChapterImageUrls: vi.fn()
-        .mockRejectedValueOnce(firstError)
-        .mockRejectedValueOnce(new Error('网络连接失败，请稍后重试')),
-    }
-    mocks.handlers.clear()
-    services = createServices(Promise.resolve(book))
-    registerIpcHandlers(services)
-
-    await expect(invoke(
-      'download:images',
-      { sender: { send: vi.fn() } },
-      { bookId: '3057', taskId: 'dl-123-1' },
-    )).rejects.toBe(firstError)
-
-    expect(mocks.downloadPictures).not.toHaveBeenCalled()
-  })
-
-  it('returns a warning when a later illustration page fails after another volume succeeds', async () => {
-    const book: IpcBook = {
-      ...createBookFixture(),
-      volumes: {
-        '第一卷': [{ name: '插图', link: 'first.htm' }],
-        '第二卷': [{ name: '插图', link: 'second.htm' }],
-      },
-      pictureUrls: {
-        '第一卷': 'first.htm',
-        '第二卷': 'second.htm',
-      },
-      getChapterImageUrls: vi.fn(async (volumeName?: string) => {
-        if (volumeName === '第二卷') throw new Error('illustration page timeout')
-        return ['https://example.com/1.jpg']
-      }),
-    }
-    mocks.handlers.clear()
-    services = createServices(Promise.resolve(book))
-    registerIpcHandlers(services)
-
-    const result = await invoke(
-      'download:images',
-      { sender: { send: vi.fn() } },
-      { bookId: '3057', taskId: 'dl-123-1' },
-    )
-
-    expect(mocks.downloadPictures).toHaveBeenCalledTimes(1)
-    expect(result).toEqual({
-      status: 'ok',
-      message: '下载完成，但有部分内容缺失',
-      warnings: ['“第二卷”的插图页无法读取，已跳过该卷。'],
-    })
-    expect(mocks.logger.error).toHaveBeenCalledWith(
-      'download.illustration-page.failed',
-      '插图页读取失败，继续处理其他分卷',
-      expect.any(Error),
-      expect.objectContaining({ bookId: '3057', volumeName: '第二卷' }),
-    )
-  })
-
-  it.each([
-    ['download:epub', mocks.downloadNovel],
-    ['download:images', mocks.downloadPictures],
-  ] as const)('captures the runtime root before awaiting book loading for %s', async (
-    channel,
-    download,
-  ) => {
-    const rootA = resolve('download-root-a')
-    const rootB = resolve('download-root-b')
-    let activeRoot = rootA
-    let releaseBook!: (book: BookFixture) => void
-    const pendingBook = new Promise<BookFixture>((resolveBook) => {
-      releaseBook = resolveBook
-    })
-
-    mocks.handlers.clear()
-    services = createServices(pendingBook)
-    registerIpcHandlers(services)
-    vi.mocked(services.config.getDownloadSnapshot).mockImplementation(() => ({
-      ...publicSnapshot.download,
-      downloadPath: activeRoot,
-    }))
-
-    const request = invoke(channel, { sender: { send: vi.fn() } }, {
+  it('validates and forwards all download manager commands', async () => {
+    const taskId = 'dl-1720000000000-3'
+    const enqueueInput = {
       bookId: '3057',
-      volumeName: '第一卷',
-      taskId: 'dl-123-1',
-    })
-    await vi.waitFor(() => {
-      expect(services.config.getDownloadSnapshot).toHaveBeenCalledTimes(1)
-    })
-    activeRoot = rootB
-    releaseBook(createBookFixture())
-    await request
+      title: '测试作品',
+      cover: 'https://example.com/cover.jpg',
+      type: 'epub_volume',
+      volume: '第一卷',
+    } as const
 
-    expect(download).toHaveBeenCalledTimes(1)
-    expect(mocks.downloaderConfigs[0]).toMatchObject({ rootPath: rootA })
+    await invoke('download:get-snapshot', {})
+    await invoke('download:enqueue', {}, enqueueInput)
+    await invoke('download:cancel', {}, { taskId })
+    await invoke('download:retry', {}, { taskId })
+    await invoke('download:remove', {}, { taskId })
+    await invoke('download:clear-history', {}, { scope: 'terminal' })
+    await invoke('download:import-legacy-history', {}, { tasks: [{ id: taskId }] })
+
+    expect(mocks.getDownloadSnapshot).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueDownload).toHaveBeenCalledWith(enqueueInput)
+    expect(mocks.cancelDownload).toHaveBeenCalledWith(taskId)
+    expect(mocks.retryDownload).toHaveBeenCalledWith(taskId)
+    expect(mocks.removeDownload).toHaveBeenCalledWith(taskId)
+    expect(mocks.clearDownloadHistory).toHaveBeenCalledWith('terminal')
+    expect(mocks.importLegacyDownloadHistory).toHaveBeenCalledWith([{ id: taskId }])
+  })
+
+  it.each([
+    ['download:cancel', { taskId: 'invalid' }],
+    ['download:retry', null],
+    ['download:clear-history', { scope: 'active' }],
+    ['download:import-legacy-history', { tasks: 'invalid' }],
+  ] as const)('rejects malformed manager payloads for %s', async (channel, payload) => {
+    await expect(invoke(channel, {}, payload)).rejects.toThrow()
+  })
+
+  it('broadcasts state changes only to live renderer windows', () => {
+    const liveSend = vi.fn()
+    const destroyedSend = vi.fn()
+    mocks.browserWindows.push(
+      {
+        isDestroyed: () => false,
+        webContents: { isDestroyed: () => false, send: liveSend },
+      },
+      {
+        isDestroyed: () => true,
+        webContents: { isDestroyed: () => false, send: destroyedSend },
+      },
+    )
+    const stateEvent = {
+      snapshot: { revision: 2, tasks: [], legacyImportCompleted: true },
+    }
+
+    mocks.downloadSubscriber?.(stateEvent)
+
+    expect(liveSend).toHaveBeenCalledWith('download:state-changed', stateEvent)
+    expect(destroyedSend).not.toHaveBeenCalled()
   })
 
   it('opens only whitelisted external URLs and current download folders', async () => {

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   setCookie: vi.fn(async () => undefined),
   removeCookie: vi.fn(async () => undefined),
   sleep: vi.fn(async (): Promise<void> => undefined),
+  sleepWithSignal: vi.fn(async (): Promise<void> => undefined),
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -29,9 +30,14 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('./utils', () => ({ sleep: mocks.sleep }))
+vi.mock('./download-cancellation', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./download-cancellation')>(),
+  sleepWithSignal: mocks.sleepWithSignal,
+}))
 vi.mock('./logging/logger', () => ({ logger: mocks.logger }))
 
 import { WebCrawler, type CrawlerConfig } from './crawler'
+import { DownloadCancelledError } from './download-cancellation'
 import {
   COOKIE_NAMES,
   emptyCookieSnapshot,
@@ -86,6 +92,7 @@ afterEach(() => {
   mocks.setCookie.mockClear()
   mocks.removeCookie.mockClear()
   mocks.sleep.mockClear()
+  mocks.sleepWithSignal.mockClear()
   mocks.logger.debug.mockClear()
   mocks.logger.info.mockClear()
   mocks.logger.warn.mockClear()
@@ -93,6 +100,29 @@ afterEach(() => {
 })
 
 describe('WebCrawler.fetch logging', () => {
+  it('does not retry a fetch cancelled by its caller', async () => {
+    const controller = new AbortController()
+    mocks.fetch.mockImplementationOnce((_url: string, init: RequestInit) => (
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    ))
+    const crawler = new WebCrawler(createConfig(), {})
+
+    const request = crawler.fetch(
+      'https://www.wenku8.net/book/3057.htm',
+      true,
+      controller.signal,
+    )
+    controller.abort()
+
+    await expect(request).rejects.toBeInstanceOf(DownloadCancelledError)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.sleepWithSignal).not.toHaveBeenCalled()
+  })
+
   it('logs retry context without headers or URL credentials', async () => {
     mocks.fetch
       .mockRejectedValueOnce(new Error('timeout'))
@@ -129,7 +159,7 @@ describe('WebCrawler.fetch logging', () => {
 
     await expect(crawler.fetch('https://www.wenku8.net/book/3057.htm')).resolves.toBeDefined()
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
-    expect(mocks.sleep).toHaveBeenCalledWith(8000)
+    expect(mocks.sleepWithSignal).toHaveBeenCalledWith(8000, undefined)
   })
 
   it('preserves the final request failure as the retry error cause', async () => {
@@ -157,6 +187,30 @@ describe('WebCrawler.search', () => {
 })
 
 describe('WebCrawler.getImageContent response reporting', () => {
+  it('does not retry an image request cancelled by its caller', async () => {
+    const controller = new AbortController()
+    mocks.fetch.mockImplementationOnce((_url: string, init: RequestInit) => (
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    ))
+    const crawler = new WebCrawler(createConfig(), {})
+
+    const request = crawler.getImageContent(
+      'https://example.com/image.jpg',
+      3,
+      undefined,
+      controller.signal,
+    )
+    controller.abort()
+
+    await expect(request).rejects.toBeInstanceOf(DownloadCancelledError)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.sleepWithSignal).not.toHaveBeenCalled()
+  })
+
   it('reports each HTTP status when a throttled request later succeeds', async () => {
     mocks.fetch
       .mockResolvedValueOnce({ ok: false, status: 429 })
@@ -176,7 +230,7 @@ describe('WebCrawler.getImageContent response reporting', () => {
 
     expect(content).toEqual(Buffer.from([1, 2, 3]))
     expect(statuses).toEqual([429, 200])
-    expect(mocks.sleep).toHaveBeenCalledWith(15000)
+    expect(mocks.sleepWithSignal).toHaveBeenCalledWith(15000, undefined)
   })
 
   it('does not report HTTP 200 when reading the response body fails', async () => {

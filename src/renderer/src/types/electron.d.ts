@@ -1,22 +1,19 @@
 import type { ConfigApi } from '../../../shared/config-types'
 import type {
   CookieProgress,
-  DownloadResult,
+  DownloadApi,
   OpenFolderTarget,
   RendererErrorReport,
 } from '../../../shared/ipc-types'
 
-export interface ElectronAPI extends ConfigApi {
+export interface ElectronAPI extends ConfigApi, DownloadApi {
   platform: NodeJS.Platform
   autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
   searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
   getBook: (bookId: string) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) => Promise<DownloadResult>
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<DownloadResult>
   onCookieProgress: (callback: (data: CookieProgress) => void) => () => void
-  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => () => void
   openFolder: (target: OpenFolderTarget) => Promise<void>
   openLogFolder: () => Promise<void>
   reportRendererError: (report: RendererErrorReport) => void

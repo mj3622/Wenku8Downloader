@@ -1,9 +1,14 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { ConfigApi } from '../../../shared/config-types'
+import type { DownloadApi } from '../../../shared/ipc-types'
 import { api } from './client'
 
 describe('renderer configuration API contract', () => {
   it('implements the complete shared configuration API', () => {
     expectTypeOf(api).toMatchTypeOf<ConfigApi>()
+  })
+
+  it('implements the complete shared download API', () => {
+    expectTypeOf(api).toMatchTypeOf<DownloadApi>()
   })
 })

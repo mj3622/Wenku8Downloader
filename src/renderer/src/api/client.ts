@@ -3,18 +3,17 @@ import type {
   LogConfig,
   UpdateCredentialsInput,
 } from '../../../shared/config-types'
-import type { CookieProgress, OpenFolderTarget } from '../../../shared/ipc-types'
+import type {
+  CookieProgress,
+  DownloadHistoryScope,
+  DownloadStateEvent,
+  EnqueueDownloadInput,
+  OpenFolderTarget,
+} from '../../../shared/ipc-types'
 import {
   toUserFacingError,
   type FeedbackContext,
 } from '../utils/userFeedback'
-
-export type DownloadProgress = {
-  taskId: string
-  current: number
-  total: number
-  phase: string
-}
 
 async function invoke<T>(
   context: FeedbackContext,
@@ -56,13 +55,22 @@ export const api = {
   getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
 
   // 下载
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) =>
-    invoke('download', () => window.electronAPI.downloadEpub(bookId, volumeName, taskId)),
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
-    invoke('download', () => window.electronAPI.downloadImages(bookId, volumeName, taskId)),
-  getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
-    return window.electronAPI.onDownloadProgress(callback)
-  },
+  getDownloadSnapshot: () =>
+    invoke('download', () => window.electronAPI.getDownloadSnapshot()),
+  enqueueDownload: (input: EnqueueDownloadInput) =>
+    invoke('download', () => window.electronAPI.enqueueDownload(input)),
+  cancelDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.cancelDownload(taskId)),
+  retryDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.retryDownload(taskId)),
+  removeDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.removeDownload(taskId)),
+  clearDownloadHistory: (scope: DownloadHistoryScope) =>
+    invoke('download', () => window.electronAPI.clearDownloadHistory(scope)),
+  importLegacyDownloadHistory: (tasks: unknown[]) =>
+    invoke('download', () => window.electronAPI.importLegacyDownloadHistory(tasks)),
+  onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) =>
+    window.electronAPI.onDownloadStateChanged(callback),
 
   // 文件
   openFolder: (target: OpenFolderTarget) =>
