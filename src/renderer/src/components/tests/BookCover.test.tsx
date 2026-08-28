@@ -31,6 +31,24 @@ afterEach(async () => {
 })
 
 describe('BookCover', () => {
+  it('keeps primary covers eager and allows long lists to opt into lazy loading', async () => {
+    await act(async () => root.render(
+      <BookCover src="https://example.com/cover.jpg" title="测试作品" />,
+    ))
+
+    expect(container.querySelector('img')?.getAttribute('loading')).toBe('eager')
+
+    await act(async () => root.render(
+      <BookCover
+        src="https://example.com/cover.jpg"
+        title="测试作品"
+        loading="lazy"
+      />,
+    ))
+    expect(container.querySelector('img')?.getAttribute('loading')).toBe('lazy')
+    expect(container.querySelector('img')?.getAttribute('decoding')).toBe('async')
+  })
+
   it('shows a readable placeholder after two retries fail', async () => {
     await act(async () => root.render(
       <BookCover src="https://example.com/cover.jpg" title="测试作品" className="w-10 h-14" />,

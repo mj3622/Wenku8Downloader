@@ -26,8 +26,8 @@ interface DownloadState {
   cancelTask(id: string): void
   retryTask(id: string): void
   removeTask(id: string): void
-  clearCompleted(): void
-  clearHistory(): void
+  clearCompleted(): Promise<void>
+  clearHistory(): Promise<void>
 }
 
 function cloneTasks(tasks: DownloadTask[]): DownloadTask[] {
@@ -174,11 +174,9 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
   cancelTask: (id) => { void runCommand(() => api.cancelDownload(id)) },
   retryTask: (id) => { void runCommand(() => api.retryDownload(id)) },
   removeTask: (id) => { void runCommand(() => api.removeDownload(id)) },
-  clearCompleted: () => {
-    void runCommand(() => api.clearDownloadHistory('completed'))
-  },
+  clearCompleted: () => runCommand(() => api.clearDownloadHistory('completed')),
   clearHistory: () => {
     const scope: DownloadHistoryScope = 'terminal'
-    void runCommand(() => api.clearDownloadHistory(scope))
+    return runCommand(() => api.clearDownloadHistory(scope))
   },
 }))
