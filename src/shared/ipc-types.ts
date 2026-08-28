@@ -110,3 +110,7 @@ export interface RendererErrorReport {
   line?: number
   column?: number
 }
+
+export interface LogStats {
+  totalSizeBytes: number
+}

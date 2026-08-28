@@ -23,7 +23,12 @@ import {
   validateSearchQuery,
 } from './ipc-validation'
 import type { LogContext } from './logging/file-logger'
-import { configureLogger, getLogDirectory, logger } from './logging/logger'
+import {
+  configureLogger,
+  getLogDirectory,
+  getLogStats,
+  logger,
+} from './logging/logger'
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
 
 function requirePayload(value: unknown): Record<string, unknown> {
@@ -353,6 +358,13 @@ export function registerIpcHandlers(services: IpcServices): void {
       const error = await shell.openPath(directory)
       if (error) throw new Error(`打开日志目录失败: ${error}`)
     },
+  ))
+
+  ipcMain.handle('logs:get-stats', () => runLoggedOperation(
+    'logs.get-stats',
+    {},
+    () => getLogStats(),
+    { logStart: false, logSuccess: false },
   ))
 
   ipcMain.handle('dialog:selectFolder', () => {

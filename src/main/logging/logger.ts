@@ -1,4 +1,5 @@
 import type { LogConfig } from '../../shared/config-types'
+import type { LogStats } from '../../shared/ipc-types'
 import { FileLogger, type FileLoggerOptions, type LoggerLike } from './file-logger'
 
 let active: FileLogger | null = null
@@ -24,4 +25,11 @@ export function getLogDirectory(): string {
     throw new Error('日志目录暂时不可用，请重启应用后再试')
   }
   return active.getDirectory()
+}
+
+export function getLogStats(): LogStats {
+  if (!active) {
+    throw new Error('日志信息暂时不可用，请重启应用后再试')
+  }
+  return { totalSizeBytes: active.getTotalSizeBytes() }
 }

@@ -2,6 +2,7 @@ import type { ConfigApi } from '../../../shared/config-types'
 import type {
   CookieProgress,
   DownloadApi,
+  LogStats,
   OpenFolderTarget,
   RendererErrorReport,
 } from '../../../shared/ipc-types'
@@ -16,6 +17,7 @@ export interface ElectronAPI extends ConfigApi, DownloadApi {
   onCookieProgress: (callback: (data: CookieProgress) => void) => () => void
   openFolder: (target: OpenFolderTarget) => Promise<void>
   openLogFolder: () => Promise<void>
+  getLogStats: () => Promise<LogStats>
   reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>

@@ -27,6 +27,7 @@ import '../index'
 
 type ExposedApi = DownloadApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
+  getLogStats: () => Promise<unknown>
 }
 
 const exposedApi = (
@@ -64,6 +65,14 @@ describe('preload download boundary', () => {
     await expect(exposedApi.enqueueDownload(input)).resolves.toBe(result)
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'download:get-snapshot')
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'download:enqueue', input)
+  })
+
+  it('requests log statistics through the fixed channel', async () => {
+    const result = { totalSizeBytes: 2048 }
+    mocks.invoke.mockResolvedValue(result)
+
+    await expect(exposedApi.getLogStats()).resolves.toBe(result)
+    expect(mocks.invoke).toHaveBeenCalledWith('logs:get-stats')
   })
 
   it('forwards task and history mutation payloads', async () => {

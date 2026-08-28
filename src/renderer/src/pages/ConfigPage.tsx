@@ -273,7 +273,7 @@ export default function ConfigPage() {
             aria-labelledby="config-tab-logging"
             hidden={tab !== 'logging'}
           >
-            <LogTab />
+            <LogTab active={tab === 'logging'} />
           </div>
         </>
       )}
@@ -938,7 +938,14 @@ function DownloadTab() {
   )
 }
 
-function LogTab() {
+function formatLogSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function LogTab({ active }: { active: boolean }) {
   const { snapshot, updateLogConfig } = useConfigStore()
   const [retentionDays, setRetentionDays] = useState('30')
   const [maxFileSizeMb, setMaxFileSizeMb] = useState('100')
@@ -946,6 +953,8 @@ function LogTab() {
   const [edited, setEdited] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('saved')
+  const [logSizeBytes, setLogSizeBytes] = useState<number | null>(null)
+  const [logSizeState, setLogSizeState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   useEffect(() => {
     if (!snapshot) return
@@ -954,6 +963,26 @@ function LogTab() {
     setMaxTotalSizeMb(String(snapshot.logging.maxTotalSizeMb))
     setEdited(false)
   }, [snapshot])
+
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    setLogSizeState('loading')
+    void api.getLogStats()
+      .then((stats) => {
+        if (cancelled) return
+        setLogSizeBytes(stats.totalSizeBytes)
+        setLogSizeState('ready')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLogSizeBytes(null)
+        setLogSizeState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [active, snapshot?.logging])
 
   const validation = validateLogConfigFields(
     retentionDays,
@@ -1020,6 +1049,13 @@ function LogTab() {
           </div>
           <p className="mt-1 text-sm text-apple-tertiary">
             日志仅保存在本机
+            <span aria-hidden="true"> · </span>
+            <span aria-live="polite">
+              {logSizeState === 'loading' && '正在计算日志占用...'}
+              {logSizeState === 'ready' && logSizeBytes !== null
+                && `当前占用：${formatLogSize(logSizeBytes)}`}
+              {logSizeState === 'error' && '当前占用暂时不可用'}
+            </span>
           </p>
         </div>
         <button

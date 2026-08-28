@@ -11,6 +11,7 @@ import type {
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
+  LogStats,
   OpenFolderTarget,
   RendererErrorReport,
 } from '../shared/ipc-types'
@@ -64,6 +65,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openFolder: (target: OpenFolderTarget) => ipcRenderer.invoke('shell:openFolder', target),
   openLogFolder: () => ipcRenderer.invoke('logs:open-directory'),
+  getLogStats: (): Promise<LogStats> => ipcRenderer.invoke('logs:get-stats'),
   reportRendererError: (report: RendererErrorReport) =>
     ipcRenderer.send('log:renderer-error', report),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),

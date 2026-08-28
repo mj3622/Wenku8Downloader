@@ -8,6 +8,7 @@ import type {
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
+  LogStats,
   OpenFolderTarget,
 } from '../../../shared/ipc-types'
 import {
@@ -77,6 +78,8 @@ export const api = {
     invoke('open-folder', () => window.electronAPI.openFolder(target)),
   openLogFolder: () =>
     invoke('open-log-folder', () => window.electronAPI.openLogFolder()),
+  getLogStats: (): Promise<LogStats> =>
+    invoke('log-stats', () => window.electronAPI.getLogStats()),
   selectFolder: () =>
     invoke('select-folder', () => window.electronAPI.selectFolder()),
   openExternal: (url: string) =>

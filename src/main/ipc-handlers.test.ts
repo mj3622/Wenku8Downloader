@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => {
       _onProgress?: (progress: { step: string; message: string }) => void,
     ) => ({ loginCookies: {} })),
     configureLogger: vi.fn(),
+    getLogStats: vi.fn(() => ({ totalSizeBytes: 2048 })),
     logger: {
       debug: vi.fn(),
       info: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock('electron', () => ({
 vi.mock('./logging/logger', () => ({
   configureLogger: mocks.configureLogger,
   getLogDirectory: () => mocks.logsPath,
+  getLogStats: mocks.getLogStats,
   logger: mocks.logger,
 }))
 
@@ -395,6 +397,13 @@ describe('registerIpcHandlers application operations', () => {
     expect(mocks.mkdir).toHaveBeenCalledWith(mocks.logsPath, { recursive: true })
     expect(mocks.openPath).toHaveBeenCalledWith(mocks.logsPath)
     expect(mocks.openPath).not.toHaveBeenCalledWith('D:\\attacker-controlled')
+  })
+
+  it('returns log statistics without logging the read itself', async () => {
+    await expect(invoke('logs:get-stats', {})).resolves.toEqual({ totalSizeBytes: 2048 })
+
+    expect(mocks.getLogStats).toHaveBeenCalledTimes(1)
+    expect(mocks.logger.info).not.toHaveBeenCalled()
   })
 
   it('logs failed operations with safe context and duration', async () => {
