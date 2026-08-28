@@ -110,6 +110,28 @@ describe('DownloadHistoryPage', () => {
     expect(container.textContent).not.toContain('暂无下载记录')
   })
 
+  it('offers a direct path to search when download history is empty', async () => {
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+
+    const searchLink = container.querySelector<HTMLAnchorElement>('a[href="#/search"]')
+    expect(searchLink?.textContent).toContain('检索作品')
+  })
+
   it('formats existing task titles with the current download setting', async () => {
     const actions = {
       removeTask: vi.fn(),

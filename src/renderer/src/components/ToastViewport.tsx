@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { IconX } from '@tabler/icons-react'
 import { useToastStore, type ToastItem, type ToastTone } from '../stores/toastStore'
 
 const toneClasses: Record<ToastTone, { border: string; dot: string }> = {
@@ -11,26 +12,34 @@ const toneClasses: Record<ToastTone, { border: string; dot: string }> = {
 function ToastCard({ item }: { item: ToastItem }) {
   const dismiss = useToastStore((state) => state.dismiss)
   const [paused, setPaused] = useState(false)
+  const [closingVersion, setClosingVersion] = useState<number | null>(null)
   const remainingMs = useRef(item.durationMs)
+  const closing = closingVersion === item.updatedAt
+  const beginDismiss = useCallback(
+    () => setClosingVersion(item.updatedAt),
+    [item.updatedAt],
+  )
 
   useEffect(() => {
     remainingMs.current = item.durationMs
   }, [item.durationMs, item.updatedAt])
 
   useEffect(() => {
-    if (paused) return undefined
+    if (paused || closing) return undefined
 
     const startedAt = Date.now()
-    const timer = window.setTimeout(() => dismiss(item.id), remainingMs.current)
+    const timer = window.setTimeout(beginDismiss, remainingMs.current)
     return () => {
       window.clearTimeout(timer)
       remainingMs.current = Math.max(0, remainingMs.current - (Date.now() - startedAt))
     }
-  }, [dismiss, item.id, item.updatedAt, paused])
+  }, [beginDismiss, closing, item.updatedAt, paused])
 
   return (
     <article
-      className={`toast-card pointer-events-auto relative flex w-full gap-3 rounded-2xl border bg-white/95 p-4 pr-11 shadow-lg backdrop-blur ${toneClasses[item.tone].border}`}
+      className={`toast-card relative flex w-full gap-3 rounded-xl border bg-white/95 p-4 pr-11 shadow-lg backdrop-blur ${
+        closing ? 'toast-card--closing pointer-events-none' : 'pointer-events-auto'
+      } ${toneClasses[item.tone].border}`}
       role={item.tone === 'error' ? 'alert' : 'status'}
       aria-atomic="true"
       onMouseEnter={() => setPaused(true)}
@@ -39,6 +48,11 @@ function ToastCard({ item }: { item: ToastItem }) {
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
           setPaused(false)
+        }
+      }}
+      onTransitionEnd={(event) => {
+        if (closing && event.target === event.currentTarget && event.propertyName === 'opacity') {
+          dismiss(item.id)
         }
       }}
     >
@@ -51,9 +65,9 @@ function ToastCard({ item }: { item: ToastItem }) {
         <p className="mt-1 text-sm leading-5 text-apple-body">{item.message}</p>
         {item.action && (
           <a
-            className="mt-2 inline-flex text-sm font-medium text-apple-accent hover:underline focus:outline-none focus:ring-2 focus:ring-apple-accent/30"
+            className="motion-pressable mt-2 inline-flex text-sm font-medium text-apple-accent hover:underline focus:outline-none focus:ring-2 focus:ring-apple-accent/30"
             href={item.action.href}
-            onClick={() => dismiss(item.id)}
+            onClick={beginDismiss}
           >
             {item.action.label}
           </a>
@@ -61,11 +75,11 @@ function ToastCard({ item }: { item: ToastItem }) {
       </div>
       <button
         type="button"
-        className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-lg leading-none text-apple-secondary hover:bg-black/5 hover:text-apple-heading focus:outline-none focus:ring-2 focus:ring-apple-accent/30"
+        className="motion-pressable absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-md text-apple-secondary hover:bg-black/5 hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30"
         aria-label={`关闭提示：${item.title}`}
-        onClick={() => dismiss(item.id)}
+        onClick={beginDismiss}
       >
-        ×
+        <IconX aria-hidden="true" size={16} stroke={1.8} />
       </button>
     </article>
   )

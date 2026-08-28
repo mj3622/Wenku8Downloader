@@ -28,6 +28,10 @@ export default {
           '"PingFang SC"', '"Microsoft YaHei"', 'sans-serif',
         ],
       },
+      transitionTimingFunction: {
+        'out-emphasized': 'var(--motion-ease-out)',
+        'in-out-emphasized': 'var(--motion-ease-in-out)',
+      },
     },
   },
   plugins: [],

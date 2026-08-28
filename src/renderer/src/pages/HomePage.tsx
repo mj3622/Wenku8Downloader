@@ -35,7 +35,7 @@ export default function HomePage() {
               void openExternal(GITHUB_URL)
             }}
             href={GITHUB_URL}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-apple-secondary transition-colors hover:bg-apple-bg hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+            className="motion-pressable inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-apple-secondary hover:bg-apple-bg hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
           >
             <IconBrandGithub aria-hidden="true" size={16} stroke={1.8} />
             GitHub 仓库
@@ -97,16 +97,16 @@ function Step({ index, title, to, children }: {
   return (
     <Link
       to={to}
-      className="group relative flex gap-4 rounded-lg px-4 py-3.5 before:pointer-events-none before:absolute before:-inset-x-1.5 before:inset-y-0 before:rounded-lg before:bg-[linear-gradient(90deg,transparent,rgba(0,113,227,0.05)_7%,rgba(0,113,227,0.05)_93%,transparent)] before:opacity-0 before:transition-opacity before:duration-200 after:pointer-events-none after:absolute after:bottom-0 after:left-4 after:right-4 after:h-px after:bg-gradient-to-r after:from-transparent after:via-apple-border-subtle after:to-transparent after:content-[''] last:after:hidden hover:before:opacity-100 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 lg:after:bottom-4 lg:after:left-auto lg:after:right-0 lg:after:top-4 lg:after:h-auto lg:after:w-px lg:after:bg-gradient-to-b"
+      className="group relative flex gap-4 rounded-lg px-4 py-3.5 before:pointer-events-none before:absolute before:-inset-x-1.5 before:inset-y-0 before:rounded-lg before:bg-[linear-gradient(90deg,transparent,rgba(0,113,227,0.05)_7%,rgba(0,113,227,0.05)_93%,transparent)] before:opacity-0 before:transition-opacity before:duration-200 before:ease-out-emphasized after:pointer-events-none after:absolute after:bottom-0 after:left-4 after:right-4 after:h-px after:bg-gradient-to-r after:from-transparent after:via-apple-border-subtle after:to-transparent after:content-[''] last:after:hidden hover:before:opacity-100 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 lg:after:bottom-4 lg:after:left-auto lg:after:right-0 lg:after:top-4 lg:after:h-auto lg:after:w-px lg:after:bg-gradient-to-b"
     >
-      <span className="relative z-[1] flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-apple-accent-light text-sm font-semibold text-apple-accent transition-[transform,box-shadow] duration-200 ease-out group-hover:scale-[1.02] group-hover:ring-1 group-hover:ring-inset group-hover:ring-apple-accent/20">
+      <span className="relative z-[1] flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-apple-accent-light text-sm font-semibold text-apple-accent transition-shadow duration-200 ease-out-emphasized group-hover:ring-1 group-hover:ring-inset group-hover:ring-apple-accent/20">
         {index}
       </span>
       <span className="relative z-[1] min-w-0 pr-3">
-        <span className="mb-2 block origin-left text-sm font-semibold text-apple-heading transition-[color,transform] duration-200 ease-out group-hover:scale-[1.02] group-hover:text-apple-accent">
+        <span className="mb-2 block text-sm font-semibold text-apple-heading transition-colors duration-200 ease-out-emphasized group-hover:text-apple-accent">
           {title}
         </span>
-        <span className="block origin-left text-sm leading-6 text-apple-secondary transition-transform duration-200 ease-out group-hover:scale-[1.02]">
+        <span className="block text-sm leading-6 text-apple-secondary">
           {children}
         </span>
       </span>
@@ -114,7 +114,7 @@ function Step({ index, title, to, children }: {
         aria-hidden="true"
         size={18}
         stroke={1.8}
-        className="absolute right-4 top-1/2 z-[1] -translate-y-1/2 text-apple-tertiary transition-all duration-200 ease-out group-hover:translate-x-0.5 group-hover:scale-[1.02] group-hover:text-apple-accent"
+        className="absolute right-4 top-1/2 z-[1] -translate-y-1/2 text-apple-tertiary transition-colors duration-200 ease-out-emphasized group-hover:text-apple-accent"
       />
     </Link>
   )

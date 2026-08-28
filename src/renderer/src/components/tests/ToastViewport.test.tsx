@@ -6,6 +6,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import ToastViewport from '../ToastViewport'
 import { toast, useToastStore } from '../../stores/toastStore'
 
+function finishToastTransition(element: Element): void {
+  const event = new Event('transitionend', { bubbles: true })
+  Object.defineProperty(event, 'propertyName', { value: 'opacity' })
+  element.dispatchEvent(event)
+}
+
 let container: HTMLDivElement
 let root: Root
 const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -55,6 +61,11 @@ describe('ToastViewport', () => {
     )
     expect(close).not.toBeNull()
     await act(async () => close?.click())
+    expect(close?.closest('article')?.classList.contains('toast-card--closing')).toBe(true)
+    await act(async () => {
+      const card = close?.closest('article')
+      if (card) finishToastTransition(card)
+    })
     expect(container.textContent).not.toContain('登录状态已失效')
   })
 
@@ -70,6 +81,33 @@ describe('ToastViewport', () => {
 
     await act(async () => close?.blur())
     await act(async () => vi.advanceTimersByTime(7_000))
+    expect(container.textContent).toContain('操作失败')
+    await act(async () => {
+      const card = container.querySelector('article')
+      if (card) finishToastTransition(card)
+    })
     expect(container.textContent).not.toContain('操作失败')
+  })
+
+  it('interrupts dismissal when a deduplicated toast is refreshed', async () => {
+    const input = { title: '操作失败', message: '请稍后重试。' }
+    toast.error(input)
+    await act(async () => root.render(<ToastViewport />))
+
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label^="关闭提示"]')
+    await act(async () => close?.click())
+    expect(container.querySelector('article')?.classList.contains('toast-card--closing')).toBe(true)
+
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+      toast.error(input)
+    })
+
+    const refreshed = container.querySelector('article')
+    expect(refreshed?.classList.contains('toast-card--closing')).toBe(false)
+    await act(async () => {
+      if (refreshed) finishToastTransition(refreshed)
+    })
+    expect(container.textContent).toContain('操作失败')
   })
 })
