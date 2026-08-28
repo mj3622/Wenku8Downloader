@@ -5,6 +5,14 @@ import {
   type FocusEvent,
   type KeyboardEvent,
 } from 'react'
+import {
+  IconDots,
+  IconFolderOpen,
+  IconFolderPlus,
+  IconLoader2,
+  IconRefresh,
+  IconX,
+} from '@tabler/icons-react'
 import type {
   DownloadConfig,
   LogConfig,
@@ -171,13 +179,13 @@ export default function ConfigPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-apple-heading mb-5">配置</h2>
+      <h1 className="text-2xl font-bold text-apple-heading mb-5">配置</h1>
 
       {loadState === 'error' && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <p>配置加载失败：{error || '暂时无法读取设置，请重试'}</p>
           <button
-            className="mt-2 rounded-lg bg-red-100 px-4 py-1.5 transition-colors hover:bg-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+            className="motion-pressable mt-2 rounded-lg bg-red-100 px-4 py-1.5 hover:bg-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
             onClick={() => void fetchConfig()}
           >
             重试
@@ -191,7 +199,7 @@ export default function ConfigPage() {
           {snapshot.health.state === 'recovery-required' && (
             <button
               disabled={resetting}
-              className="mt-2 rounded-lg bg-amber-100 px-4 py-1.5 transition-colors hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:cursor-not-allowed disabled:bg-amber-50 disabled:text-amber-400"
+              className="motion-pressable mt-2 rounded-lg bg-amber-100 px-4 py-1.5 hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:cursor-not-allowed disabled:bg-amber-50 disabled:text-amber-400"
               onClick={() => void handleReset()}
             >
               {resetting ? '处理中...' : '处理配置问题'}
@@ -233,10 +241,10 @@ export default function ConfigPage() {
                 tabIndex={tab === item.key ? 0 : -1}
                 onClick={() => setTab(item.key)}
                 onKeyDown={(event) => handleTabKeyDown(event, item.key)}
-                className={`px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30 focus-visible:ring-inset ${
+                className={`border-b-2 px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30 focus-visible:ring-inset ${
                   tab === item.key
-                    ? 'border-b-2 border-apple-accent text-apple-accent font-medium'
-                    : 'text-apple-secondary hover:text-apple-heading'
+                    ? 'border-apple-accent font-medium text-apple-accent'
+                    : 'border-transparent text-apple-secondary hover:text-apple-heading'
                 }`}
               >
                 {item.label}
@@ -281,7 +289,7 @@ const COOKIE_STATE_CONFIG = {
     showSpinner: false,
   },
   loading: {
-    dot: 'bg-apple-accent animate-pulse',
+    dot: 'bg-apple-accent',
     text: 'text-apple-secondary',
     label: '',
     showSpinner: true,
@@ -339,10 +347,7 @@ function CookieStatusCard({
     <div className="flex items-center gap-3">
       <div className="flex items-center gap-2" title={cookieState === 'error' ? cookieMsg : undefined}>
         {stateConfig.showSpinner ? (
-          <svg className="animate-spin h-4 w-4 text-apple-accent" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <IconLoader2 aria-hidden="true" className="motion-spinner h-4 w-4 animate-spin text-apple-accent" stroke={1.8} />
         ) : (
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${stateConfig.dot}`} />
         )}
@@ -352,9 +357,12 @@ function CookieStatusCard({
       </div>
       <button
         disabled={disabled || cookieState === 'loading'}
-        className="rounded-lg border border-apple-border-subtle bg-white px-3 py-1.5 text-sm font-medium text-apple-accent transition-colors hover:border-apple-accent/30 hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
+        className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-white px-3 py-1.5 text-sm font-medium text-apple-accent hover:border-apple-accent/30 hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
         onClick={onRefresh}
       >
+        {cookieState !== 'loading' && (
+          <IconRefresh aria-hidden="true" size={15} stroke={1.8} />
+        )}
         {cookieState === 'loading' ? '刷新中...' : '刷新状态'}
       </button>
     </div>
@@ -598,11 +606,11 @@ function LoginTab() {
 
   return (
     <div className="max-w-4xl">
-      <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-[#fafafa]">
+      <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-apple-card">
         <section>
           <div className="flex flex-col gap-4 border-b border-apple-border-subtle px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-6">
             <div className="flex items-center gap-3">
-              <h3 className="text-base font-semibold text-apple-heading">账号登录</h3>
+              <h2 className="text-base font-semibold text-apple-heading">账号登录</h2>
               <SaveStateIndicator state={effectiveSaveState} />
             </div>
             <div className="flex items-center gap-2">
@@ -616,19 +624,15 @@ function LoginTab() {
                 <details ref={accountMenuRef} data-account-menu className="relative">
                   <summary
                     aria-label="更多账号操作"
-                    className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-apple-secondary transition-colors hover:bg-apple-accent-light hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 [&::-webkit-details-marker]:hidden"
+                    className="motion-pressable flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-apple-secondary hover:bg-apple-accent-light hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 [&::-webkit-details-marker]:hidden"
                   >
-                    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
-                      <circle cx="4" cy="10" r="1.5" />
-                      <circle cx="10" cy="10" r="1.5" />
-                      <circle cx="16" cy="10" r="1.5" />
-                    </svg>
+                    <IconDots aria-hidden="true" size={18} stroke={1.8} />
                   </summary>
-                  <div className="absolute right-0 top-10 z-10 min-w-40 rounded-lg border border-apple-border-subtle bg-white p-1 shadow-lg">
+                  <div className="motion-popover absolute right-0 top-10 z-10 min-w-40 rounded-lg border border-apple-border-subtle bg-white p-1 shadow-lg">
                     <button
                       type="button"
                       disabled={accountBusy}
-                      className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:cursor-not-allowed disabled:text-red-300"
+                      className="motion-pressable w-full rounded-md px-3 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:cursor-not-allowed disabled:text-red-300"
                       onClick={() => void handleClearCredentials()}
                     >
                       {clearing ? '清除中...' : '清除登录信息'}
@@ -784,7 +788,7 @@ function DownloadTab() {
   return (
     <div className="max-w-3xl space-y-6">
       <div className="flex items-center gap-3">
-        <h3 className="text-lg font-semibold text-apple-heading">下载选项</h3>
+        <h2 className="text-lg font-semibold text-apple-heading">下载选项</h2>
         <SaveStateIndicator state={saving ? 'saving' : saveState} />
       </div>
       <h3 className="text-sm font-semibold text-apple-heading">书名格式</h3>
@@ -810,9 +814,9 @@ function DownloadTab() {
                   downloadPath,
                 })
               }}
-              className={`w-full text-left px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+              className={`motion-pressable w-full cursor-pointer rounded-xl border px-4 py-3 text-left ${
                 titleFormat === format.value
-                  ? 'border-apple-accent bg-[rgba(0,113,227,0.06)]'
+                  ? 'border-apple-accent bg-apple-accent-light'
                   : 'border-apple-border-subtle bg-white hover:border-apple-accent/40'
               }`}
             >
@@ -821,7 +825,7 @@ function DownloadTab() {
               }`}>
                 {format.label}
               </div>
-              <div className={`mt-0.5 text-[11px] ${
+              <div className={`mt-0.5 text-xs ${
                 titleFormat === format.value ? 'text-apple-accent/70' : 'text-apple-tertiary'
               }`}>
                 {examples[format.value]}
@@ -874,7 +878,7 @@ function DownloadTab() {
             type="button"
             data-download-action
             disabled={saving}
-            className="flex-shrink-0 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent transition-colors hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
+            className="motion-pressable inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed disabled:text-apple-tertiary"
             onClick={async () => {
               try {
                 const path = await api.selectFolder()
@@ -892,6 +896,7 @@ function DownloadTab() {
               }
             }}
           >
+            <IconFolderPlus aria-hidden="true" size={16} stroke={1.8} />
             选择文件夹
           </button>
           <button
@@ -899,9 +904,10 @@ function DownloadTab() {
             data-download-action
             disabled={saving}
             title={saving ? '保存完成后可打开目录' : '打开当前下载目录'}
-            className="flex-shrink-0 rounded-lg border border-apple-border-subtle bg-apple-card px-4 py-2 text-sm font-medium text-apple-secondary transition-colors hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-apple-tertiary"
+            className="motion-pressable inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card px-4 py-2 text-sm font-medium text-apple-secondary hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-apple-tertiary"
             onClick={() => void handleOpenDownloadFolder()}
           >
+            <IconFolderOpen aria-hidden="true" size={16} stroke={1.8} />
             打开目录
           </button>
           {downloadPath && (
@@ -910,7 +916,7 @@ function DownloadTab() {
               data-download-action
               aria-label="清除文件夹路径"
               disabled={saving}
-              className="flex-shrink-0 text-apple-tertiary hover:text-apple-secondary transition-colors text-[16px] leading-none px-1"
+              className="motion-pressable flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-bg hover:text-apple-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/20"
               onClick={() => {
                 setDownloadPath('')
                 void saveDownloadConfig({
@@ -920,7 +926,7 @@ function DownloadTab() {
                 })
               }}
             >
-              ×
+              <IconX aria-hidden="true" size={16} stroke={1.8} />
             </button>
           )}
         </div>
@@ -1006,10 +1012,10 @@ function LogTab() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="rounded-xl border border-apple-border-subtle bg-[#fafafa] p-4 sm:flex sm:items-start sm:justify-between sm:gap-6">
+      <div className="rounded-xl border border-apple-border-subtle bg-apple-card p-4 sm:flex sm:items-start sm:justify-between sm:gap-6">
         <div>
           <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold text-apple-heading">本地日志</h3>
+            <h2 className="text-sm font-semibold text-apple-heading">本地日志</h2>
             <SaveStateIndicator state={saving ? 'saving' : saveState} />
           </div>
           <p className="mt-1 text-sm text-apple-tertiary">
@@ -1018,9 +1024,10 @@ function LogTab() {
         </div>
         <button
           type="button"
-          className="mt-3 flex-shrink-0 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent transition-colors hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 sm:mt-0"
+          className="motion-pressable mt-3 inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 sm:mt-0"
           onClick={() => void handleOpenDirectory()}
         >
+          <IconFolderOpen aria-hidden="true" size={16} stroke={1.8} />
           打开日志目录
         </button>
       </div>

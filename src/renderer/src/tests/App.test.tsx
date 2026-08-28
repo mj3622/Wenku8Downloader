@@ -62,11 +62,6 @@ describe('App routing', () => {
     expect(container.textContent).toContain('页面不存在')
     expect(container.textContent).toContain('返回首页')
     expect(container.querySelector('a[href="#/"]')).not.toBeNull()
-    expect(useToastStore.getState().items).toHaveLength(1)
-    expect(useToastStore.getState().items[0]).toMatchObject({
-      tone: 'warning',
-      title: '页面不存在',
-      action: { href: '#/' },
-    })
+    expect(useToastStore.getState().items).toHaveLength(0)
   })
 })

@@ -80,6 +80,15 @@ async function setValue(input: HTMLInputElement, value: string): Promise<void> {
 }
 
 describe('SearchPage', () => {
+  it('exposes search methods as a labelled pressed-button group', async () => {
+    await renderPage()
+
+    const group = container.querySelector('[role="group"][aria-label="检索方式"]')
+    expect(group).not.toBeNull()
+    expect(button('编号检索').getAttribute('aria-pressed')).toBe('true')
+    expect(button('作者检索').getAttribute('aria-pressed')).toBe('false')
+  })
+
   it('shows inline validation for empty author searches', async () => {
     await renderPage()
     await act(async () => button('作者检索').click())
@@ -92,7 +101,7 @@ describe('SearchPage', () => {
   it('distinguishes a completed zero-result search from the initial prompt', async () => {
     await renderPage()
     await act(async () => button('书名检索').click())
-    const input = container.querySelector('input[placeholder="例如：败犬女主"]') as HTMLInputElement
+    const input = container.querySelector('input[placeholder="例如：败犬"]') as HTMLInputElement
     await setValue(input, '不存在的作品')
     await act(async () => {
       button('查询').click()
@@ -108,7 +117,7 @@ describe('SearchPage', () => {
   it('keeps zero-result copy tied to the last submitted search', async () => {
     await renderPage()
     await act(async () => button('书名检索').click())
-    const input = container.querySelector('input[placeholder="例如：败犬女主"]') as HTMLInputElement
+    const input = container.querySelector('input[placeholder="例如：败犬"]') as HTMLInputElement
     await setValue(input, '第一次搜索')
     await act(async () => {
       button('查询').click()
@@ -136,7 +145,7 @@ describe('SearchPage', () => {
     mocks.searchTitle.mockReturnValue(new Promise(() => undefined))
     await renderPage()
     await act(async () => button('书名检索').click())
-    const input = container.querySelector('input[placeholder="例如：败犬女主"]') as HTMLInputElement
+    const input = container.querySelector('input[placeholder="例如：败犬"]') as HTMLInputElement
     await setValue(input, '测试作品')
     await act(async () => button('查询').click())
 

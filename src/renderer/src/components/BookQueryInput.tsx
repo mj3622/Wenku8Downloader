@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { IconSearch } from '@tabler/icons-react'
 
 type Props = {
   label: string
@@ -34,15 +35,21 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
   }
 
   return (
-    <div className="mb-6">
-      <label htmlFor={inputId} className="block text-[12px] text-apple-secondary mb-1">
+    <form
+      className="mb-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        handleSubmit()
+      }}
+    >
+      <label htmlFor={inputId} className="mb-1.5 block text-sm text-apple-secondary">
         {label}
       </label>
       <div className="flex items-center gap-3">
         <input
           id={inputId}
           className="w-full px-4 py-2.5 bg-apple-card border border-apple-border-input rounded-xl
-                     text-[13px] text-apple-heading placeholder:text-apple-tertiary
+                     text-sm text-apple-heading placeholder:text-apple-tertiary
                      focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10
                      transition-colors"
           placeholder={help}
@@ -53,14 +60,14 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
             setValue(e.target.value)
             if (error) setError(null)
           }}
-          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
         />
         <button
+          type="submit"
           disabled={loading}
-          className="shrink-0 px-6 py-2.5 bg-apple-accent hover:opacity-90 disabled:opacity-40
-                     rounded-[24px] text-[13px] font-medium text-white transition-opacity"
-          onClick={handleSubmit}
+          className="motion-pressable inline-flex shrink-0 items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
+                     font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
+          <IconSearch aria-hidden="true" size={16} stroke={1.8} />
           {loading ? '查询中...' : '查询'}
         </button>
       </div>
@@ -69,6 +76,6 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
           {error}
         </p>
       )}
-    </div>
+    </form>
   )
 }
