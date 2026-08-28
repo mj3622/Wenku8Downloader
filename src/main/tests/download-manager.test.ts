@@ -180,6 +180,28 @@ describe('DownloadManager scheduling', () => {
     await vi.runAllTimersAsync()
   })
 
+  it('persists an active task cover as task metadata immediately', () => {
+    const execution = deferred<DownloadExecutionResult>()
+    const { manager, executor, saved } = setup()
+    let context: DownloadExecutionContext | undefined
+    executor.execute.mockImplementation((_task, value) => {
+      context = value
+      return execution.promise
+    })
+    manager.enqueue(input({
+      type: 'epub_volume',
+      volume: '第九卷',
+      cover: 'https://example.com/book-cover.jpg',
+    }))
+
+    context?.onVolumeCover?.('https://example.com/volume-9-cover.jpg')
+
+    expect(manager.getSnapshot().tasks[0].cover)
+      .toBe('https://example.com/volume-9-cover.jpg')
+    expect(saved.at(-1)?.tasks[0].cover)
+      .toBe('https://example.com/volume-9-cover.jpg')
+  })
+
   it('cancels a queued task without executing it', async () => {
     const first = deferred<DownloadExecutionResult>()
     const { manager, executor } = setup()

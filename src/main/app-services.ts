@@ -14,6 +14,7 @@ import {
 import { DownloadManager } from './download-manager'
 import { sharedDownloadRateLimiter } from './download-rate-limiter'
 import { DownloadTaskStore, resolveDownloadTaskPath } from './download-task-store'
+import { selectVolumeCoverUrl } from './downloader'
 import { configureLogger, logger } from './logging/logger'
 
 export interface AppServices {
@@ -21,6 +22,7 @@ export interface AppServices {
   crawler: WebCrawler
   books: BookService
   downloads: DownloadManager
+  resolveVolumeCovers(bookId: string, volumes: string[]): Promise<Record<string, string>>
 }
 
 function createDownloadBookView(
@@ -88,7 +90,30 @@ export function createAppServices(): AppServices {
     executor,
   })
 
-  return { config, crawler, books, downloads }
+  const resolveVolumeCovers = async (
+    bookId: string,
+    volumes: string[],
+  ): Promise<Record<string, string>> => {
+    const book = await books.get(bookId)
+    const coverIndex = config.getDownloadSnapshot().defaultCoverIndex
+    const resolved = await Promise.all(volumes.map(async (volumeName) => {
+      try {
+        const urls = await book.getChapterImageUrls(volumeName)
+        const cover = selectVolumeCoverUrl(urls, coverIndex, book.baseChapterUrl)
+        return cover ? [volumeName, cover] as const : undefined
+      } catch (error) {
+        logger.warn(
+          'book.volume-cover.failed',
+          '分卷封面解析失败，下载任务将不沿用小说封面',
+          { bookId, volumeName, error },
+        )
+        return undefined
+      }
+    }))
+    return Object.fromEntries(resolved.filter((item) => item !== undefined))
+  }
+
+  return { config, crawler, books, downloads, resolveVolumeCovers }
 }
 
 export async function initializeAppServices(): Promise<AppServices> {

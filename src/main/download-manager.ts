@@ -431,6 +431,16 @@ export class DownloadManager {
     this.progressPublishTimer = undefined
   }
 
+  private updateTaskCover(taskId: string, cover: string): void {
+    const task = this.state.tasks.find((item) => item.id === taskId)
+    if (!task || task.cover === cover) return
+    this.updateRuntimeTask(taskId, {
+      cover,
+      updatedAt: this.now(),
+    })
+    logger.debug('download.task-cover.updated', '下载任务封面已更新', { taskId })
+  }
+
   private publish(transition?: DownloadTransition): void {
     if (this.listeners.size === 0) return
     const event: DownloadStateEvent = {
@@ -497,6 +507,7 @@ export class DownloadManager {
               progress.total,
               progress.phase,
             ),
+            onVolumeCover: (cover) => this.updateTaskCover(taskId, cover),
           })
         } catch (error) {
           execution = Promise.reject(error)

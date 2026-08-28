@@ -114,3 +114,7 @@ export interface RendererErrorReport {
 export interface LogStats {
   totalSizeBytes: number
 }
+
+export interface VolumeCoverSnapshot {
+  covers: Record<string, string>
+}

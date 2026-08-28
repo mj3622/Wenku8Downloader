@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import StatusAlert from '../components/StatusAlert'
 import BookCover from '../components/BookCover'
 import { toast } from '../stores/toastStore'
+import { api } from '../api/client'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
 
@@ -22,6 +23,7 @@ export default function BookDetailPage() {
   const { book, loading, error, fetchBook, clear } = useBookStore()
   const { downloadEpub, downloadImages } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
+  const [preparingVolumes, setPreparingVolumes] = useState(false)
   const warnedEmptyBooks = useRef(new Set<string>())
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function BookDetailPage() {
     navigate('/download')
   }
 
-  const handleMultiDownload = (type: DownloadTab, volumes: string[]) => {
+  const handleMultiDownload = async (type: DownloadTab, volumes: string[]) => {
     if (!book) {
       toast.warning({
         title: '作品信息尚未准备好',
@@ -68,11 +70,25 @@ export default function BookDetailPage() {
       toast.warning({ title: '尚未选择分卷', message: '请至少选择一个要下载的分卷。' })
       return
     }
-    volumes.forEach(v =>
-      type === 'pictures'
-        ? downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
-        : downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'], v)
-    )
+    setPreparingVolumes(true)
+    let covers: Record<string, string> = {}
+    try {
+      covers = (await api.getVolumeCovers(book.book_id, volumes)).covers
+    } catch {
+      toast.warning({
+        title: '部分封面暂不可用',
+        message: '下载仍会继续，分卷封面将在任务开始后再次获取。',
+      })
+    }
+    volumes.forEach((volumeName) => {
+      const cover = covers[volumeName]
+      if (type === 'pictures') {
+        downloadImages(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
+      } else {
+        downloadEpub(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
+      }
+    })
+    setPreparingVolumes(false)
     navigate('/download')
   }
 
@@ -228,6 +244,7 @@ export default function BookDetailPage() {
               {dlTab === 'divided' && Object.keys(book.volumes).length > 0 && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
+                  preparing={preparingVolumes}
                   onDownload={(vols) => handleMultiDownload('divided', vols)}
                 />
               )}
@@ -235,6 +252,7 @@ export default function BookDetailPage() {
               {dlTab === 'pictures' && Object.keys(book.volumes).length > 0 && (
                 <MultiVolumeSelector
                   volumes={book.volumes}
+                  preparing={preparingVolumes}
                   onDownload={(vols) => handleMultiDownload('pictures', vols)}
                 />
               )}
@@ -247,10 +265,11 @@ export default function BookDetailPage() {
 }
 
 function MultiVolumeSelector({
-  volumes, onDownload,
+  volumes, preparing, onDownload,
 }: {
   volumes: Record<string, unknown>
-  onDownload: (volumes: string[]) => void
+  preparing: boolean
+  onDownload: (volumes: string[]) => Promise<void>
 }) {
   const volumeKeys = Object.keys(volumes)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -277,6 +296,8 @@ function MultiVolumeSelector({
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-apple-secondary">已选 {count}/{volumeKeys.length}</span>
           <button
+            type="button"
+            disabled={preparing}
             onClick={allSelected ? deselectAll : selectAll}
             className="motion-pressable rounded-[14px] border border-apple-border-input px-3 py-1
                        text-[11px] text-apple-accent hover:bg-apple-accent/5"
@@ -296,6 +317,7 @@ function MultiVolumeSelector({
           >
             <input
               type="checkbox"
+              disabled={preparing}
               checked={selected.has(v)}
               onChange={() => toggle(v)}
               className="h-4 w-4 accent-apple-accent"
@@ -307,13 +329,20 @@ function MultiVolumeSelector({
 
       <div className="text-center">
         <button
-          disabled={count === 0}
+          type="button"
+          disabled={count === 0 || preparing}
           className="motion-pressable inline-flex items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
                      font-medium text-white hover:opacity-90 disabled:opacity-40"
-          onClick={() => count > 0 && onDownload([...selected])}
+          onClick={() => {
+            if (count > 0 && !preparing) void onDownload([...selected])
+          }}
         >
           <IconDownload aria-hidden="true" size={16} stroke={1.8} />
-          {count === 0 ? '请选择要下载的卷' : `下载选中的 ${count} 卷`}
+          {preparing
+            ? '正在准备分卷封面...'
+            : count === 0
+              ? '请选择要下载的卷'
+              : `下载选中的 ${count} 卷`}
         </button>
       </div>
     </div>

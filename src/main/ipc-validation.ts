@@ -13,6 +13,7 @@ const MAX_RENDERER_MESSAGE = 8 * 1024
 const MAX_RENDERER_STACK = 32 * 1024
 const MAX_RENDERER_SOURCE = 4 * 1024
 const MAX_RENDERER_REPORT = 64 * 1024
+const MAX_VOLUME_COVER_REQUESTS = 500
 const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
 
@@ -63,6 +64,17 @@ export function validateOptionalVolumeName(value: unknown): string | undefined {
     throw new Error('分卷信息无效，请返回作品页重新选择')
   }
   return value
+}
+
+export function validateVolumeNames(value: unknown): string[] {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.length > MAX_VOLUME_COVER_REQUESTS
+  ) {
+    throw new Error('分卷列表无效，请返回作品页重新选择')
+  }
+  return [...new Set(value.map((item) => validateBoundedString(item, '分卷信息', 200)))]
 }
 
 export function validateOptionalTaskId(value: unknown): string | undefined {

@@ -6,19 +6,21 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  book: {
+    book_id: '3057',
+    basic_info: { 标题: '测试作品', 作者: '测试作者', cover: 'https://example.com/book.jpg' },
+    volumes: {} as Record<string, unknown[]>,
+  },
   fetchBook: vi.fn(),
   clear: vi.fn(),
   downloadEpub: vi.fn(),
   downloadImages: vi.fn(),
+  getVolumeCovers: vi.fn(),
 }))
 
 vi.mock('../../stores/bookStore', () => ({
   useBookStore: () => ({
-    book: {
-      book_id: '3057',
-      basic_info: { 标题: '测试作品', 作者: '测试作者', cover: '' },
-      volumes: {},
-    },
+    book: mocks.book,
     loading: false,
     error: null,
     fetchBook: mocks.fetchBook,
@@ -31,6 +33,12 @@ vi.mock('../../stores/downloadStore', () => ({
     downloadEpub: mocks.downloadEpub,
     downloadImages: mocks.downloadImages,
   }),
+}))
+
+vi.mock('../../api/client', () => ({
+  api: {
+    getVolumeCovers: mocks.getVolumeCovers,
+  },
 }))
 
 import BookDetailPage from '../BookDetailPage'
@@ -52,6 +60,8 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.book.volumes = {}
+  mocks.getVolumeCovers.mockResolvedValue({ covers: {} })
   useToastStore.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -63,7 +73,7 @@ afterEach(async () => {
   container.remove()
 })
 
-describe('BookDetailPage empty volumes', () => {
+describe('BookDetailPage', () => {
   it('shows one warning and offers deterministic retry and search actions', async () => {
     await act(async () => root.render(
       <MemoryRouter
@@ -94,5 +104,45 @@ describe('BookDetailPage empty volumes', () => {
     await act(async () => backToSearch?.click())
     expect(container.textContent).toContain('检索页')
     expect(useToastStore.getState().items).toHaveLength(1)
+  })
+
+  it('resolves each selected volume cover before enqueueing tasks', async () => {
+    mocks.book.volumes = { '第一卷': [], '第二卷': [] }
+    mocks.getVolumeCovers.mockResolvedValue({
+      covers: {
+        '第一卷': 'https://example.com/volume-1.jpg',
+        '第二卷': 'https://example.com/volume-2.jpg',
+      },
+    })
+    await act(async () => root.render(
+      <MemoryRouter
+        initialEntries={['/book/3057']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/download" element={<div>下载页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const dividedTab = [...container.querySelectorAll('button')]
+      .find((item) => item.textContent === '分卷下载')
+    await act(async () => dividedTab?.click())
+    const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    await act(async () => checkboxes.forEach((checkbox) => checkbox.click()))
+    const download = [...container.querySelectorAll('button')]
+      .find((item) => item.textContent?.includes('下载选中的 2 卷'))
+    await act(async () => {
+      download?.click()
+      await Promise.resolve()
+    })
+
+    expect(mocks.getVolumeCovers).toHaveBeenCalledWith('3057', ['第一卷', '第二卷'])
+    expect(mocks.downloadEpub.mock.calls).toEqual([
+      ['3057', '测试作品', 'https://example.com/volume-1.jpg', '第一卷'],
+      ['3057', '测试作品', 'https://example.com/volume-2.jpg', '第二卷'],
+    ])
+    expect(container.textContent).toContain('下载页')
   })
 })

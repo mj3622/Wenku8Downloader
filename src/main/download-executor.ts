@@ -4,6 +4,7 @@ import type { CrawlerRequestControlFactory } from './crawler'
 import {
   Downloader,
   NoUsableDownloadContentError,
+  selectVolumeCoverUrl,
   resolveDownloadRoot,
   type DownloaderBook,
   type DownloaderCrawler,
@@ -25,6 +26,7 @@ import type { DownloadTask } from '../shared/ipc-types'
 export interface DownloadExecutionContext {
   signal: AbortSignal
   onProgress(progress: DownloadProgress): void
+  onVolumeCover?(cover: string): void
 }
 
 export interface DownloadExecutionResult {
@@ -170,6 +172,7 @@ export function createDownloadExecutor(
       const downloader = createRunner(dependencies.crawler, runtimeConfig, {
         logContext: { operationId: task.id, taskId: task.id },
         signal: context.signal,
+        onVolumeCover: context.onVolumeCover,
         rateLimiter,
       })
       downloader.setOnProgress(publishProgress)
@@ -189,6 +192,12 @@ export function createDownloadExecutor(
         if (volumeIndex < 0 || !urls?.length) {
           throw new NoUsableDownloadContentError(`该卷没有可保存的插图: ${task.volume}`)
         }
+        const cover = selectVolumeCoverUrl(
+          urls,
+          runtimeConfig.defaultCoverIndex,
+          book.baseChapterUrl,
+        )
+        if (cover) context.onVolumeCover?.(cover)
         await downloader.downloadPictures(
           urls,
           task.volume,

@@ -32,6 +32,7 @@ export interface DownloaderOptions {
   rateLimiter?: DownloadRateLimiter
   logContext?: DownloaderLogContext
   signal?: AbortSignal
+  onVolumeCover?: (cover: string) => void
 }
 
 export type DownloaderCrawler = Pick<WebCrawler, 'fetch' | 'getImageContent'>
@@ -73,6 +74,36 @@ export function buildBookKey(bookTitle: string, bookId: string): string {
 
 export function buildVolumeKey(volumeName: string, volumeIndex: number): string {
   return `${volumeIndex + 1}_${safePathSegment(volumeName, 'volume')}`
+}
+
+export function normalizeVolumeCoverUrl(
+  rawCover: string | undefined,
+  baseUrl?: string,
+): string | undefined {
+  if (!rawCover || rawCover.length > 2_048) return undefined
+  try {
+    let cover: URL
+    try {
+      cover = new URL(rawCover)
+    } catch {
+      if (!baseUrl) return undefined
+      const absoluteBaseUrl = baseUrl.startsWith('//') ? `https:${baseUrl}` : baseUrl
+      cover = new URL(rawCover, absoluteBaseUrl)
+    }
+    if (cover.protocol !== 'http:' && cover.protocol !== 'https:') return undefined
+    const normalized = cover.toString()
+    return normalized.length <= 2_048 ? normalized : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function selectVolumeCoverUrl(
+  urls: readonly string[] | null | undefined,
+  coverIndex: number,
+  baseUrl?: string,
+): string | undefined {
+  return normalizeVolumeCoverUrl(urls?.[coverIndex], baseUrl)
 }
 
 interface AtomicDownloadFileOps {
@@ -354,6 +385,7 @@ export class Downloader {
   private readonly rateLimiter: DownloadRateLimiter
   private readonly logContext: DownloaderLogContext
   private readonly signal?: AbortSignal
+  private readonly onVolumeCover?: (cover: string) => void
   private readonly warnings: string[] = []
   private onProgress: ((p: DownloadProgress) => void) | null = null
   private lastProgress: DownloadProgress | null = null
@@ -369,18 +401,22 @@ export class Downloader {
       this.rateLimiter = optionsOrRateLimiter
       this.logContext = {}
       this.signal = undefined
+      this.onVolumeCover = undefined
     } else if (
       'rateLimiter' in optionsOrRateLimiter
       || 'logContext' in optionsOrRateLimiter
       || 'signal' in optionsOrRateLimiter
+      || 'onVolumeCover' in optionsOrRateLimiter
     ) {
       this.rateLimiter = optionsOrRateLimiter.rateLimiter ?? sharedDownloadRateLimiter
       this.logContext = { ...optionsOrRateLimiter.logContext }
       this.signal = optionsOrRateLimiter.signal
+      this.onVolumeCover = optionsOrRateLimiter.onVolumeCover
     } else {
       this.rateLimiter = sharedDownloadRateLimiter
       this.logContext = { ...(optionsOrRateLimiter as DownloaderLogContext) }
       this.signal = undefined
+      this.onVolumeCover = undefined
     }
   }
 
@@ -734,6 +770,20 @@ export class Downloader {
       illustrationError = illustration.error
       if (urls?.length) {
         illustrationUrls = urls
+        const cover = selectVolumeCoverUrl(
+          urls,
+          this.runtimeConfig.defaultCoverIndex,
+          book.baseChapterUrl,
+        )
+        if (cover) {
+          this.onVolumeCover?.(cover)
+          logger.debug('download.volume-cover.selected', '已选择分卷封面', {
+            ...this.logContext,
+            bookId,
+            volumeName,
+            coverIndex: this.runtimeConfig.defaultCoverIndex,
+          })
+        }
       } else if (illustrationError !== undefined) {
         illustrationWarning = `“${volumeName}”的插图页无法读取，正文内容仍会保存。`
       } else if (urls === null) {

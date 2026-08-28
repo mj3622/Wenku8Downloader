@@ -10,6 +10,7 @@ import type {
   EnqueueDownloadInput,
   LogStats,
   OpenFolderTarget,
+  VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 import {
   toUserFacingError,
@@ -54,6 +55,8 @@ export const api = {
   // 书籍
   getBook: (id: string) => invoke('book', () => window.electronAPI.getBook(id)),
   getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
+  getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
+    invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
 
   // 下载
   getDownloadSnapshot: () =>

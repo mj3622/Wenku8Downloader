@@ -24,6 +24,7 @@ import {
   Downloader,
   downloadImageBatch,
   guessType,
+  selectVolumeCoverUrl,
   type DownloaderBook,
   type DownloaderCrawler,
   type DownloadRuntimeConfig,
@@ -90,6 +91,16 @@ describe('buildBookKey', () => {
     expect(first).toBe('100_作品_A')
     expect(second).toBe('200_作品_A')
     expect(first).not.toBe(second)
+  })
+})
+
+describe('selectVolumeCoverUrl', () => {
+  it('uses the configured candidate and normalizes it against the chapter base URL', () => {
+    expect(selectVolumeCoverUrl(
+      ['covers/first.jpg', 'covers/second.jpg'],
+      1,
+      'https://www.wenku8.net/novel/2/200/',
+    )).toBe('https://www.wenku8.net/novel/2/200/covers/second.jpg')
   })
 })
 
@@ -948,6 +959,46 @@ describe('Downloader.downloadNovel', () => {
     try {
       await downloader.downloadNovel(book, '第一卷')
       expect(getImageContent).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the selected-volume cover before downloading all EPUB illustrations', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-volume-cover-metadata-'))
+    let releaseLastImage!: (value: Buffer) => void
+    const lastImage = new Promise<Buffer>((resolve) => { releaseLastImage = resolve })
+    const imageUrls = [
+      '../../images/200/9-cover.jpg',
+      ...Array.from({ length: 4 }, (_, index) => `https://example.com/${index + 2}.jpg`),
+      'https://example.com/slow-last.jpg',
+    ]
+    const book = createBookFixture({
+      baseChapterUrl: '//www.wenku8.net/novel/2/200/',
+      volumes: { '第九卷': [{ name: '插图', link: 'illust.htm' }] },
+      getChapterImageUrls: async () => imageUrls,
+    })
+    const onVolumeCover = vi.fn()
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async (url: string) => (
+        url.endsWith('slow-last.jpg') ? lastImage : Buffer.from('volume-image')
+      )),
+    }), runtimeConfig(root), {
+      rateLimiter: new DownloadRateLimiter(() => undefined),
+      onVolumeCover,
+    })
+
+    try {
+      let settled = false
+      const download = downloader.downloadNovel(book, '第九卷').finally(() => { settled = true })
+
+      await vi.waitFor(() => expect(onVolumeCover).toHaveBeenCalledWith(
+        'https://www.wenku8.net/novel/images/200/9-cover.jpg',
+      ))
+      expect(settled).toBe(false)
+
+      releaseLastImage(Buffer.from('last-image'))
+      await download
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -28,7 +28,7 @@ function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
 function book(overrides: Partial<DownloadExecutorBook> = {}): DownloadExecutorBook {
   return {
     bookId: '100',
-    baseChapterUrl: 'https://www.wenku8.net/novel/1/100/',
+    baseChapterUrl: '//www.wenku8.net/novel/1/100/',
     volumes: { '第一卷': [{ name: '插图', link: 'illustrations.htm' }] },
     pictureUrls: { '第一卷': 'illustrations.htm' },
     basicInfo: {
@@ -106,10 +106,12 @@ describe('createDownloadExecutor', () => {
     const { executor, createDownloader, downloadNovel, setOnProgress } = setup()
     const controller = new AbortController()
     const onProgress = vi.fn()
+    const onVolumeCover = vi.fn()
 
     await expect(executor.execute(task(), {
       signal: controller.signal,
       onProgress,
+      onVolumeCover,
     })).resolves.toEqual({ warnings: [] })
 
     expect(createDownloader).toHaveBeenCalledWith(
@@ -126,6 +128,7 @@ describe('createDownloadExecutor', () => {
           taskId: '123e4567-e89b-42d3-a456-426614174000',
         },
         signal: controller.signal,
+        onVolumeCover,
         rateLimiter: expect.anything(),
       },
     )
@@ -182,10 +185,12 @@ describe('createDownloadExecutor', () => {
     const targetBook = book()
     const { executor, downloadPictures } = setup(targetBook)
     const controller = new AbortController()
+    const onVolumeCover = vi.fn()
 
     await executor.execute(task({ type: 'images', volume: '第一卷' }), {
       signal: controller.signal,
       onProgress: vi.fn<(progress: DownloadProgress) => void>(),
+      onVolumeCover,
     })
 
     expect(targetBook.getChapterImageUrls).toHaveBeenCalledWith('第一卷', controller.signal)
@@ -196,6 +201,7 @@ describe('createDownloadExecutor', () => {
       '100',
       0,
     )
+    expect(onVolumeCover).toHaveBeenCalledWith('https://example.com/1.jpg')
   })
 
   it('keeps partial warnings while downloading images for all volumes', async () => {

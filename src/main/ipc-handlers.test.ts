@@ -36,6 +36,9 @@ const mocks = vi.hoisted(() => {
     removeDownload: vi.fn(),
     clearDownloadHistory: vi.fn(),
     importLegacyDownloadHistory: vi.fn(),
+    resolveVolumeCovers: vi.fn(async () => ({
+      '第一卷': 'https://example.com/volume-1.jpg',
+    })),
     subscribeDownloads: vi.fn((listener: (event: unknown) => void) => {
       mocks.downloadSubscriber = listener
       return vi.fn()
@@ -160,6 +163,7 @@ function createServices(
       get: vi.fn(() => bookPromise),
       clear: vi.fn(),
     },
+    resolveVolumeCovers: mocks.resolveVolumeCovers,
     downloads: {
       getSnapshot: mocks.getDownloadSnapshot,
       enqueue: mocks.enqueueDownload,
@@ -406,6 +410,21 @@ describe('registerIpcHandlers application operations', () => {
     expect(mocks.logger.info).not.toHaveBeenCalled()
   })
 
+  it('validates and resolves selected volume covers through the main process', async () => {
+    await expect(invoke('book:volume-covers', {}, {
+      bookId: '3057',
+      volumes: ['第一卷', '第一卷'],
+    })).resolves.toEqual({
+      covers: { '第一卷': 'https://example.com/volume-1.jpg' },
+    })
+
+    expect(mocks.resolveVolumeCovers).toHaveBeenCalledWith('3057', ['第一卷'])
+    await expect(invoke('book:volume-covers', {}, {
+      bookId: '3057',
+      volumes: [],
+    })).rejects.toThrow('分卷列表')
+  })
+
   it('logs failed operations with safe context and duration', async () => {
     vi.mocked(services.crawler.search).mockRejectedValueOnce(new Error('HTTP 503'))
 
@@ -468,6 +487,18 @@ describe('registerIpcHandlers application operations', () => {
       type: 'epub_volume',
       volume: '第一卷',
     } as const
+    mocks.enqueueDownload.mockReturnValueOnce({
+      revision: 2,
+      tasks: [{
+        id: taskId,
+        ...enqueueInput,
+        status: 'pending',
+        progress: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+      legacyImportCompleted: true,
+    })
 
     await invoke('download:get-snapshot', {})
     await invoke('download:enqueue', {}, enqueueInput)

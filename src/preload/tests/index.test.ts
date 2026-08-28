@@ -28,6 +28,7 @@ import '../index'
 type ExposedApi = DownloadApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
+  getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
 }
 
 const exposedApi = (
@@ -73,6 +74,17 @@ describe('preload download boundary', () => {
 
     await expect(exposedApi.getLogStats()).resolves.toBe(result)
     expect(mocks.invoke).toHaveBeenCalledWith('logs:get-stats')
+  })
+
+  it('requests selected volume covers through the fixed channel', async () => {
+    const result = { covers: { '第一卷': 'https://example.com/1.jpg' } }
+    mocks.invoke.mockResolvedValue(result)
+
+    await expect(exposedApi.getVolumeCovers('3057', ['第一卷'])).resolves.toBe(result)
+    expect(mocks.invoke).toHaveBeenCalledWith('book:volume-covers', {
+      bookId: '3057',
+      volumes: ['第一卷'],
+    })
   })
 
   it('forwards task and history mutation payloads', async () => {

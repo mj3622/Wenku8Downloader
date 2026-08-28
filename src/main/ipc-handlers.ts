@@ -21,6 +21,7 @@ import {
   validateLoginOperationId,
   validateOpenFolder,
   validateSearchQuery,
+  validateVolumeNames,
 } from './ipc-validation'
 import type { LogContext } from './logging/file-logger'
 import {
@@ -61,6 +62,7 @@ export interface IpcServices {
     get(bookId: string): Promise<IpcBook>
     clear(): void
   }
+  resolveVolumeCovers(bookId: string, volumes: string[]): Promise<Record<string, string>>
   downloads: Pick<
     DownloadManager,
     | 'getSnapshot'
@@ -261,6 +263,17 @@ export function registerIpcHandlers(services: IpcServices): void {
       const book = await services.books.get(bookId)
       context.volumeCount = Object.keys(book.pictureUrls).length
       return { images: book.pictureUrls }
+    })
+  })
+
+  ipcMain.handle('book:volume-covers', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('book.volume-covers', context, async () => {
+      const payload = requirePayload(rawPayload)
+      const bookId = validateBookId(payload.bookId)
+      const volumes = validateVolumeNames(payload.volumes)
+      Object.assign(context, { bookId, volumeCount: volumes.length })
+      return { covers: await services.resolveVolumeCovers(bookId, volumes) }
     })
   })
 
