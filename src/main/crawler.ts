@@ -463,7 +463,7 @@ export class WebCrawler {
       throw new Error('搜索过于频繁，请等待片刻再试')
     }
 
-    if ($('#content table.grid').length > 0) {
+    if (title.includes('搜索结果')) {
       return this.searchMultiResult($)
     }
     return this.searchSingleResult($)
@@ -511,7 +511,12 @@ export class WebCrawler {
     const title = $('title').text()
     const pageTitle = title.split('-')[0]?.trim() || ''
     const myUrl = ($ as unknown as Record<string, string>).myUrl || ''
-    const bookId = myUrl.split('/book/')[1]?.split('.')[0] || ''
+    const bookcaseHref = $('#content a[href*="/modules/article/addbookcase.php?bid="]')
+      .first()
+      .attr('href') || ''
+    const bookId = myUrl.split('/book/')[1]?.split('.')[0]
+      || bookcaseHref.match(/[?&]bid=(\d+)/)?.[1]
+      || ''
     const cover = $('#content img').first().attr('src') || ''
     const infoTable = $('#content table')
     let author = ''

@@ -223,6 +223,49 @@ describe('WebCrawler.search', () => {
     }])
   })
 
+  it('treats a single book page with recommendation grids as a single result', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    const page = load(`
+      <html>
+        <title>败北女角太多了！(败犬女主太多了！) - 雨森焚火 - 小学馆 - 轻小说文库</title>
+        <body>
+          <div id="content">
+            <img src="cover.jpg">
+            <a href="https://www.wenku8.net/modules/article/addbookcase.php?bid=3057">加入书架</a>
+            <table>
+              <tr><td>败北女角太多了！</td></tr>
+              <tr><td>作品信息</td></tr>
+              <tr>
+                <td>小说分类：小学馆</td>
+                <td>作者：雨森焚火</td>
+                <td>状态：连载中</td>
+              </tr>
+            </table>
+            <table class="grid"><tr><td><div>
+              <a href="/book/3745.htm" title="推荐作品"><img src="recommendation.jpg"></a>
+              <p>作者:其他作者</p>
+              <p>连载中</p>
+            </div></td></tr></table>
+          </div>
+        </body>
+      </html>
+    `)
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(page as unknown as Buffer)
+
+    await expect(crawler.search('败犬女主', 'title')).resolves.toEqual([{
+      title: '败北女角太多了！(败犬女主太多了！)',
+      cover: 'cover.jpg',
+      id: '3057',
+      author: '雨森焚火',
+      status: '连载中',
+      updateTime: '',
+      wordCount: '',
+      isAnimated: false,
+      tags: '',
+      desc: '',
+    }])
+  })
+
   it('keeps parser diagnostics internal when the search page is incomplete', async () => {
     const crawler = new WebCrawler(createConfig(), {})
     vi.spyOn(crawler, 'fetch').mockResolvedValue(
