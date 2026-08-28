@@ -45,6 +45,32 @@ afterEach(async () => {
 })
 
 describe('SearchResultList', () => {
+  it('separates compact search metadata into readable rows and badges', async () => {
+    await act(async () => {
+      root.render(
+        <SearchResultList
+          results={[{
+            id: '3057',
+            title: '败北女角太多了！',
+            cover: '',
+            author: '雨森焚火',
+            status: '连载中',
+            updateTime: '2026-07-19',
+            wordCount: '1271K',
+            isAnimated: true,
+          }]}
+          onSelect={vi.fn()}
+        />,
+      )
+    })
+
+    expect(container.textContent).toContain('雨森焚火')
+    expect(container.textContent).toContain('连载中')
+    expect(container.textContent).toContain('1271K')
+    expect(container.textContent).toContain('2026-07-19 更新')
+    expect(container.textContent).toContain('已动画化')
+  })
+
   it('replaces a cover with a readable placeholder after retries are exhausted', async () => {
     await act(async () => {
       root.render(

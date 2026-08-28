@@ -173,6 +173,56 @@ describe('WebCrawler.fetch logging', () => {
 })
 
 describe('WebCrawler.search', () => {
+  it('encodes title keywords as GBK for the Wenku8 search endpoint', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    const fetch = vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(
+        '<html><title>搜索结果</title><body><div id="content"><table class="grid"></table></div></body></html>',
+      ) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('败犬', 'title')).resolves.toEqual([])
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=%b0%dc%c8%ae',
+    )
+  })
+
+  it('returns structured metadata from multi-result status text', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(`
+        <html>
+          <title>“败犬”搜索结果</title>
+          <body>
+            <div id="content">
+              <table class="grid"><tr><td><div>
+                <a href="/book/3057.htm" title="败北女角太多了！"><img src="cover.jpg"></a>
+                <p>作者:雨森焚火/分类:小学馆</p>
+                <p>更新:2026-07-19/字数:1271K/连载中/已动画化</p>
+                <p>Tags:校园 青春</p>
+                <p>简介:测试简介</p>
+              </div></td></tr></table>
+            </div>
+          </body>
+        </html>
+      `) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('败犬', 'title')).resolves.toEqual([{
+      title: '败北女角太多了！',
+      cover: 'cover.jpg',
+      id: '3057',
+      author: '雨森焚火',
+      status: '连载中',
+      updateTime: '2026-07-19',
+      wordCount: '1271K',
+      isAnimated: true,
+      tags: '校园 青春',
+      desc: '测试简介',
+    }])
+  })
+
   it('keeps parser diagnostics internal when the search page is incomplete', async () => {
     const crawler = new WebCrawler(createConfig(), {})
     vi.spyOn(crawler, 'fetch').mockResolvedValue(

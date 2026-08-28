@@ -82,6 +82,38 @@ function encodeKey(key: string): string {
   return result
 }
 
+function parseSearchStatus(statusText: string) {
+  const metadata = {
+    status: '',
+    updateTime: '',
+    wordCount: '',
+    isAnimated: false,
+  }
+
+  for (const part of statusText.split('/').map((value) => value.trim()).filter(Boolean)) {
+    const updateMatch = part.match(/^更新[:：]\s*(.+)$/)
+    if (updateMatch) {
+      metadata.updateTime = updateMatch[1].trim()
+      continue
+    }
+
+    const wordCountMatch = part.match(/^字数[:：]\s*(.+)$/)
+    if (wordCountMatch) {
+      metadata.wordCount = wordCountMatch[1].trim()
+      continue
+    }
+
+    if (part === '已动画化') {
+      metadata.isAnimated = true
+      continue
+    }
+
+    if (!metadata.status) metadata.status = part
+  }
+
+  return metadata
+}
+
 export class WebCrawler {
   private cookies: Record<string, string>
   constructor(
@@ -451,21 +483,22 @@ export class WebCrawler {
       const ps = $(div).find('p')
       const p1 = ps.eq(0).text()
       const statusText = ps.eq(1).text()
+      const statusMetadata = parseSearchStatus(statusText)
       const tags = ps.eq(2).text().replace('Tags:', '').trim()
       const desc = ps.eq(3).text().replace('简介:', '').trim()
 
       const authorPart = p1.split('/').find((s: string) => s.includes('作者:')) || ''
       const author = authorPart.replace('作者:', '').trim()
-      const updatePart = p1.split('/').find((s: string) => s.includes('更新:')) || ''
-      const updateTime = updatePart.replace('更新:', '').trim()
 
       results.push({
         title: titleText,
         cover,
         id: bookId,
         author,
-        status: statusText.trim(),
-        updateTime,
+        status: statusMetadata.status,
+        updateTime: statusMetadata.updateTime,
+        wordCount: statusMetadata.wordCount,
+        isAnimated: statusMetadata.isAnimated,
         tags,
         desc,
       })
@@ -507,6 +540,8 @@ export class WebCrawler {
         author,
         status,
         updateTime: '',
+        wordCount: '',
+        isAnimated: false,
         tags: '',
         desc,
       })

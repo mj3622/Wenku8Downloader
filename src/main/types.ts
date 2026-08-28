@@ -5,6 +5,8 @@ export interface SearchResult {
   author: string
   status: string
   updateTime: string
+  wordCount: string
+  isAnimated: boolean
   tags: string
   desc: string
 }
