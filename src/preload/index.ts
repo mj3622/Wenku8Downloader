@@ -11,8 +11,10 @@ import type {
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
+  LogStats,
   OpenFolderTarget,
   RendererErrorReport,
+  VolumeCoverSnapshot,
 } from '../shared/ipc-types'
 
 const configApi: ConfigApi = {
@@ -57,6 +59,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
   getBook: (bookId: string) => ipcRenderer.invoke('book:get', { bookId }),
   getBookImages: (bookId: string) => ipcRenderer.invoke('book:images', { bookId }),
+  getVolumeCovers: (bookId: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
+    ipcRenderer.invoke('book:volume-covers', { bookId, volumes }),
   onCookieProgress: (callback: (data: CookieProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: CookieProgress) => callback(data)
     ipcRenderer.on('cookie:progress', listener)
@@ -64,6 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openFolder: (target: OpenFolderTarget) => ipcRenderer.invoke('shell:openFolder', target),
   openLogFolder: () => ipcRenderer.invoke('logs:open-directory'),
+  getLogStats: (): Promise<LogStats> => ipcRenderer.invoke('logs:get-stats'),
   reportRendererError: (report: RendererErrorReport) =>
     ipcRenderer.send('log:renderer-error', report),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),

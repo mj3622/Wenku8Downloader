@@ -2,8 +2,10 @@ import type { ConfigApi } from '../../../shared/config-types'
 import type {
   CookieProgress,
   DownloadApi,
+  LogStats,
   OpenFolderTarget,
   RendererErrorReport,
+  VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 
 export interface ElectronAPI extends ConfigApi, DownloadApi {
@@ -13,9 +15,11 @@ export interface ElectronAPI extends ConfigApi, DownloadApi {
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
   getBook: (bookId: string) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
+  getVolumeCovers: (bookId: string, volumes: string[]) => Promise<VolumeCoverSnapshot>
   onCookieProgress: (callback: (data: CookieProgress) => void) => () => void
   openFolder: (target: OpenFolderTarget) => Promise<void>
   openLogFolder: () => Promise<void>
+  getLogStats: () => Promise<LogStats>
   reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>

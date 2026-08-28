@@ -40,7 +40,9 @@ export default function Layout() {
           <div className="flex items-center gap-3">
             <img src={logoUrl} alt="" aria-hidden="true" className="w-10 h-10" />
             <div>
-              <p className="text-[17px] font-bold tracking-tight">文库下载器</p>
+              <p className="whitespace-nowrap text-[15px] font-bold tracking-tight">
+                轻小说文库下载器
+              </p>
               <p className="text-[12px] text-apple-tertiary">Wenku8 Downloader</p>
             </div>
           </div>

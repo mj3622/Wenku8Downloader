@@ -17,6 +17,7 @@ beforeEach(() => {
     loading: false,
     error: null,
     hasSearched: false,
+    lastType: null,
     lastQuery: null,
   })
   useToastStore.getState().clear()
@@ -88,6 +89,7 @@ describe('searchStore', () => {
       loading: false,
       error: null,
       hasSearched: false,
+      lastType: null,
       lastQuery: null,
     })
   })

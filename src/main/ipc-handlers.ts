@@ -21,9 +21,15 @@ import {
   validateLoginOperationId,
   validateOpenFolder,
   validateSearchQuery,
+  validateVolumeNames,
 } from './ipc-validation'
 import type { LogContext } from './logging/file-logger'
-import { configureLogger, getLogDirectory, logger } from './logging/logger'
+import {
+  configureLogger,
+  getLogDirectory,
+  getLogStats,
+  logger,
+} from './logging/logger'
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
 
 function requirePayload(value: unknown): Record<string, unknown> {
@@ -56,6 +62,7 @@ export interface IpcServices {
     get(bookId: string): Promise<IpcBook>
     clear(): void
   }
+  resolveVolumeCovers(bookId: string, volumes: string[]): Promise<Record<string, string>>
   downloads: Pick<
     DownloadManager,
     | 'getSnapshot'
@@ -259,6 +266,17 @@ export function registerIpcHandlers(services: IpcServices): void {
     })
   })
 
+  ipcMain.handle('book:volume-covers', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('book.volume-covers', context, async () => {
+      const payload = requirePayload(rawPayload)
+      const bookId = validateBookId(payload.bookId)
+      const volumes = validateVolumeNames(payload.volumes)
+      Object.assign(context, { bookId, volumeCount: volumes.length })
+      return { covers: await services.resolveVolumeCovers(bookId, volumes) }
+    })
+  })
+
   ipcMain.handle('download:get-snapshot', () => runLoggedOperation(
     'download.get-snapshot',
     {},
@@ -353,6 +371,13 @@ export function registerIpcHandlers(services: IpcServices): void {
       const error = await shell.openPath(directory)
       if (error) throw new Error(`打开日志目录失败: ${error}`)
     },
+  ))
+
+  ipcMain.handle('logs:get-stats', () => runLoggedOperation(
+    'logs.get-stats',
+    {},
+    () => getLogStats(),
+    { logStart: false, logSuccess: false },
   ))
 
   ipcMain.handle('dialog:selectFolder', () => {

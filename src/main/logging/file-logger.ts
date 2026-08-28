@@ -205,6 +205,10 @@ export class FileLogger implements LoggerLike {
     return this.options.directory
   }
 
+  getTotalSizeBytes(): number {
+    return this.listManagedFiles().reduce((total, file) => total + file.size, 0)
+  }
+
   private write(
     level: LogLevel,
     event: string,

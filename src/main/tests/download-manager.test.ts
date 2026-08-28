@@ -151,6 +151,57 @@ describe('DownloadManager scheduling', () => {
     expect(manager.getSnapshot().tasks[0].title).toBe('测试作品')
   })
 
+  it('coalesces frequent progress snapshot publications', async () => {
+    vi.useFakeTimers()
+    const execution = deferred<DownloadExecutionResult>()
+    const { manager, executor } = setup()
+    let context: DownloadExecutionContext | undefined
+    executor.execute.mockImplementation((_task, value) => {
+      context = value
+      return execution.promise
+    })
+    const listener = vi.fn()
+    manager.subscribe(listener)
+    manager.enqueue(input())
+    listener.mockClear()
+
+    context?.onProgress({ current: 1, total: 10, phase: '下载中' })
+    context?.onProgress({ current: 2, total: 10, phase: '下载中' })
+
+    expect(listener).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0][0].snapshot.tasks[0]).toMatchObject({
+      progress: 20,
+      phase: '下载中',
+    })
+
+    execution.resolve({ warnings: [] })
+    await vi.runAllTimersAsync()
+  })
+
+  it('persists an active task cover as task metadata immediately', () => {
+    const execution = deferred<DownloadExecutionResult>()
+    const { manager, executor, saved } = setup()
+    let context: DownloadExecutionContext | undefined
+    executor.execute.mockImplementation((_task, value) => {
+      context = value
+      return execution.promise
+    })
+    manager.enqueue(input({
+      type: 'epub_volume',
+      volume: '第九卷',
+      cover: 'https://example.com/book-cover.jpg',
+    }))
+
+    context?.onVolumeCover?.('https://example.com/volume-9-cover.jpg')
+
+    expect(manager.getSnapshot().tasks[0].cover)
+      .toBe('https://example.com/volume-9-cover.jpg')
+    expect(saved.at(-1)?.tasks[0].cover)
+      .toBe('https://example.com/volume-9-cover.jpg')
+  })
+
   it('cancels a queued task without executing it', async () => {
     const first = deferred<DownloadExecutionResult>()
     const { manager, executor } = setup()

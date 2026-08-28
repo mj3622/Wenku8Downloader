@@ -11,6 +11,7 @@ export type FeedbackContext =
   | 'download-warning'
   | 'open-folder'
   | 'open-log-folder'
+  | 'log-stats'
   | 'select-folder'
   | 'open-external'
   | 'unexpected'
@@ -74,6 +75,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   'open-log-folder': {
     title: '无法打开日志目录',
     message: '请稍后重试，或重启应用后再次打开。',
+  },
+  'log-stats': {
+    title: '无法读取日志占用',
+    message: '暂时无法读取日志占用空间，请稍后重试。',
   },
   'select-folder': {
     title: '无法选择文件夹',

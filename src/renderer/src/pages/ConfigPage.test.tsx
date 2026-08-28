@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   }),
   openFolder: vi.fn(),
   openLogFolder: vi.fn(),
+  getLogStats: vi.fn(),
   selectFolder: vi.fn(),
 }))
 
@@ -181,6 +182,7 @@ beforeEach(() => {
   mocks.getCookieProgress.mockReturnValue(() => undefined)
   mocks.openFolder.mockResolvedValue(undefined)
   mocks.openLogFolder.mockResolvedValue(undefined)
+  mocks.getLogStats.mockResolvedValue({ totalSizeBytes: 1.5 * 1024 * 1024 })
   mocks.selectFolder.mockResolvedValue(null)
   useConfigStore.setState({
     snapshot: null,
@@ -805,6 +807,26 @@ describe('ConfigPage', () => {
     await click(button('打开日志目录'))
 
     expect(mocks.openLogFolder).toHaveBeenCalledWith()
+  })
+
+  it('shows the current total size of managed logs', async () => {
+    await renderPage()
+    expect(mocks.getLogStats).not.toHaveBeenCalled()
+
+    await click(button('日志'))
+
+    expect(mocks.getLogStats).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('日志仅保存在本机 · 当前占用：1.5 MB')
+  })
+
+  it('keeps logging settings usable when log size cannot be read', async () => {
+    mocks.getLogStats.mockRejectedValueOnce(new Error('read failed'))
+    await renderPage()
+
+    await click(button('日志'))
+
+    expect(container.textContent).toContain('当前占用暂时不可用')
+    expect(button('打开日志目录').disabled).toBe(false)
   })
 
   it('renders load failures and retries explicitly', async () => {

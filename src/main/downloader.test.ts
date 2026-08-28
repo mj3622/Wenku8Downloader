@@ -24,6 +24,7 @@ import {
   Downloader,
   downloadImageBatch,
   guessType,
+  selectVolumeCoverUrl,
   type DownloaderBook,
   type DownloaderCrawler,
   type DownloadRuntimeConfig,
@@ -93,6 +94,16 @@ describe('buildBookKey', () => {
   })
 })
 
+describe('selectVolumeCoverUrl', () => {
+  it('uses the configured candidate and normalizes it against the chapter base URL', () => {
+    expect(selectVolumeCoverUrl(
+      ['covers/first.jpg', 'covers/second.jpg'],
+      1,
+      'https://www.wenku8.net/novel/2/200/',
+    )).toBe('https://www.wenku8.net/novel/2/200/covers/second.jpg')
+  })
+})
+
 describe('buildVolumeKey', () => {
   it('keeps sanitized volume names unique by their stable index', () => {
     const first = buildVolumeKey('卷:A', 0)
@@ -124,6 +135,38 @@ describe('atomicWriteDownloadFile', () => {
 })
 
 describe('Downloader.downloadPictures', () => {
+  it('resets monotonic progress before starting the next volume', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-volume-progress-'))
+    let now = 0
+    const rateLimiter = new DownloadRateLimiter({
+      now: () => now,
+      sleep: async (delayMs) => { now += delayMs },
+    })
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent: vi.fn(async () => Buffer.from('image')) }),
+      runtimeConfig(root),
+      rateLimiter,
+    )
+    const progress: Array<{ current: number; total: number; phase: string }> = []
+    downloader.setOnProgress((value) => progress.push(value))
+    const urls = Array.from(
+      { length: 5 },
+      (_, index) => `https://example.com/${index + 1}.jpg`,
+    )
+
+    try {
+      await downloader.downloadPictures(urls, '第一卷', '测试作品', '100', 0)
+      await downloader.downloadPictures(urls, '第二卷', '测试作品', '100', 1)
+
+      expect(progress.filter((item) => item.phase.includes('第二卷'))).toEqual([
+        { current: 4, total: 5, phase: '正在下载图片 (第二卷)' },
+        { current: 5, total: 5, phase: '正在下载图片 (第二卷)' },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps completion when cancellation arrives after the final image is committed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-final-picture-'))
     const controller = new AbortController()
@@ -389,13 +432,27 @@ describe('Downloader.downloadPictures', () => {
         '“第一卷”有 1 张插图未能下载，已保存其余插图。',
       )
 
-      expect(getImageContent).toHaveBeenNthCalledWith(1, secretUrl, 1, expect.any(Function))
+      expect(getImageContent).toHaveBeenNthCalledWith(
+        1,
+        secretUrl,
+        1,
+        expect.any(Function),
+        undefined,
+        expect.objectContaining({ beforeAttempt: expect.any(Function) }),
+      )
       expect(rateLimiter.speed.level).toBe(2)
       expect(schedule).toHaveBeenCalledWith(expect.any(Function), 30000)
 
       const nextUrl = 'https://example.com/2.jpg'
       await downloader.downloadPictures([nextUrl], '第二卷', '测试作品', '100', 1)
-      expect(getImageContent).toHaveBeenNthCalledWith(2, nextUrl, 3, expect.any(Function))
+      expect(getImageContent).toHaveBeenNthCalledWith(
+        2,
+        nextUrl,
+        3,
+        expect.any(Function),
+        undefined,
+        expect.objectContaining({ beforeAttempt: expect.any(Function) }),
+      )
       const warningText = warn.mock.calls.flat().join(' ')
       expect(warningText).not.toContain('password')
       expect(warningText).not.toContain('secret-token')
@@ -450,9 +507,63 @@ describe('Downloader.downloadPictures', () => {
         'https://example.com/retried.jpg',
         2,
         expect.any(Function),
+        undefined,
+        expect.objectContaining({ beforeAttempt: expect.any(Function) }),
       )
       expect(rateLimiter.speed.level).toBe(2)
       expect(scheduled.map(({ delayMs }) => delayMs)).toContain(30000)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('routes image attempts through adaptive control and reports a throttle wait', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-pictures-'))
+    const phases: string[] = []
+    const rateLimiter = new DownloadRateLimiter(vi.fn())
+    const getImageContent = vi.fn(async (
+      _url: string,
+      _maxRetries: number,
+      _onStatus?: (status: number) => void,
+      _signal?: AbortSignal,
+      control?: Parameters<DownloaderCrawler['getImageContent']>[4],
+    ) => {
+      await control?.beforeAttempt?.()
+      control?.onResponse?.({ status: 429, latencyMs: 200, retryAfterMs: 7_000 })
+      control?.onResponse?.({ status: 200, latencyMs: 150 })
+      control?.afterAttempt?.()
+      return Buffer.from('image-after-throttle')
+    })
+
+    try {
+      const downloader = new Downloader(
+        createCrawlerFixture({ getImageContent }),
+        runtimeConfig(root),
+        rateLimiter,
+      )
+      downloader.setOnProgress(({ phase }) => phases.push(phase))
+
+      await downloader.downloadPictures(
+        ['https://pic.example/retried.jpg'],
+        '第一卷',
+        '测试作品',
+        '100',
+        0,
+      )
+
+      expect(getImageContent).toHaveBeenCalledWith(
+        'https://pic.example/retried.jpg',
+        1,
+        expect.any(Function),
+        undefined,
+        expect.objectContaining({
+          beforeAttempt: expect.any(Function),
+          afterAttempt: expect.any(Function),
+          onResponse: expect.any(Function),
+          getRetryDelay: expect.any(Function),
+        }),
+      )
+      expect(phases).toContain('服务器限流，已自动减速，约 7 秒后继续')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -497,6 +608,135 @@ describe('Downloader.downloadPictures', () => {
 })
 
 describe('Downloader.downloadNovel', () => {
+  it('routes chapter attempts through adaptive control and reports a throttle wait', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-chapters-'))
+    const phases: string[] = []
+    const rateLimiter = new DownloadRateLimiter(vi.fn())
+    const fetch = vi.fn(async (
+      _url: string,
+      _parse?: boolean,
+      _signal?: AbortSignal,
+      control?: Parameters<DownloaderCrawler['fetch']>[3],
+    ) => {
+      await control?.beforeAttempt?.()
+      control?.onResponse?.({ status: 429, latencyMs: 200, retryAfterMs: 5_000 })
+      control?.onResponse?.({ status: 200, latencyMs: 180 })
+      control?.afterAttempt?.()
+      return load('<div id="content">有效正文</div>')
+    }) as unknown as DownloaderCrawler['fetch']
+    const downloader = new Downloader(
+      createCrawlerFixture({ fetch }),
+      runtimeConfig(root),
+      rateLimiter,
+    )
+    downloader.setOnProgress(({ phase }) => phases.push(phase))
+    const book = createBookFixture({
+      volumes: { '第一卷': [{ name: '第一章', link: '1.htm' }] },
+    })
+
+    try {
+      await downloader.downloadNovel(book, '第一卷')
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://www.wenku8.net/novel/2/200/1.htm',
+        true,
+        undefined,
+        expect.objectContaining({
+          beforeAttempt: expect.any(Function),
+          afterAttempt: expect.any(Function),
+          onResponse: expect.any(Function),
+          getRetryDelay: expect.any(Function),
+        }),
+      )
+      expect(phases).toContain('服务器限流，已自动减速，约 5 秒后继续')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    { label: '整本', volumeName: undefined },
+    { label: '分卷', volumeName: '第一卷' },
+  ])('$label下载会并行请求章节和图片', async ({ volumeName }) => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-parallel-content-'))
+    let resolveImage!: (value: Buffer) => void
+    let resolveChapter!: (value: ReturnType<typeof load>) => void
+    const imageResponse = new Promise<Buffer>((resolve) => { resolveImage = resolve })
+    const chapterResponse = new Promise<ReturnType<typeof load>>((resolve) => {
+      resolveChapter = resolve
+    })
+    const getImageContent = vi.fn(async () => imageResponse)
+    const fetch = vi.fn(async () => chapterResponse) as unknown as DownloaderCrawler['fetch']
+    const downloader = new Downloader(
+      createCrawlerFixture({ fetch, getImageContent }),
+      runtimeConfig(root),
+      new DownloadRateLimiter(vi.fn()),
+    )
+    const book = createBookFixture({
+      volumes: {
+        '第一卷': [
+          { name: '插图', link: 'illust.htm' },
+          { name: '第一章', link: '1.htm' },
+        ],
+      },
+      getChapterImageUrls: async () => ['https://pic.example/1.jpg'],
+    })
+    let task: Promise<void> | undefined
+
+    try {
+      task = downloader.downloadNovel(book, volumeName)
+      await vi.waitFor(() => expect(getImageContent).toHaveBeenCalledTimes(1))
+
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      resolveImage(Buffer.from('image'))
+      resolveChapter(load('<div id="content">有效正文</div>'))
+      await task?.catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('并行下载完成较慢的图片时不会让章节进度倒退', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-parallel-progress-'))
+    let resolveImage!: (value: Buffer) => void
+    const imageResponse = new Promise<Buffer>((resolve) => { resolveImage = resolve })
+    const getImageContent = vi.fn(async () => imageResponse)
+    const fetch = vi.fn(async () => load('<div id="content">有效正文</div>')) as unknown as DownloaderCrawler['fetch']
+    const downloader = new Downloader(
+      createCrawlerFixture({ fetch, getImageContent }),
+      runtimeConfig(root),
+      new DownloadRateLimiter(vi.fn()),
+    )
+    const progressValues: number[] = []
+    downloader.setOnProgress(({ current }) => progressValues.push(current))
+    const book = createBookFixture({
+      volumes: {
+        '第一卷': [
+          { name: '插图', link: 'illust.htm' },
+          { name: '第一章', link: '1.htm' },
+          { name: '第二章', link: '2.htm' },
+        ],
+      },
+      getChapterImageUrls: async () => ['https://pic.example/1.jpg'],
+    })
+    let task: Promise<void> | undefined
+
+    try {
+      task = downloader.downloadNovel(book, '第一卷')
+      await vi.waitFor(() => expect(progressValues).toContain(2))
+      resolveImage(Buffer.from('image'))
+      await task
+
+      expect(progressValues.every((value, index) => (
+        index === 0 || value >= progressValues[index - 1]
+      ))).toBe(true)
+    } finally {
+      resolveImage(Buffer.from('image'))
+      await task?.catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     {
       label: '整本',
@@ -719,6 +959,46 @@ describe('Downloader.downloadNovel', () => {
     try {
       await downloader.downloadNovel(book, '第一卷')
       expect(getImageContent).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reports the selected-volume cover before downloading all EPUB illustrations', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-volume-cover-metadata-'))
+    let releaseLastImage!: (value: Buffer) => void
+    const lastImage = new Promise<Buffer>((resolve) => { releaseLastImage = resolve })
+    const imageUrls = [
+      '../../images/200/9-cover.jpg',
+      ...Array.from({ length: 4 }, (_, index) => `https://example.com/${index + 2}.jpg`),
+      'https://example.com/slow-last.jpg',
+    ]
+    const book = createBookFixture({
+      baseChapterUrl: '//www.wenku8.net/novel/2/200/',
+      volumes: { '第九卷': [{ name: '插图', link: 'illust.htm' }] },
+      getChapterImageUrls: async () => imageUrls,
+    })
+    const onVolumeCover = vi.fn()
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async (url: string) => (
+        url.endsWith('slow-last.jpg') ? lastImage : Buffer.from('volume-image')
+      )),
+    }), runtimeConfig(root), {
+      rateLimiter: new DownloadRateLimiter(() => undefined),
+      onVolumeCover,
+    })
+
+    try {
+      let settled = false
+      const download = downloader.downloadNovel(book, '第九卷').finally(() => { settled = true })
+
+      await vi.waitFor(() => expect(onVolumeCover).toHaveBeenCalledWith(
+        'https://www.wenku8.net/novel/images/200/9-cover.jpg',
+      ))
+      expect(settled).toBe(false)
+
+      releaseLastImage(Buffer.from('last-image'))
+      await download
     } finally {
       await rm(root, { recursive: true, force: true })
     }

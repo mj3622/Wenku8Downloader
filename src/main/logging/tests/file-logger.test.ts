@@ -173,6 +173,16 @@ describe('FileLogger', () => {
     expect(fallback).not.toHaveBeenCalled()
   })
 
+  it('reports the total size of managed log files only', async () => {
+    await writeFile(join(root, 'app-2026-08-22.log'), Buffer.alloc(1200))
+    await writeFile(join(root, 'error-2026-08-22.log'), Buffer.alloc(800))
+    await writeFile(join(root, 'notes.txt'), Buffer.alloc(5000))
+
+    const logger = createLogger()
+
+    expect(logger.getTotalSizeBytes()).toBe(2000)
+  })
+
   it('swallows filesystem failures and reports them through the fallback', async () => {
     const blockedPath = join(root, 'blocked')
     await writeFile(blockedPath, 'not a directory')

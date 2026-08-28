@@ -171,6 +171,128 @@ describe('DownloadHistoryPage', () => {
     expect(container.textContent).not.toContain('败犬女主太多了！')
   })
 
+  it('places history clearing actions in the page header', async () => {
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [{
+        id: 'dl-header-actions',
+        bookId: '3057',
+        title: '测试作品',
+        type: 'epub_full',
+        status: 'completed',
+        progress: 100,
+        createdAt: Date.now(),
+      }],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+
+    const header = container.querySelector('header')
+    const clearCompleted = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('清空已完成'))
+    const clearHistory = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('清空全部历史'))
+    expect(header?.contains(clearCompleted ?? null)).toBe(true)
+    expect(header?.contains(clearHistory ?? null)).toBe(true)
+  })
+
+  it('confirms bulk clearing and disables both actions while it is pending', async () => {
+    let finishClearing!: () => void
+    const clearCompleted = vi.fn(() => new Promise<void>((resolve) => {
+      finishClearing = resolve
+    }))
+    const clearHistory = vi.fn().mockResolvedValue(undefined)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [{
+        id: 'dl-confirm-clear',
+        bookId: '3057',
+        title: '测试作品',
+        type: 'epub_full',
+        status: 'completed',
+        progress: 100,
+        createdAt: Date.now(),
+      }],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      removeTask: vi.fn(),
+      clearCompleted,
+      clearHistory,
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+    const findButton = (text: string) => [...container!.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes(text))
+
+    await act(async () => findButton('清空已完成')?.click())
+    expect(clearCompleted).not.toHaveBeenCalled()
+
+    await act(async () => {
+      findButton('清空已完成')?.click()
+      await Promise.resolve()
+    })
+    expect(clearCompleted).toHaveBeenCalledOnce()
+    expect(findButton('正在清空')?.disabled).toBe(true)
+    expect(findButton('清空全部历史')?.disabled).toBe(true)
+
+    await act(async () => finishClearing())
+    expect(findButton('清空已完成')?.disabled).toBe(false)
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders completed history in batches of one hundred', async () => {
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: Array.from({ length: 150 }, (_, index) => ({
+        id: `dl-completed-${index}`,
+        bookId: String(index + 1),
+        title: `测试作品 ${index + 1}`,
+        type: 'epub_full' as const,
+        status: 'completed' as const,
+        progress: 100,
+        createdAt: Date.now() - index,
+      })),
+      initialized: true,
+      loading: false,
+      error: undefined,
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+
+    expect(container.querySelectorAll('button[title="删除记录"]')).toHaveLength(100)
+    expect(container.textContent).toContain('已显示 100/150 项')
+
+    const loadMore = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === '加载更多')
+    await act(async () => loadMore?.click())
+
+    expect(container.querySelectorAll('button[title="删除记录"]')).toHaveLength(150)
+    expect(container.textContent).not.toContain('加载更多')
+  })
+
   it('loads the title format when download history is opened directly', async () => {
     mocks.useDownloadStore.mockReturnValue({
       tasks: [{
@@ -394,6 +516,7 @@ describe('DownloadHistoryPage', () => {
     expect(pendingCancel?.disabled).toBe(false)
     expect(downloadingCancel?.disabled).toBe(false)
     expect(cancelling?.hasAttribute('disabled')).toBe(true)
+    expect(container.textContent).not.toContain('清空全部历史')
     await act(async () => pendingCancel?.click())
     expect(cancelTask).toHaveBeenCalledWith('pending-task')
   })

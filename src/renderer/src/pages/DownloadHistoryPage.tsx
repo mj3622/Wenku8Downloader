@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   IconDownload,
   IconFolderOpen,
@@ -23,12 +23,19 @@ import { getUserFeedback } from '../utils/userFeedback'
 import BookCover from '../components/BookCover'
 import LoadingSpinner from '../components/LoadingSpinner'
 
-function DownloadHistoryHeader() {
+const COMPLETED_PAGE_SIZE = 100
+const CLEAR_COMPLETED_CONFIRMATION = '确定要清空全部已完成的下载记录吗？此操作无法撤销'
+const CLEAR_HISTORY_CONFIRMATION = '确定要清空全部已结束的下载记录吗？此操作无法撤销'
+
+function DownloadHistoryHeader({ actions }: { actions?: ReactNode }) {
   return (
-    <>
-      <h1 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h1>
-      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-    </>
+    <header className="mb-4 flex items-start justify-between gap-4">
+      <div>
+        <h1 className="mb-2 text-2xl font-bold text-apple-heading">下载历史</h1>
+        <div className="h-1 w-11 rounded-full bg-apple-accent" />
+      </div>
+      {actions}
+    </header>
   )
 }
 
@@ -49,6 +56,8 @@ export default function DownloadHistoryPage() {
     loadState: configLoadState,
     fetchConfig,
   } = useConfigStore()
+  const [visibleCompletedCount, setVisibleCompletedCount] = useState(COMPLETED_PAGE_SIZE)
+  const [clearingScope, setClearingScope] = useState<'completed' | 'terminal' | null>(null)
 
   useEffect(() => {
     if (configSnapshot || configLoadState !== 'idle') return
@@ -68,6 +77,29 @@ export default function DownloadHistoryPage() {
   const activeTasks = tasks.filter((task) => ACTIVE_DOWNLOAD_STATUSES.includes(task.status))
   const retryable = tasks.filter((task) => RETRYABLE_DOWNLOAD_STATUSES.includes(task.status))
   const completed = tasks.filter((t) => t.status === 'completed')
+  const visibleCompleted = completed.slice(0, visibleCompletedCount)
+
+  const handleClearCompleted = async () => {
+    if (clearingScope || !window.confirm(CLEAR_COMPLETED_CONFIRMATION)) return
+    setClearingScope('completed')
+    try {
+      await clearCompleted()
+      setVisibleCompletedCount(COMPLETED_PAGE_SIZE)
+    } finally {
+      setClearingScope(null)
+    }
+  }
+
+  const handleClearHistory = async () => {
+    if (clearingScope || !window.confirm(CLEAR_HISTORY_CONFIRMATION)) return
+    setClearingScope('terminal')
+    try {
+      await clearHistory()
+      setVisibleCompletedCount(COMPLETED_PAGE_SIZE)
+    } finally {
+      setClearingScope(null)
+    }
+  }
 
   if (loading === true || initialized === false) {
     return (
@@ -112,7 +144,32 @@ export default function DownloadHistoryPage() {
 
   return (
     <div>
-      <DownloadHistoryHeader />
+      <DownloadHistoryHeader actions={(
+        <div className="flex flex-wrap justify-end gap-2">
+          {completed.length > 0 && (
+            <button
+              onClick={handleClearCompleted}
+              disabled={clearingScope !== null}
+              className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
+                         px-4 py-2 text-xs text-apple-secondary hover:text-apple-heading disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <IconTrash aria-hidden="true" size={14} stroke={1.8} />
+              {clearingScope === 'completed' ? '正在清空…' : '清空已完成'}
+            </button>
+          )}
+          {(completed.length > 0 || retryable.length > 0) && (
+            <button
+              onClick={handleClearHistory}
+              disabled={clearingScope !== null}
+              className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
+                         px-4 py-2 text-xs text-red-600 hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <IconTrash aria-hidden="true" size={14} stroke={1.8} />
+              {clearingScope === 'terminal' ? '正在清空…' : '清空全部历史'}
+            </button>
+          )}
+        </div>
+      )} />
 
       {/* 进行中 */}
       {activeTasks.length > 0 && (
@@ -216,7 +273,7 @@ export default function DownloadHistoryPage() {
             </span>
           </h2>
           <div className="bg-apple-card rounded-xl border border-apple-border-subtle divide-y divide-apple-border-subtle">
-            {completed.map((task) => (
+            {visibleCompleted.map((task) => (
               <div key={task.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 {task.cover && (
@@ -226,6 +283,7 @@ export default function DownloadHistoryPage() {
                     className="w-9 h-12 rounded-md"
                     decorative
                     showFailureText={false}
+                    loading="lazy"
                   />
                 )}
                 <div className="flex-1 min-w-0">
@@ -263,32 +321,23 @@ export default function DownloadHistoryPage() {
               </div>
             ))}
           </div>
+          {visibleCompleted.length < completed.length && (
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <span className="text-xs text-apple-tertiary">
+                已显示 {visibleCompleted.length}/{completed.length} 项
+              </span>
+              <button
+                type="button"
+                className="motion-pressable rounded-lg border border-apple-border-subtle bg-apple-card px-4 py-2 text-xs font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                onClick={() => setVisibleCompletedCount((count) => count + COMPLETED_PAGE_SIZE)}
+              >
+                加载更多
+              </button>
+            </div>
+          )}
         </section>
       )}
 
-      {/* 清空操作 */}
-      {(completed.length > 0 || retryable.length > 0) && (
-        <div className="flex gap-3 mt-6">
-          {completed.length > 0 && (
-            <button
-              onClick={clearCompleted}
-              className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
-                         px-4 py-2 text-xs text-apple-secondary hover:text-apple-heading"
-            >
-              <IconTrash aria-hidden="true" size={14} stroke={1.8} />
-              清空已完成
-            </button>
-          )}
-          <button
-            onClick={clearHistory}
-            className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
-                       px-4 py-2 text-xs text-red-600 hover:border-red-200 hover:bg-red-50"
-          >
-            <IconTrash aria-hidden="true" size={14} stroke={1.8} />
-            清空全部历史
-          </button>
-        </div>
-      )}
     </div>
   )
 }

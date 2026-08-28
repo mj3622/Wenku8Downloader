@@ -46,7 +46,7 @@ export default function HomePage() {
           轻小说文库下载器
         </h1>
         <p className="max-w-3xl text-sm leading-6 text-apple-body">
-          按编号、作者或书名检索作品，导出 EPUB 或单独下载插图
+          按书名、作者或编号检索作品，导出 EPUB 或单独下载插图
         </p>
 
       </section>
@@ -58,7 +58,7 @@ export default function HomePage() {
             填写文库账号并确认登录状态，也可设置文件保存目录
           </Step>
           <Step index={2} title="检索作品" to="/search">
-            按书籍编号、作者或书名检索，选择目标作品查看详情
+            按书名、作者或作品编号检索，选择目标作品查看详情
           </Step>
           <Step index={3} title="下载小说" to="/download">
             下载整本、分卷或插图，完成后可从下载历史打开目录

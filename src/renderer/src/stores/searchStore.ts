@@ -10,6 +10,7 @@ type SearchState = {
   loading: boolean
   error: string | null
   hasSearched: boolean
+  lastType: SearchType | null
   lastQuery: string | null
   search: (type: SearchType, query: string) => Promise<void>
   clear: () => void
@@ -23,11 +24,19 @@ export const useSearchStore = create<SearchState>((set) => {
     loading: false,
     error: null,
     hasSearched: false,
+    lastType: null,
     lastQuery: null,
     search: async (type, query) => {
       if (type !== 'author' && type !== 'title') {
         requestGeneration++
-        set({ loading: false, error: null, results: [], hasSearched: false, lastQuery: null })
+        set({
+          loading: false,
+          error: null,
+          results: [],
+          hasSearched: false,
+          lastType: null,
+          lastQuery: null,
+        })
         toast.warning({
           title: '搜索方式不可用',
           message: '请重新选择作者检索或书名检索。',
@@ -41,7 +50,14 @@ export const useSearchStore = create<SearchState>((set) => {
         const message = normalizedQuery
           ? '搜索内容不能超过 100 个字。'
           : '请输入要搜索的内容。'
-        set({ loading: false, error: message, results: [], hasSearched: false, lastQuery: null })
+        set({
+          loading: false,
+          error: message,
+          results: [],
+          hasSearched: false,
+          lastType: null,
+          lastQuery: null,
+        })
         toast.warning({ title: '请检查搜索内容', message })
         return
       }
@@ -52,6 +68,7 @@ export const useSearchStore = create<SearchState>((set) => {
         error: null,
         results: [],
         hasSearched: true,
+        lastType: type,
         lastQuery: normalizedQuery,
       })
       try {
@@ -78,6 +95,7 @@ export const useSearchStore = create<SearchState>((set) => {
         error: null,
         loading: false,
         hasSearched: false,
+        lastType: null,
         lastQuery: null,
       })
     },

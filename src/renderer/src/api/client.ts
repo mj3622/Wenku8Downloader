@@ -8,7 +8,9 @@ import type {
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
+  LogStats,
   OpenFolderTarget,
+  VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 import {
   toUserFacingError,
@@ -53,6 +55,8 @@ export const api = {
   // 书籍
   getBook: (id: string) => invoke('book', () => window.electronAPI.getBook(id)),
   getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
+  getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
+    invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
 
   // 下载
   getDownloadSnapshot: () =>
@@ -77,6 +81,8 @@ export const api = {
     invoke('open-folder', () => window.electronAPI.openFolder(target)),
   openLogFolder: () =>
     invoke('open-log-folder', () => window.electronAPI.openLogFolder()),
+  getLogStats: (): Promise<LogStats> =>
+    invoke('log-stats', () => window.electronAPI.getLogStats()),
   selectFolder: () =>
     invoke('select-folder', () => window.electronAPI.selectFolder()),
   openExternal: (url: string) =>

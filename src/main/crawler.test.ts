@@ -36,7 +36,7 @@ vi.mock('./download-cancellation', async (importOriginal) => ({
 }))
 vi.mock('./logging/logger', () => ({ logger: mocks.logger }))
 
-import { WebCrawler, type CrawlerConfig } from './crawler'
+import { parseRetryAfter, WebCrawler, type CrawlerConfig } from './crawler'
 import { DownloadCancelledError } from './download-cancellation'
 import {
   COOKIE_NAMES,
@@ -100,6 +100,82 @@ afterEach(() => {
 })
 
 describe('WebCrawler.fetch logging', () => {
+  it('parses Retry-After seconds and HTTP dates', () => {
+    const now = Date.parse('2026-08-29T00:00:00Z')
+
+    expect(parseRetryAfter('7', now)).toBe(7_000)
+    expect(parseRetryAfter('Sat, 29 Aug 2026 00:00:09 GMT', now)).toBe(9_000)
+    expect(parseRetryAfter('invalid', now)).toBeUndefined()
+  })
+
+  it('exposes every attempt to adaptive request control and uses its retry delay', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'Retry-After': '7' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/book/3057.htm',
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    const beforeAttempt = vi.fn(async () => undefined)
+    const afterAttempt = vi.fn()
+    const onResponse = vi.fn()
+    const getRetryDelay = vi.fn(() => 1_234)
+    const onRetry = vi.fn()
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await crawler.fetch('https://www.wenku8.net/book/3057.htm', true, undefined, {
+      beforeAttempt,
+      afterAttempt,
+      onResponse,
+      getRetryDelay,
+      onRetry,
+    })
+
+    expect(beforeAttempt).toHaveBeenCalledTimes(2)
+    expect(afterAttempt).toHaveBeenCalledTimes(2)
+    expect(onResponse).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      status: 429,
+      retryAfterMs: 7_000,
+    }))
+    expect(onResponse).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 200 }))
+    expect(getRetryDelay).toHaveBeenCalledWith(expect.objectContaining({
+      attempt: 1,
+      status: 429,
+      retryAfterMs: 7_000,
+    }))
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ delayMs: 1_234 }))
+    expect(mocks.sleepWithSignal).toHaveBeenCalledWith(1_234, undefined)
+  })
+
+  it('does not report a successful document response when reading its body fails', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/book/3057.htm',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => { throw new Error('response stream failed') }),
+    })
+    const onResponse = vi.fn()
+    const afterAttempt = vi.fn()
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.fetch(
+      'https://www.wenku8.net/book/3057.htm',
+      true,
+      undefined,
+      { beforeAttempt: async () => undefined, afterAttempt, onResponse, getRetryDelay: () => 0 },
+    )).rejects.toThrow('response stream failed')
+
+    expect(onResponse).not.toHaveBeenCalled()
+    expect(afterAttempt).toHaveBeenCalledTimes(3)
+  })
+
   it('does not retry a fetch cancelled by its caller', async () => {
     const controller = new AbortController()
     mocks.fetch.mockImplementationOnce((_url: string, init: RequestInit) => (
@@ -223,6 +299,49 @@ describe('WebCrawler.search', () => {
     }])
   })
 
+  it('treats a single book page with recommendation grids as a single result', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    const page = load(`
+      <html>
+        <title>败北女角太多了！(败犬女主太多了！) - 雨森焚火 - 小学馆 - 轻小说文库</title>
+        <body>
+          <div id="content">
+            <img src="cover.jpg">
+            <a href="https://www.wenku8.net/modules/article/addbookcase.php?bid=3057">加入书架</a>
+            <table>
+              <tr><td>败北女角太多了！</td></tr>
+              <tr><td>作品信息</td></tr>
+              <tr>
+                <td>小说分类：小学馆</td>
+                <td>作者：雨森焚火</td>
+                <td>状态：连载中</td>
+              </tr>
+            </table>
+            <table class="grid"><tr><td><div>
+              <a href="/book/3745.htm" title="推荐作品"><img src="recommendation.jpg"></a>
+              <p>作者:其他作者</p>
+              <p>连载中</p>
+            </div></td></tr></table>
+          </div>
+        </body>
+      </html>
+    `)
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(page as unknown as Buffer)
+
+    await expect(crawler.search('败犬女主', 'title')).resolves.toEqual([{
+      title: '败北女角太多了！(败犬女主太多了！)',
+      cover: 'cover.jpg',
+      id: '3057',
+      author: '雨森焚火',
+      status: '连载中',
+      updateTime: '',
+      wordCount: '',
+      isAnimated: false,
+      tags: '',
+      desc: '',
+    }])
+  })
+
   it('keeps parser diagnostics internal when the search page is incomplete', async () => {
     const crawler = new WebCrawler(createConfig(), {})
     vi.spyOn(crawler, 'fetch').mockResolvedValue(
@@ -290,6 +409,8 @@ describe('WebCrawler.getImageContent response reporting', () => {
       arrayBuffer: vi.fn(async () => { throw new Error('response stream failed') }),
     })
     const statuses: number[] = []
+    const onResponse = vi.fn()
+    const afterAttempt = vi.fn()
     const crawler = new WebCrawler(createConfig(), {})
 
     await expect(
@@ -297,9 +418,13 @@ describe('WebCrawler.getImageContent response reporting', () => {
         'https://example.com/image.jpg',
         1,
         (status) => statuses.push(status),
+        undefined,
+        { beforeAttempt: async () => undefined, afterAttempt, onResponse },
       ),
     ).rejects.toThrow('response stream failed')
     expect(statuses).toEqual([])
+    expect(onResponse).not.toHaveBeenCalled()
+    expect(afterAttempt).toHaveBeenCalledTimes(1)
   })
 
   it('continues image retries after a non-Error rejection', async () => {

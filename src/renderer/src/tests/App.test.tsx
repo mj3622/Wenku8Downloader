@@ -59,6 +59,7 @@ describe('App routing', () => {
   it('shows a recoverable page instead of a blank screen for unknown routes', async () => {
     await act(async () => root.render(<App />))
 
+    expect(container.textContent).toContain('轻小说文库下载器')
     expect(container.textContent).toContain('页面不存在')
     expect(container.textContent).toContain('返回首页')
     expect(container.querySelector('a[href="#/"]')).not.toBeNull()

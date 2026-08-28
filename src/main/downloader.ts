@@ -6,13 +6,16 @@ import type { Book } from './book'
 import type { WebCrawler } from './crawler'
 import type { EpubChapter, EpubImage } from './epub-builder'
 import { imageExtensionFromUrl, resolveWithin, safePathSegment } from './path-safety'
-import { DownloadRateLimiter, sharedDownloadRateLimiter } from './download-rate-limiter'
+import {
+  DownloadRateLimiter,
+  sharedDownloadRateLimiter,
+  type DownloadRequestKind,
+} from './download-rate-limiter'
 import { migrateLegacyVolumeCache } from './legacy-cache-migration'
 import type { DownloadConfig } from '../shared/config-types'
 import { logger } from './logging/logger'
 import {
   DownloadCancelledError,
-  sleepWithSignal,
   throwIfDownloadCancelled,
 } from './download-cancellation'
 
@@ -29,6 +32,7 @@ export interface DownloaderOptions {
   rateLimiter?: DownloadRateLimiter
   logContext?: DownloaderLogContext
   signal?: AbortSignal
+  onVolumeCover?: (cover: string) => void
 }
 
 export type DownloaderCrawler = Pick<WebCrawler, 'fetch' | 'getImageContent'>
@@ -70,6 +74,36 @@ export function buildBookKey(bookTitle: string, bookId: string): string {
 
 export function buildVolumeKey(volumeName: string, volumeIndex: number): string {
   return `${volumeIndex + 1}_${safePathSegment(volumeName, 'volume')}`
+}
+
+export function normalizeVolumeCoverUrl(
+  rawCover: string | undefined,
+  baseUrl?: string,
+): string | undefined {
+  if (!rawCover || rawCover.length > 2_048) return undefined
+  try {
+    let cover: URL
+    try {
+      cover = new URL(rawCover)
+    } catch {
+      if (!baseUrl) return undefined
+      const absoluteBaseUrl = baseUrl.startsWith('//') ? `https:${baseUrl}` : baseUrl
+      cover = new URL(rawCover, absoluteBaseUrl)
+    }
+    if (cover.protocol !== 'http:' && cover.protocol !== 'https:') return undefined
+    const normalized = cover.toString()
+    return normalized.length <= 2_048 ? normalized : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function selectVolumeCoverUrl(
+  urls: readonly string[] | null | undefined,
+  coverIndex: number,
+  baseUrl?: string,
+): string | undefined {
+  return normalizeVolumeCoverUrl(urls?.[coverIndex], baseUrl)
 }
 
 interface AtomicDownloadFileOps {
@@ -351,8 +385,10 @@ export class Downloader {
   private readonly rateLimiter: DownloadRateLimiter
   private readonly logContext: DownloaderLogContext
   private readonly signal?: AbortSignal
+  private readonly onVolumeCover?: (cover: string) => void
   private readonly warnings: string[] = []
   private onProgress: ((p: DownloadProgress) => void) | null = null
+  private lastProgress: DownloadProgress | null = null
 
   constructor(
     crawler: DownloaderCrawler,
@@ -365,18 +401,22 @@ export class Downloader {
       this.rateLimiter = optionsOrRateLimiter
       this.logContext = {}
       this.signal = undefined
+      this.onVolumeCover = undefined
     } else if (
       'rateLimiter' in optionsOrRateLimiter
       || 'logContext' in optionsOrRateLimiter
       || 'signal' in optionsOrRateLimiter
+      || 'onVolumeCover' in optionsOrRateLimiter
     ) {
       this.rateLimiter = optionsOrRateLimiter.rateLimiter ?? sharedDownloadRateLimiter
       this.logContext = { ...optionsOrRateLimiter.logContext }
       this.signal = optionsOrRateLimiter.signal
+      this.onVolumeCover = optionsOrRateLimiter.onVolumeCover
     } else {
       this.rateLimiter = sharedDownloadRateLimiter
       this.logContext = { ...(optionsOrRateLimiter as DownloaderLogContext) }
       this.signal = undefined
+      this.onVolumeCover = undefined
     }
   }
 
@@ -385,11 +425,36 @@ export class Downloader {
   }
 
   private emitProgress(current: number, total: number, phase: string): void {
-    this.onProgress?.({ current, total, phase })
+    const safeCurrent = this.lastProgress?.total === total
+      ? Math.max(current, this.lastProgress.current)
+      : current
+    this.lastProgress = { current: safeCurrent, total, phase }
+    this.onProgress?.(this.lastProgress)
   }
 
   private get speed() {
     return this.rateLimiter.speed
+  }
+
+  private reportThrottleWait(waitMs: number): void {
+    if (waitMs <= 0) return
+    const progress = this.lastProgress ?? { current: 0, total: 0, phase: '' }
+    this.emitProgress(
+      progress.current,
+      progress.total,
+      `服务器限流，已自动减速，约 ${Math.max(1, Math.ceil(waitMs / 1000))} 秒后继续`,
+    )
+  }
+
+  private createRequestControl(
+    kind: DownloadRequestKind,
+    url: string,
+    onResponseObserved: () => void,
+  ) {
+    return this.rateLimiter.createRequestControl(kind, url, {
+      onResponseObserved,
+      onThrottleWait: (waitMs) => this.reportThrottleWait(waitMs),
+    })
   }
 
   private async fetchImageWithRetry(
@@ -399,14 +464,22 @@ export class Downloader {
     throwIfDownloadCancelled(this.signal)
     let receivedResponseStatus = false
     const recordResponseStatus = (status: number): void => {
+      if (receivedResponseStatus) return
       receivedResponseStatus = true
       this.rateLimiter.record(status)
     }
+    const control = this.createRequestControl('image', url, () => {
+      receivedResponseStatus = true
+    })
 
     try {
-      const content = this.signal
-        ? await this.crawler.getImageContent(url, retries, recordResponseStatus, this.signal)
-        : await this.crawler.getImageContent(url, retries, recordResponseStatus)
+      const content = await this.crawler.getImageContent(
+        url,
+        retries,
+        recordResponseStatus,
+        this.signal,
+        control,
+      )
       if (content && !receivedResponseStatus) this.rateLimiter.record(200)
       return content
     } catch (err) {
@@ -433,12 +506,13 @@ export class Downloader {
   }
 
   private async fetchChapterContent(url: string): Promise<string> {
-    await sleepWithSignal(this.speed.delayMs, this.signal)
     throwIfDownloadCancelled(this.signal)
+    let receivedResponseStatus = false
+    const control = this.createRequestControl('document', url, () => {
+      receivedResponseStatus = true
+    })
     try {
-      const $ = this.signal
-        ? await this.crawler.fetch(url, true, this.signal)
-        : await this.crawler.fetch(url)
+      const $ = await this.crawler.fetch(url, true, this.signal, control)
       const textDiv = $('#content')
       textDiv.find('ul').each((_i, ul) => $(ul).remove())
       const html = (textDiv.html() || '').trim()
@@ -446,17 +520,17 @@ export class Downloader {
       if (!html || (!readableText && textDiv.find('img').length === 0)) {
         throw new NoUsableDownloadContentError('章节内容为空，请稍后重试')
       }
-      this.rateLimiter.record(200)
+      if (!receivedResponseStatus) this.rateLimiter.record(200)
       return html
     } catch (err) {
       throwIfDownloadCancelled(this.signal)
       const status = httpStatusFromError(err)
       if (status === 429) {
-        this.rateLimiter.record(429)
+        if (!receivedResponseStatus) this.rateLimiter.record(429)
         throw new Error('请求过于频繁，已自动降低下载速度，请稍等片刻后重试', { cause: err })
       }
       if (status === 403) {
-        this.rateLimiter.record(403)
+        if (!receivedResponseStatus) this.rateLimiter.record(403)
         throw new Error('登录状态已失效，请前往配置页重新登录后重试', { cause: err })
       }
       throw err
@@ -507,9 +581,6 @@ export class Downloader {
         firstError ??= outcome.firstError
         completed += batch.length
         onProgress(completed, total)
-        if (i + batchSize < urls.length && this.speed.delayMs > 0) {
-          await sleepWithSignal(this.speed.delayMs, this.signal)
-        }
       }
     }
     return { succeeded, failedIndices, firstError }
@@ -522,6 +593,8 @@ export class Downloader {
     bookId: string,
     volumeIndex?: number,
   ): Promise<void> {
+    // 每次调用对应一个独立分卷，不能沿用上一卷的单调进度基线。
+    this.lastProgress = null
     throwIfDownloadCancelled(this.signal)
     if (urls.length === 0) {
       throw new NoUsableDownloadContentError('该分卷没有可保存的插图')
@@ -687,29 +760,28 @@ export class Downloader {
     let illustrationError: unknown
     let illustrationDownloadError: unknown
     let illustrationWarning: string | undefined
+    let illustrationUrls: string[] | undefined
 
-    // 插图下载（带缓存）
+    // 先解析插图地址，再让图片 CDN 与章节主站并行下载。
     if (illustItem) {
       this.emitProgress(0, totalChapters, `正在下载插图 (${volumeName})`)
       const illustration = await this.loadIllustrationUrls(book, volumeName)
       const { urls } = illustration
       illustrationError = illustration.error
       if (urls?.length) {
-        const imgResults = await this.downloadVolumeImagesCached(
-          urls, volumeName, volumeKey, 0, totalChapters, images, builder, bookId,
+        illustrationUrls = urls
+        const cover = selectVolumeCoverUrl(
+          urls,
+          this.runtimeConfig.defaultCoverIndex,
+          book.baseChapterUrl,
         )
-        imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
-        illustrationDownloadError = imgResults.firstError
-        if (imgResults.failedCount > 0) {
-          illustrationWarning = imgResults.html
-            ? `“${volumeName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
-            : `“${volumeName}”的插图未能下载，正文内容仍会保存。`
-        }
-        if (imgResults.html) {
-          chapters.push({
-            title: '插图',
-            content: imgResults.html,
-            fileName: `illustrations_${volumeKey}.xhtml`,
+        if (cover) {
+          this.onVolumeCover?.(cover)
+          logger.debug('download.volume-cover.selected', '已选择分卷封面', {
+            ...this.logContext,
+            bookId,
+            volumeName,
+            coverIndex: this.runtimeConfig.defaultCoverIndex,
           })
         }
       } else if (illustrationError !== undefined) {
@@ -719,11 +791,51 @@ export class Downloader {
       }
     }
 
-    // 章节下载（带缓存）
-    if (chapterItems.length > 0) {
-      const chapterResults = await this.downloadChaptersWithCache(
-        book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
-      )
+    const imageDownload = illustrationUrls
+      ? this.downloadVolumeImagesCached(
+          illustrationUrls,
+          volumeName,
+          volumeKey,
+          0,
+          totalChapters,
+          images,
+          builder,
+          bookId,
+          true,
+        )
+      : Promise.resolve(undefined)
+    const chapterDownload = chapterItems.length > 0
+      ? this.downloadChaptersWithCache(
+          book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
+        )
+      : Promise.resolve(undefined)
+    const [imageResult, chapterResult] = await Promise.allSettled([
+      imageDownload,
+      chapterDownload,
+    ] as const)
+    if (imageResult.status === 'rejected') throw imageResult.reason
+    if (chapterResult.status === 'rejected') throw chapterResult.reason
+
+    const imgResults = imageResult.value
+    if (imgResults) {
+      imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
+      illustrationDownloadError = imgResults.firstError
+      if (imgResults.failedCount > 0) {
+        illustrationWarning = imgResults.html
+          ? `“${volumeName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
+          : `“${volumeName}”的插图未能下载，正文内容仍会保存。`
+      }
+      if (imgResults.html) {
+        chapters.push({
+          title: '插图',
+          content: imgResults.html,
+          fileName: `illustrations_${volumeKey}.xhtml`,
+        })
+      }
+    }
+
+    const chapterResults = chapterResult.value
+    if (chapterResults) {
       completedChapters = chapterResults.completed
       chapterCache = { hits: chapterResults.cacheHits, total: chapterResults.total }
       chapters.push(...chapterResults.chapters)
@@ -990,29 +1102,15 @@ export class Downloader {
       const chapterItems = volume.filter(item => item.name !== '插图')
       let imageCache = { hits: 0, total: 0 }
       let chapterCache = { hits: 0, total: chapterItems.length }
+      let illustrationUrls: string[] | undefined
 
-      // 插图下载（带缓存）
+      // 先解析插图地址，再让图片 CDN 与章节主站并行下载。
       if (illustItem) {
         this.emitProgress(completedChapters, totalChapters, `正在下载插图 (${volName})`)
         const illustration = await this.loadIllustrationUrls(book, volName)
         const { urls } = illustration
         if (urls?.length) {
-          const imgResults = await this.downloadVolumeImagesCached(
-            urls, volName, volumeKey, completedChapters, totalChapters, images, builder, bookId,
-            false, // 整本下载不从卷插图设置封面（封面已在前面通过 book.getCoverContent() 设置）
-          )
-          imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
-          if (imgResults.failedCount > 0) {
-            if (!imgResults.html && imgResults.firstError !== undefined) {
-              illustrationFailures.push({ volumeName: volName, error: imgResults.firstError })
-            }
-            illustrationWarnings.push(
-              imgResults.html
-                ? `“${volName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
-                : `“${volName}”的插图未能下载，正文内容仍会保存。`,
-            )
-          }
-          if (imgResults.html) htmlParts += imgResults.html + '<br/>'
+          illustrationUrls = urls
         } else if (illustration.error !== undefined) {
           illustrationFailures.push({ volumeName: volName, error: illustration.error })
           illustrationWarnings.push(`“${volName}”的插图页无法读取，正文内容仍会保存。`)
@@ -1021,14 +1119,52 @@ export class Downloader {
         }
       }
 
-      // 章节下载（带缓存）
-      if (chapterItems.length > 0) {
-        const result = await this.downloadChaptersWithCache(
-          book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
-        )
-        completedChapters = result.completed
-        chapterCache = { hits: result.cacheHits, total: result.total }
-        for (const ch of result.chapters) {
+      const imageDownload = illustrationUrls
+        ? this.downloadVolumeImagesCached(
+            illustrationUrls,
+            volName,
+            volumeKey,
+            completedChapters,
+            totalChapters,
+            images,
+            builder,
+            bookId,
+            false, // 整本下载不从卷插图设置封面（封面已在前面通过 book.getCoverContent() 设置）
+          )
+        : Promise.resolve(undefined)
+      const chapterDownload = chapterItems.length > 0
+        ? this.downloadChaptersWithCache(
+            book, chapterItems, bookId, volumeKey, totalChapters, completedChapters,
+          )
+        : Promise.resolve(undefined)
+      const [imageResult, chapterResult] = await Promise.allSettled([
+        imageDownload,
+        chapterDownload,
+      ] as const)
+      if (imageResult.status === 'rejected') throw imageResult.reason
+      if (chapterResult.status === 'rejected') throw chapterResult.reason
+
+      const imgResults = imageResult.value
+      if (imgResults) {
+        imageCache = { hits: imgResults.cacheHits, total: imgResults.total }
+        if (imgResults.failedCount > 0) {
+          if (!imgResults.html && imgResults.firstError !== undefined) {
+            illustrationFailures.push({ volumeName: volName, error: imgResults.firstError })
+          }
+          illustrationWarnings.push(
+            imgResults.html
+              ? `“${volName}”有 ${imgResults.failedCount} 张插图未能下载，已保存其余内容。`
+              : `“${volName}”的插图未能下载，正文内容仍会保存。`,
+          )
+        }
+        if (imgResults.html) htmlParts += imgResults.html + '<br/>'
+      }
+
+      const chapterResults = chapterResult.value
+      if (chapterResults) {
+        completedChapters = chapterResults.completed
+        chapterCache = { hits: chapterResults.cacheHits, total: chapterResults.total }
+        for (const ch of chapterResults.chapters) {
           htmlParts += `<h2>${escapeXml(ch.title)}</h2><div>${ch.content}</div><br/>`
         }
       }

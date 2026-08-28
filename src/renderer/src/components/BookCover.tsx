@@ -6,6 +6,7 @@ type Props = {
   className?: string
   decorative?: boolean
   showFailureText?: boolean
+  loading?: 'eager' | 'lazy'
 }
 
 export default function BookCover({
@@ -14,6 +15,7 @@ export default function BookCover({
   className = 'w-full aspect-[2/3]',
   decorative = false,
   showFailureText = true,
+  loading = 'eager',
 }: Props) {
   const retries = useRef(0)
   const [failed, setFailed] = useState(false)
@@ -57,6 +59,8 @@ export default function BookCover({
       <img
         src={src}
         alt={decorative ? '' : title}
+        loading={loading}
+        decoding="async"
         className="w-full h-full object-cover bg-apple-bg"
         onError={handleError}
       />

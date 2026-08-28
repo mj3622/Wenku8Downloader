@@ -36,19 +36,19 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
 
   return (
     <form
-      className="mb-6"
+      className="mb-6 flex items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         handleSubmit()
       }}
     >
-      <label htmlFor={inputId} className="mb-1.5 block text-sm text-apple-secondary">
-        {label}
-      </label>
-      <div className="flex items-center gap-3">
+      <div className="flex-1">
+        <label htmlFor={inputId} className="mb-1 block text-sm text-apple-secondary">
+          {label}
+        </label>
         <input
           id={inputId}
-          className="w-full px-4 py-2.5 bg-apple-card border border-apple-border-input rounded-xl
+          className="w-full rounded-xl border border-apple-border-input bg-apple-card px-3 py-2
                      text-sm text-apple-heading placeholder:text-apple-tertiary
                      focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10
                      transition-colors"
@@ -61,21 +61,21 @@ export default function BookQueryInput({ label, help, onQuery, loading }: Props)
             if (error) setError(null)
           }}
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="motion-pressable inline-flex shrink-0 items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
-                     font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <IconSearch aria-hidden="true" size={16} stroke={1.8} />
-          {loading ? '查询中...' : '查询'}
-        </button>
+        {error && (
+          <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-600">
+            {error}
+          </p>
+        )}
       </div>
-      {error && (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-600">
-          {error}
-        </p>
-      )}
+      <button
+        type="submit"
+        disabled={loading}
+        className="motion-pressable inline-flex shrink-0 items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
+                   font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <IconSearch aria-hidden="true" size={16} stroke={1.8} />
+        {loading ? '查询中...' : '查询'}
+      </button>
     </form>
   )
 }
