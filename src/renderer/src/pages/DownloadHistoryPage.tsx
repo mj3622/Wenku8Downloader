@@ -1,4 +1,11 @@
 import { useEffect } from 'react'
+import {
+  IconDownload,
+  IconFolderOpen,
+  IconRefresh,
+  IconTrash,
+  IconX,
+} from '@tabler/icons-react'
 import type { TitleFormat } from '../../../shared/config-types'
 import {
   ACTIVE_DOWNLOAD_STATUSES,
@@ -14,11 +21,12 @@ import { api } from '../api/client'
 import { toast } from '../stores/toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
 import BookCover from '../components/BookCover'
+import LoadingSpinner from '../components/LoadingSpinner'
 
 function DownloadHistoryHeader() {
   return (
     <>
-      <h2 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h2>
+      <h1 className="text-2xl font-bold text-apple-heading mb-2">下载历史</h1>
       <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
     </>
   )
@@ -65,9 +73,7 @@ export default function DownloadHistoryPage() {
     return (
       <div>
         <DownloadHistoryHeader />
-        <div className="text-center py-16" role="status">
-          <p className="text-apple-secondary text-[14px]">正在同步下载记录…</p>
-        </div>
+        <LoadingSpinner text="正在同步下载记录…" />
       </div>
     )
   }
@@ -76,8 +82,8 @@ export default function DownloadHistoryPage() {
     return (
       <div>
         <DownloadHistoryHeader />
-        <div className="text-center py-16" role="alert">
-          <p className="text-red-400 text-[14px]">{error}</p>
+        <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center" role="alert">
+          <p className="text-sm text-red-600">{error}</p>
         </div>
       </div>
     )
@@ -87,9 +93,18 @@ export default function DownloadHistoryPage() {
     return (
       <div>
         <DownloadHistoryHeader />
-        <div className="text-center py-16">
-          <p className="text-apple-tertiary text-[14px]">暂无下载记录</p>
-          <p className="text-apple-tertiary text-[12px] mt-1">前往检索页面搜索书籍并下载</p>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-apple-accent-light text-apple-accent">
+            <IconDownload aria-hidden="true" size={22} stroke={1.7} />
+          </div>
+          <h2 className="text-sm font-semibold text-apple-heading">暂无下载记录</h2>
+          <p className="mt-1 text-sm text-apple-secondary">检索作品并选择整本、分卷或插图下载</p>
+          <a
+            href="#/search"
+            className="motion-pressable mt-4 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+          >
+            检索作品
+          </a>
         </div>
       </div>
     )
@@ -102,13 +117,13 @@ export default function DownloadHistoryPage() {
       {/* 进行中 */}
       {activeTasks.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+          <h2 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-apple-accent inline-block" />
             <span className="text-apple-accent">进行中</span>
             <span className="text-apple-secondary text-[12px] font-normal">
               · {activeTasks.length} 项
             </span>
-          </h3>
+          </h2>
           {activeTasks.map((task) => (
             <div
               key={task.id}
@@ -125,7 +140,7 @@ export default function DownloadHistoryPage() {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-[14px] font-semibold text-apple-heading">
+                  <div className="truncate text-[14px] font-semibold text-apple-heading" title={formatBookTitle(task.title, titleFormat)}>
                     {formatBookTitle(task.title, titleFormat)}
                   </div>
                   <div className="text-[12px] text-apple-secondary">
@@ -135,8 +150,8 @@ export default function DownloadHistoryPage() {
                   <div className="mt-2 flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-apple-bg rounded-full overflow-hidden">
                       <div
-                        className={`h-full bg-apple-accent rounded-full ${task.status === 'downloading' ? 'animate-pulse' : ''}`}
-                        style={{ width: `${task.progress}%` }}
+                        className="download-progress h-full origin-left rounded-full bg-apple-accent"
+                        style={{ transform: `scaleX(${task.progress / 100})` }}
                       />
                     </div>
                     <span className="text-[11px] text-apple-secondary font-medium tabular-nums">
@@ -155,10 +170,11 @@ export default function DownloadHistoryPage() {
                   aria-label={task.status === 'cancelling'
                     ? undefined
                     : `取消 ${formatBookTitle(task.title, titleFormat)} 下载`}
-                  className="px-4 py-1.5 text-[11px] font-medium text-apple-secondary bg-apple-bg
-                             rounded-[14px] flex-shrink-0 transition-colors hover:text-apple-heading
+                  className="motion-pressable flex-shrink-0 rounded-[14px] bg-apple-bg px-4 py-1.5
+                             inline-flex items-center gap-1 text-xs font-medium text-apple-secondary hover:text-apple-heading
                              disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:text-apple-secondary"
                 >
+                  {task.status !== 'cancelling' && <IconX aria-hidden="true" size={13} stroke={1.8} />}
                   {task.status === 'cancelling' ? '正在取消…' : '取消'}
                 </button>
               </div>
@@ -170,13 +186,13 @@ export default function DownloadHistoryPage() {
       {/* 可重试 */}
       {retryable.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+          <h2 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
             <span className="text-amber-600">需要处理</span>
             <span className="text-apple-secondary text-[12px] font-normal">
               · {retryable.length} 项
             </span>
-          </h3>
+          </h2>
           {retryable.map((task) => (
             <RetryableTaskItem
               key={task.id}
@@ -192,13 +208,13 @@ export default function DownloadHistoryPage() {
       {/* 已完成 */}
       {completed.length > 0 && (
         <section className="mb-5">
-          <h3 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
+          <h2 className="text-[13px] font-semibold mb-3 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-            <span className="text-green-500">已完成</span>
+            <span className="text-green-600">已完成</span>
             <span className="text-apple-secondary text-[12px] font-normal">
               · {completed.length} 项
             </span>
-          </h3>
+          </h2>
           <div className="bg-apple-card rounded-xl border border-apple-border-subtle divide-y divide-apple-border-subtle">
             {completed.map((task) => (
               <div key={task.id} className="flex items-center gap-3 px-4 py-3">
@@ -213,10 +229,10 @@ export default function DownloadHistoryPage() {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-medium text-apple-heading">
+                  <div className="truncate text-[13px] font-medium text-apple-heading" title={formatBookTitle(task.title, titleFormat)}>
                     {formatBookTitle(task.title, titleFormat)}
                   </div>
-                  <div className="text-[11px] text-apple-secondary">
+                  <div className="text-xs text-apple-secondary">
                     {task.type === 'images' ? '插图下载' : 'EPUB 下载'}
                     {task.volume && ` · ${task.volume}`}
                     {' · '}
@@ -231,20 +247,18 @@ export default function DownloadHistoryPage() {
                 <button
                   onClick={() => void handleOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
                   aria-label={`打开 ${formatBookTitle(task.title, titleFormat)} 所在文件夹`}
-                  className="text-apple-tertiary hover:text-apple-accent transition-colors px-1"
+                  className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
                   title="打开所在文件夹"
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  </svg>
+                  <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
                 </button>
                 <button
                   onClick={() => removeTask(task.id)}
                   aria-label={`删除 ${formatBookTitle(task.title, titleFormat)} 的下载记录`}
-                  className="text-apple-tertiary hover:text-red-400 transition-colors text-[16px] leading-none px-1"
+                  className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
                   title="删除记录"
                 >
-                  ×
+                  <IconTrash aria-hidden="true" size={16} stroke={1.8} />
                 </button>
               </div>
             ))}
@@ -258,17 +272,19 @@ export default function DownloadHistoryPage() {
           {completed.length > 0 && (
             <button
               onClick={clearCompleted}
-              className="px-4 py-2 text-[12px] text-apple-secondary hover:text-apple-heading
-                         bg-apple-card border border-apple-border-subtle rounded-xl transition-colors"
+              className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
+                         px-4 py-2 text-xs text-apple-secondary hover:text-apple-heading"
             >
+              <IconTrash aria-hidden="true" size={14} stroke={1.8} />
               清空已完成
             </button>
           )}
           <button
             onClick={clearHistory}
-            className="px-4 py-2 text-[12px] text-red-400 hover:text-red-500
-                       bg-apple-card border border-apple-border-subtle rounded-xl transition-colors"
+            className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-subtle bg-apple-card
+                       px-4 py-2 text-xs text-red-600 hover:border-red-200 hover:bg-red-50"
           >
+            <IconTrash aria-hidden="true" size={14} stroke={1.8} />
             清空全部历史
           </button>
         </div>
@@ -312,7 +328,7 @@ function RetryableTaskItem({
         )}
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-semibold text-apple-heading">{displayTitle}</div>
-          <div className="text-[12px] text-red-400">
+          <div className="text-xs text-red-600">
             {statusLabel} · {task.type === 'images' ? '插图下载' : 'EPUB 下载'}
             {task.volume && ` · ${task.volume}`}
           </div>
@@ -327,17 +343,19 @@ function RetryableTaskItem({
         </div>
         <button
           onClick={() => { onRetry(task.id) }}
-          className="px-4 py-1.5 text-[11px] font-medium bg-apple-accent-light text-apple-accent
-                     rounded-[14px] hover:bg-apple-accent/15 transition-colors"
+          className="motion-pressable inline-flex items-center gap-1 rounded-[14px] bg-apple-accent-light px-4 py-1.5
+                     text-xs font-medium text-apple-accent hover:bg-apple-accent/15"
         >
+          <IconRefresh aria-hidden="true" size={13} stroke={1.8} />
           重试
         </button>
         <button
           onClick={() => onRemove(task.id)}
           aria-label={`删除 ${displayTitle} 的下载记录`}
-          className="text-apple-tertiary hover:text-red-400 transition-colors text-[16px] leading-none px-1"
+          className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+          title="删除记录"
         >
-          ×
+          <IconTrash aria-hidden="true" size={16} stroke={1.8} />
         </button>
       </div>
     </div>
