@@ -11,22 +11,23 @@ import { toast } from '../stores/toastStore'
 type Tab = 'id' | 'author' | 'title'
 
 const tabs: { key: Tab; label: string }[] = [
-  { key: 'id', label: '编号检索' },
-  { key: 'author', label: '作者检索' },
   { key: 'title', label: '书名检索' },
+  { key: 'author', label: '作者检索' },
+  { key: 'id', label: '编号检索' },
 ]
 
 export default function SearchPage() {
-  const [tab, setTab] = useState<Tab>('id')
   const {
     results,
     loading: searchLoading,
     error: searchError,
     hasSearched,
+    lastType,
     lastQuery,
     search,
     clear: clearSearch,
   } = useSearchStore()
+  const [tab, setTab] = useState<Tab>(lastType ?? 'title')
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -36,12 +37,13 @@ export default function SearchPage() {
       if (tabs.some((item) => item.key === routeTab)) {
         setTab(routeTab as Tab)
       } else {
+        setTab('title')
         toast.warning({
           title: '检索方式无效',
-          message: '已为你切换到编号检索，请重新选择。',
+          message: '已为你切换到书名检索，请重新选择。',
         })
+        setSearchParams({}, { replace: true })
       }
-      setSearchParams({}, { replace: true })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -66,6 +68,7 @@ export default function SearchPage() {
             onClick={() => {
               if (tab !== t.key) clearSearch()
               setTab(t.key)
+              setSearchParams(t.key === 'title' ? {} : { tab: t.key }, { replace: true })
             }}
             className={`border-b-2 px-4 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 ${
               tab === t.key
@@ -125,6 +128,13 @@ function IdTab({ onQuery }: { onQuery: (id: string) => void }) {
         help="例如：3057 或 https://www.wenku8.net/book/3057.htm"
         onQuery={onQuery}
       />
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-apple-accent-light text-apple-accent">
+          <IconSearch aria-hidden="true" size={22} stroke={1.7} />
+        </div>
+        <p className="mb-1 text-sm font-medium text-apple-secondary">输入作品编号开始检索</p>
+        <p className="text-xs text-apple-tertiary">例如：3057 或 Wenku8 作品链接</p>
+      </div>
     </div>
   )
 }
@@ -146,7 +156,7 @@ function SearchTab({
   const label = type === 'author' ? '请输入轻小说文库的作者' : '请输入轻小说文库的作品名称'
   const emptyText = type === 'author' ? '输入作者名开始搜索' : '输入书名开始搜索'
   const exampleText = type === 'author' ? '例如：三上库太' : '例如：败犬'
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(lastQuery ?? '')
   const [fieldError, setFieldError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = `search-${type}`

@@ -45,6 +45,29 @@ afterEach(async () => {
 })
 
 describe('SearchResultList', () => {
+  it('opens the selected work when its cover is clicked', async () => {
+    const onSelect = vi.fn()
+    await act(async () => {
+      root.render(
+        <SearchResultList
+          results={[{
+            id: '3057',
+            title: '测试作品',
+            cover: 'https://example.com/cover.jpg',
+          }]}
+          onSelect={onSelect}
+        />,
+      )
+    })
+
+    await act(async () => {
+      container.querySelector('img')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(onSelect).toHaveBeenCalledOnce()
+    expect(onSelect).toHaveBeenCalledWith('3057')
+  })
+
   it('separates compact search metadata into readable rows and badges', async () => {
     await act(async () => {
       root.render(

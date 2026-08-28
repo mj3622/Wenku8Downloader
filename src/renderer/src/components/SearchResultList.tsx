@@ -18,7 +18,15 @@ export default function SearchResultList({ results, onSelect }: Props) {
           className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-apple-border-subtle
                      bg-apple-card shadow-card transition-colors hover:border-apple-accent/20"
         >
-          <BookCover src={item.cover} title={item.title} />
+          <button
+            type="button"
+            onClick={() => onSelect(item.id)}
+            aria-label={`通过封面查看 ${item.title} 详情`}
+            className="motion-pressable block w-full cursor-pointer text-left transition-opacity hover:opacity-95
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/30"
+          >
+            <BookCover src={item.cover} title={item.title} />
+          </button>
           <div className="flex flex-1 flex-col px-3 py-3">
             <h3 className="min-h-[2.5em] line-clamp-2 text-[13px] font-semibold leading-snug text-apple-heading">
               {item.title}
