@@ -6,9 +6,13 @@ import { resolveConfigPaths } from './config/config-paths'
 import { ElectronSafeStorageCodec } from './config/secret-codec'
 import { SecretStore } from './config/secret-store'
 import { SettingsStore } from './config/settings-store'
-import { WebCrawler } from './crawler'
-import { createDownloadExecutor } from './download-executor'
+import { WebCrawler, type CrawlerRequestControlFactory } from './crawler'
+import {
+  createDownloadExecutor,
+  type DownloadExecutorBook,
+} from './download-executor'
 import { DownloadManager } from './download-manager'
+import { sharedDownloadRateLimiter } from './download-rate-limiter'
 import { DownloadTaskStore, resolveDownloadTaskPath } from './download-task-store'
 import { configureLogger, logger } from './logging/logger'
 
@@ -17,6 +21,24 @@ export interface AppServices {
   crawler: WebCrawler
   books: BookService
   downloads: DownloadManager
+}
+
+function createDownloadBookView(
+  book: Book,
+  requestControlFactory: CrawlerRequestControlFactory,
+): DownloadExecutorBook {
+  return {
+    bookId: book.bookId,
+    baseChapterUrl: book.baseChapterUrl,
+    volumes: book.volumes,
+    pictureUrls: book.pictureUrls,
+    basicInfo: book.basicInfo,
+    getFormattedTitle: (format) => book.getFormattedTitle(format),
+    getChapterImageUrls: (volumeName, signal) => (
+      book.getChapterImageUrls(volumeName, signal, requestControlFactory)
+    ),
+    getCoverContent: (signal) => book.getCoverContent(signal, requestControlFactory),
+  }
 }
 
 export function createAppServices(): AppServices {
@@ -36,7 +58,11 @@ export function createAppServices(): AppServices {
     legacyPath: paths.legacyPath,
   })
   const crawler = new WebCrawler(config)
-  const books = new BookService((bookId) => Book.create(bookId, crawler))
+  const books = new BookService((bookId, signal, onThrottleWait) => (
+    Book.create(bookId, crawler, signal, (kind, url) => (
+      sharedDownloadRateLimiter.createRequestControl(kind, url, { onThrottleWait })
+    ))
+  ))
   const environment = {
     isPackaged: app.isPackaged,
     downloadsPath: app.getPath('downloads'),
@@ -45,7 +71,11 @@ export function createAppServices(): AppServices {
   const executor = createDownloadExecutor({
     config,
     crawler,
-    loadBook: (bookId, signal) => Book.create(bookId, crawler, signal),
+    loadBook: async (bookId, signal, controlFactory, onThrottleWait) => {
+      const book = await books.get(bookId, signal, onThrottleWait)
+      return createDownloadBookView(book, controlFactory)
+    },
+    rateLimiter: sharedDownloadRateLimiter,
     environment,
   })
   const taskPath = resolveDownloadTaskPath({

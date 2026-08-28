@@ -151,6 +151,35 @@ describe('DownloadManager scheduling', () => {
     expect(manager.getSnapshot().tasks[0].title).toBe('测试作品')
   })
 
+  it('coalesces frequent progress snapshot publications', async () => {
+    vi.useFakeTimers()
+    const execution = deferred<DownloadExecutionResult>()
+    const { manager, executor } = setup()
+    let context: DownloadExecutionContext | undefined
+    executor.execute.mockImplementation((_task, value) => {
+      context = value
+      return execution.promise
+    })
+    const listener = vi.fn()
+    manager.subscribe(listener)
+    manager.enqueue(input())
+    listener.mockClear()
+
+    context?.onProgress({ current: 1, total: 10, phase: '下载中' })
+    context?.onProgress({ current: 2, total: 10, phase: '下载中' })
+
+    expect(listener).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener.mock.calls[0][0].snapshot.tasks[0]).toMatchObject({
+      progress: 20,
+      phase: '下载中',
+    })
+
+    execution.resolve({ warnings: [] })
+    await vi.runAllTimersAsync()
+  })
+
   it('cancels a queued task without executing it', async () => {
     const first = deferred<DownloadExecutionResult>()
     const { manager, executor } = setup()

@@ -43,6 +43,7 @@ const RETRYABLE_STATUSES = new Set<DownloadTaskStatus>(RETRYABLE_DOWNLOAD_STATUS
 const TERMINAL_STATUSES = new Set<DownloadTaskStatus>(TERMINAL_DOWNLOAD_STATUSES)
 const STORAGE_WARNING = '任务状态暂时无法保存，将自动重试。'
 const REQUIRED_STORAGE_ERROR = '任务状态无法保存，请检查磁盘后重试'
+const PROGRESS_PUBLISH_INTERVAL_MS = 500
 
 function cloneTask(task: DownloadTask): DownloadTask {
   return { ...task }
@@ -84,6 +85,7 @@ export class DownloadManager {
   private accepting = true
   private dirty = false
   private progressTimer: ReturnType<typeof setTimeout> | undefined
+  private progressPublishTimer: ReturnType<typeof setTimeout> | undefined
   private persistenceRetryTimer: ReturnType<typeof setTimeout> | undefined
   private drainRetryTimer: ReturnType<typeof setTimeout> | undefined
   private shutdownPromise: Promise<void> | undefined
@@ -331,8 +333,10 @@ export class DownloadManager {
       if (this.dirty) throw new Error(REQUIRED_STORAGE_ERROR)
     }
     if (this.progressTimer) clearTimeout(this.progressTimer)
+    if (this.progressPublishTimer) clearTimeout(this.progressPublishTimer)
     if (this.persistenceRetryTimer) clearTimeout(this.persistenceRetryTimer)
     this.progressTimer = undefined
+    this.progressPublishTimer = undefined
     this.persistenceRetryTimer = undefined
   }
 
@@ -369,6 +373,7 @@ export class DownloadManager {
     next: PersistedDownloadState,
     transition?: DownloadTransition,
   ): void {
+    this.cancelProgressPublish()
     this.state = next
     this.publish(transition)
     this.cancelProgressSave()
@@ -386,7 +391,12 @@ export class DownloadManager {
     this.applyRuntimeState(this.nextState(tasks), transition)
   }
 
-  private updateProgress(taskId: string, current: number, total: number, phase: string): void {
+  private updateProgress(
+    taskId: string,
+    current: number,
+    total: number,
+    phase: string,
+  ): void {
     const task = this.state.tasks.find((item) => item.id === taskId)
     if (!task || (task.status !== 'downloading' && task.status !== 'cancelling')) return
     const progress = total > 0
@@ -402,8 +412,23 @@ export class DownloadManager {
         }
       : item)
     this.state = this.nextState(tasks)
-    this.publish()
+    this.scheduleProgressPublish()
     this.scheduleProgressSave()
+  }
+
+  private scheduleProgressPublish(): void {
+    if (this.progressPublishTimer) return
+    this.progressPublishTimer = setTimeout(() => {
+      this.progressPublishTimer = undefined
+      this.publish()
+    }, PROGRESS_PUBLISH_INTERVAL_MS)
+    timerUnref(this.progressPublishTimer)
+  }
+
+  private cancelProgressPublish(): void {
+    if (!this.progressPublishTimer) return
+    clearTimeout(this.progressPublishTimer)
+    this.progressPublishTimer = undefined
   }
 
   private publish(transition?: DownloadTransition): void {

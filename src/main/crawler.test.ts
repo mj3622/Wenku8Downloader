@@ -36,7 +36,7 @@ vi.mock('./download-cancellation', async (importOriginal) => ({
 }))
 vi.mock('./logging/logger', () => ({ logger: mocks.logger }))
 
-import { WebCrawler, type CrawlerConfig } from './crawler'
+import { parseRetryAfter, WebCrawler, type CrawlerConfig } from './crawler'
 import { DownloadCancelledError } from './download-cancellation'
 import {
   COOKIE_NAMES,
@@ -100,6 +100,82 @@ afterEach(() => {
 })
 
 describe('WebCrawler.fetch logging', () => {
+  it('parses Retry-After seconds and HTTP dates', () => {
+    const now = Date.parse('2026-08-29T00:00:00Z')
+
+    expect(parseRetryAfter('7', now)).toBe(7_000)
+    expect(parseRetryAfter('Sat, 29 Aug 2026 00:00:09 GMT', now)).toBe(9_000)
+    expect(parseRetryAfter('invalid', now)).toBeUndefined()
+  })
+
+  it('exposes every attempt to adaptive request control and uses its retry delay', async () => {
+    mocks.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'Retry-After': '7' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/book/3057.htm',
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    const beforeAttempt = vi.fn(async () => undefined)
+    const afterAttempt = vi.fn()
+    const onResponse = vi.fn()
+    const getRetryDelay = vi.fn(() => 1_234)
+    const onRetry = vi.fn()
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await crawler.fetch('https://www.wenku8.net/book/3057.htm', true, undefined, {
+      beforeAttempt,
+      afterAttempt,
+      onResponse,
+      getRetryDelay,
+      onRetry,
+    })
+
+    expect(beforeAttempt).toHaveBeenCalledTimes(2)
+    expect(afterAttempt).toHaveBeenCalledTimes(2)
+    expect(onResponse).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      status: 429,
+      retryAfterMs: 7_000,
+    }))
+    expect(onResponse).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 200 }))
+    expect(getRetryDelay).toHaveBeenCalledWith(expect.objectContaining({
+      attempt: 1,
+      status: 429,
+      retryAfterMs: 7_000,
+    }))
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ delayMs: 1_234 }))
+    expect(mocks.sleepWithSignal).toHaveBeenCalledWith(1_234, undefined)
+  })
+
+  it('does not report a successful document response when reading its body fails', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/book/3057.htm',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => { throw new Error('response stream failed') }),
+    })
+    const onResponse = vi.fn()
+    const afterAttempt = vi.fn()
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await expect(crawler.fetch(
+      'https://www.wenku8.net/book/3057.htm',
+      true,
+      undefined,
+      { beforeAttempt: async () => undefined, afterAttempt, onResponse, getRetryDelay: () => 0 },
+    )).rejects.toThrow('response stream failed')
+
+    expect(onResponse).not.toHaveBeenCalled()
+    expect(afterAttempt).toHaveBeenCalledTimes(3)
+  })
+
   it('does not retry a fetch cancelled by its caller', async () => {
     const controller = new AbortController()
     mocks.fetch.mockImplementationOnce((_url: string, init: RequestInit) => (
@@ -333,6 +409,8 @@ describe('WebCrawler.getImageContent response reporting', () => {
       arrayBuffer: vi.fn(async () => { throw new Error('response stream failed') }),
     })
     const statuses: number[] = []
+    const onResponse = vi.fn()
+    const afterAttempt = vi.fn()
     const crawler = new WebCrawler(createConfig(), {})
 
     await expect(
@@ -340,9 +418,13 @@ describe('WebCrawler.getImageContent response reporting', () => {
         'https://example.com/image.jpg',
         1,
         (status) => statuses.push(status),
+        undefined,
+        { beforeAttempt: async () => undefined, afterAttempt, onResponse },
       ),
     ).rejects.toThrow('response stream failed')
     expect(statuses).toEqual([])
+    expect(onResponse).not.toHaveBeenCalled()
+    expect(afterAttempt).toHaveBeenCalledTimes(1)
   })
 
   it('continues image retries after a non-Error rejection', async () => {

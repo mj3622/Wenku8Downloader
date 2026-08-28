@@ -34,6 +34,98 @@ describe('BookService', () => {
     )
   })
 
+  it('lets one waiter cancel without aborting or evicting the shared load', async () => {
+    let resolveLoad!: (book: Book) => void
+    let sharedSignal!: AbortSignal
+    const loader = vi.fn((_bookId: string, signal: AbortSignal) => new Promise<Book>((resolve) => {
+      sharedSignal = signal
+      resolveLoad = resolve
+    }))
+    const service = new BookService(loader)
+    const controller = new AbortController()
+
+    const cancelledWaiter = service.get('123', controller.signal)
+    const sharedWaiter = service.get('123')
+    controller.abort()
+
+    await expect(cancelledWaiter).rejects.toThrow('下载已取消')
+    expect(sharedSignal.aborted).toBe(false)
+    resolveLoad(fakeBook('123'))
+    await expect(sharedWaiter).resolves.toEqual(fakeBook('123'))
+    await expect(service.get('123')).resolves.toEqual(fakeBook('123'))
+    expect(loader).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts and evicts an in-flight load after its last waiter cancels', async () => {
+    let firstSignal!: AbortSignal
+    const loader = vi.fn()
+      .mockImplementationOnce((_bookId: string, signal: AbortSignal) => {
+        firstSignal = signal
+        return new Promise<Book>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('shared load aborted')), { once: true })
+        })
+      })
+      .mockResolvedValueOnce(fakeBook('123'))
+    const service = new BookService(loader)
+    const controller = new AbortController()
+
+    const waiter = service.get('123', controller.signal)
+    controller.abort()
+
+    await expect(waiter).rejects.toThrow('下载已取消')
+    expect(firstSignal.aborted).toBe(true)
+    await expect(service.get('123')).resolves.toEqual(fakeBook('123'))
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not attach a new waiter to an aborted entry before its loader rejects', async () => {
+    let rejectFirstLoad!: (error: Error) => void
+    const loader = vi.fn()
+      .mockImplementationOnce(() => new Promise<Book>((_resolve, reject) => {
+        rejectFirstLoad = reject
+      }))
+      .mockResolvedValueOnce(fakeBook('123'))
+    const service = new BookService(loader)
+    const controller = new AbortController()
+
+    const cancelledWaiter = service.get('123', controller.signal)
+    controller.abort()
+    await expect(cancelledWaiter).rejects.toThrow('下载已取消')
+
+    const replacement = service.get('123')
+    expect(loader).toHaveBeenCalledTimes(2)
+    rejectFirstLoad(new Error('delayed abort rejection'))
+
+    await expect(replacement).resolves.toEqual(fakeBook('123'))
+    await expect(service.get('123')).resolves.toEqual(fakeBook('123'))
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
+  it('broadcasts throttle waits to every active waiter', async () => {
+    let resolveLoad!: (book: Book) => void
+    let notifyThrottle!: (waitMs: number) => void
+    const loader = vi.fn((
+      _bookId: string,
+      _signal: AbortSignal,
+      onThrottleWait: (waitMs: number) => void,
+    ) => new Promise<Book>((resolve) => {
+      resolveLoad = resolve
+      notifyThrottle = onThrottleWait
+    }))
+    const service = new BookService(loader)
+    const firstProgress = vi.fn()
+    const secondProgress = vi.fn()
+
+    const first = service.get('123', undefined, firstProgress)
+    const second = service.get('123', undefined, secondProgress)
+    notifyThrottle(120_000)
+
+    expect(firstProgress).toHaveBeenCalledWith(120_000)
+    expect(secondProgress).toHaveBeenCalledWith(120_000)
+    resolveLoad(fakeBook('123'))
+    await Promise.all([first, second])
+  })
+
   it('logs cache misses and loaded book summaries', async () => {
     const book = {
       bookId: '3057',

@@ -1,5 +1,6 @@
 import type { Book } from './book'
 import type { ConfigService } from './config/config-service'
+import type { CrawlerRequestControlFactory } from './crawler'
 import {
   Downloader,
   NoUsableDownloadContentError,
@@ -14,6 +15,10 @@ import {
   DownloadCancelledError,
   throwIfDownloadCancelled,
 } from './download-cancellation'
+import {
+  DownloadRateLimiter,
+  sharedDownloadRateLimiter,
+} from './download-rate-limiter'
 import { logger } from './logging/logger'
 import type { DownloadTask } from '../shared/ipc-types'
 
@@ -51,7 +56,13 @@ export interface DownloadRunner {
 interface DownloadExecutorDependencies {
   config: Pick<ConfigService, 'getDownloadSnapshot'>
   crawler: DownloaderCrawler
-  loadBook(bookId: string, signal: AbortSignal): Promise<DownloadExecutorBook>
+  loadBook(
+    bookId: string,
+    signal: AbortSignal,
+    requestControlFactory: CrawlerRequestControlFactory,
+    onThrottleWait: (waitMs: number) => void,
+  ): Promise<DownloadExecutorBook>
+  rateLimiter?: DownloadRateLimiter
   environment: {
     isPackaged: boolean
     downloadsPath: string
@@ -125,22 +136,43 @@ export function createDownloadExecutor(
 ): DownloadExecutor {
   const createRunner = dependencies.createDownloader
     ?? ((crawler, runtimeConfig, options) => new Downloader(crawler, runtimeConfig, options))
+  const rateLimiter = dependencies.rateLimiter ?? sharedDownloadRateLimiter
 
   return {
     async execute(task, context) {
       throwIfDownloadCancelled(context.signal)
+      let lastProgress: DownloadProgress = { current: 0, total: 0, phase: '准备下载...' }
+      const publishProgress = (progress: DownloadProgress): void => {
+        lastProgress = progress
+        context.onProgress(progress)
+      }
+      const handleThrottleWait = (waitMs: number): void => publishProgress({
+        ...lastProgress,
+        phase: `服务器限流，已自动减速，约 ${Math.max(1, Math.ceil(waitMs / 1000))} 秒后继续`,
+      })
+      const requestControlFactory: CrawlerRequestControlFactory = (kind, url) => (
+        rateLimiter.createRequestControl(kind, url, {
+          onThrottleWait: handleThrottleWait,
+        })
+      )
       const downloadConfig = dependencies.config.getDownloadSnapshot()
       const runtimeConfig: DownloadRuntimeConfig = {
         ...downloadConfig,
         rootPath: resolveDownloadRoot(downloadConfig, dependencies.environment),
       }
-      const book = await dependencies.loadBook(task.bookId, context.signal)
+      const book = await dependencies.loadBook(
+        task.bookId,
+        context.signal,
+        requestControlFactory,
+        handleThrottleWait,
+      )
       throwIfDownloadCancelled(context.signal)
       const downloader = createRunner(dependencies.crawler, runtimeConfig, {
         logContext: { operationId: task.id, taskId: task.id },
         signal: context.signal,
+        rateLimiter,
       })
-      downloader.setOnProgress(context.onProgress)
+      downloader.setOnProgress(publishProgress)
 
       if (task.type === 'epub_full' || task.type === 'epub_volume') {
         if (task.volume && !book.volumes[task.volume]) {
@@ -174,8 +206,13 @@ export function createDownloadExecutor(
       const warnings: string[] = []
       let firstIllustrationError: unknown
       let completedVolumes = 0
-      for (const volume of volumes) {
+      for (const [volumePosition, volume] of volumes.entries()) {
         throwIfDownloadCancelled(context.signal)
+        publishProgress({
+          current: volumePosition,
+          total: volumes.length,
+          phase: `正在准备插图 (${volume})`,
+        })
         let urls: string[] | null
         try {
           urls = await book.getChapterImageUrls(volume, context.signal)
@@ -199,6 +236,16 @@ export function createDownloadExecutor(
         }
         const volumeIndex = Object.keys(book.volumes).indexOf(volume)
         try {
+          downloader.setOnProgress((progress) => {
+            const volumeFraction = progress.total > 0
+              ? Math.max(0, Math.min(1, progress.current / progress.total))
+              : 0
+            publishProgress({
+              current: volumePosition + volumeFraction,
+              total: volumes.length,
+              phase: progress.phase,
+            })
+          })
           await downloader.downloadPictures(
             urls,
             volume,

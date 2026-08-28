@@ -36,6 +36,34 @@ export interface CrawlerConfig {
   replaceCookies(input: CookieSnapshot): void
 }
 
+export interface CrawlerResponseInfo {
+  status: number
+  latencyMs: number
+  retryAfterMs?: number
+}
+
+export interface CrawlerRetryInfo {
+  attempt: number
+  status?: number
+  retryAfterMs?: number
+  error: Error
+}
+
+export interface CrawlerRequestControl {
+  beforeAttempt?: (signal?: AbortSignal) => Promise<void>
+  afterAttempt?: () => void
+  onResponse?: (info: CrawlerResponseInfo) => void
+  getRetryDelay?: (info: CrawlerRetryInfo) => number
+  onRetry?: (info: CrawlerRetryInfo & { delayMs: number }) => void
+}
+
+export type CrawlerRequestKind = 'document' | 'image'
+
+export type CrawlerRequestControlFactory = (
+  kind: CrawlerRequestKind,
+  url: string,
+) => CrawlerRequestControl
+
 class CredentialsChangedDuringLoginError extends Error {
   constructor() {
     super('登录期间账号已变更，请重新登录')
@@ -51,12 +79,22 @@ function formatHttpError(status: number): string {
 
 export class HttpStatusError extends Error {
   readonly status: number
+  readonly retryAfterMs?: number
 
-  constructor(status: number) {
+  constructor(status: number, retryAfterMs?: number) {
     super(formatHttpError(status))
     this.name = 'HttpStatusError'
     this.status = status
+    this.retryAfterMs = retryAfterMs
   }
+}
+
+export function parseRetryAfter(value: string | null | undefined, nowMs = Date.now()): number | undefined {
+  const normalized = value?.trim()
+  if (!normalized) return undefined
+  if (/^\d+$/.test(normalized)) return Number(normalized) * 1_000
+  const dateMs = Date.parse(normalized)
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - nowMs) : undefined
 }
 
 function errorMessage(error: unknown): string {
@@ -164,12 +202,23 @@ export class WebCrawler {
     }
   }
 
-  async fetch(url: string, parse?: true, signal?: AbortSignal): Promise<CheerioDocument>
-  async fetch(url: string, parse: false, signal?: AbortSignal): Promise<Buffer>
+  async fetch(
+    url: string,
+    parse?: true,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<CheerioDocument>
+  async fetch(
+    url: string,
+    parse: false,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<Buffer>
   async fetch(
     url: string,
     parse: boolean = true,
     signal?: AbortSignal,
+    control?: CrawlerRequestControl,
   ): Promise<CheerioDocument | Buffer> {
     // Resolve relative URLs against base
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -189,7 +238,19 @@ export class WebCrawler {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       throwIfDownloadCancelled(signal)
+      let attemptAcquired = false
+      const releaseAttempt = (): void => {
+        if (!attemptAcquired) return
+        attemptAcquired = false
+        control?.afterAttempt?.()
+      }
       try {
+        if (control?.beforeAttempt) {
+          await control.beforeAttempt(signal)
+          attemptAcquired = true
+          throwIfDownloadCancelled(signal)
+        }
+        const attemptStartedAt = performance.now()
         const headers: Record<string, string> = {
           ...COMMON_HEADERS,
           'Referer': `${BASE_URL}/`,
@@ -202,11 +263,23 @@ export class WebCrawler {
           signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
         lastStatus = resp.status
-
-        if (!resp.ok) throw new HttpStatusError(resp.status)
+        const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
+        if (!resp.ok) {
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          throw new HttpStatusError(resp.status, retryAfterMs)
+        }
 
         if (parse) {
           const buf = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
           // wenku8 uses GBK encoding
           const html = iconv.decode(buf, 'gbk')
           const $ = cheerio.load(html)
@@ -219,24 +292,48 @@ export class WebCrawler {
             attempt: attempt + 1,
             durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
           })
+          releaseAttempt()
           return $
         } else {
-          return Buffer.from(await resp.arrayBuffer())
+          const buf = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          releaseAttempt()
+          return buf
         }
       } catch (err) {
+        releaseAttempt()
         throwIfDownloadCancelled(signal)
         lastError = normalizeError(err)
         if (attempt < maxRetries - 1) {
+          const status = lastError instanceof HttpStatusError ? lastError.status : undefined
+          const retryAfterMs = lastError instanceof HttpStatusError
+            ? lastError.retryAfterMs
+            : undefined
+          const retryInfo: CrawlerRetryInfo = {
+            attempt: attempt + 1,
+            ...(status === undefined ? {} : { status }),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+            error: lastError,
+          }
+          const requestedDelay = control?.getRetryDelay?.(retryInfo)
+          const backoffMs = requestedDelay !== undefined && Number.isFinite(requestedDelay)
+            ? Math.max(0, Math.round(requestedDelay))
+            : 8000
+          control?.onRetry?.({ ...retryInfo, delayMs: backoffMs })
           logger.warn('network.request.retry', '网页请求失败，准备重试', {
             method: 'GET',
             url: sanitizeLogText(url),
             status: lastStatus,
             attempt: attempt + 1,
             maxAttempts: maxRetries,
-            backoffMs: 8000,
+            backoffMs,
             error: sanitizeLogText(lastError.message),
           })
-          await sleepWithSignal(8000, signal)
+          await sleepWithSignal(backoffMs, signal)
           // Re-inject cookies on retry
           await this.injectCookies()
         }
@@ -375,6 +472,7 @@ export class WebCrawler {
     maxRetries = 3,
     onResponseStatus?: (status: number) => void,
     signal?: AbortSignal,
+    control?: CrawlerRequestControl,
   ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
     let lastError: string | null = null
@@ -382,7 +480,19 @@ export class WebCrawler {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       throwIfDownloadCancelled(signal)
+      let attemptAcquired = false
+      const releaseAttempt = (): void => {
+        if (!attemptAcquired) return
+        attemptAcquired = false
+        control?.afterAttempt?.()
+      }
       try {
+        if (control?.beforeAttempt) {
+          await control.beforeAttempt(signal)
+          attemptAcquired = true
+          throwIfDownloadCancelled(signal)
+        }
+        const attemptStartedAt = performance.now()
         const resp = await net.fetch(url, {
           method: 'GET',
           headers: {
@@ -391,37 +501,52 @@ export class WebCrawler {
           },
           signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
+        const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
         if (resp.ok) {
           const content = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
           onResponseStatus?.(resp.status)
+          releaseAttempt()
           return content
         }
 
+        control?.onResponse?.({
+          status: resp.status,
+          latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+        })
         onResponseStatus?.(resp.status)
-        lastCause = new HttpStatusError(resp.status)
-        lastError = lastCause.message
-        const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
-        if (attempt < maxRetries - 1) {
-          logger.warn('network.image.retry', '图片请求失败，准备重试', {
-            method: 'GET',
-            url: sanitizeLogText(url),
-            status: resp.status,
-            attempt: attempt + 1,
-            maxAttempts: maxRetries,
-            backoffMs,
-          })
-          await sleepWithSignal(backoffMs, signal)
-        }
+        throw new HttpStatusError(resp.status, retryAfterMs)
       } catch (err) {
+        releaseAttempt()
         throwIfDownloadCancelled(signal)
         lastCause = normalizeError(err)
         lastError = lastCause.message
-        const is429 = lastError.includes('429')
-        const backoffMs = is429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
+        const status = lastCause instanceof HttpStatusError ? lastCause.status : undefined
+        const retryAfterMs = lastCause instanceof HttpStatusError
+          ? lastCause.retryAfterMs
+          : undefined
+        const retryInfo: CrawlerRetryInfo = {
+          attempt: attempt + 1,
+          ...(status === undefined ? {} : { status }),
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          error: lastCause,
+        }
+        const requestedDelay = control?.getRetryDelay?.(retryInfo)
+        const defaultBackoffMs = status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
+        const backoffMs = requestedDelay !== undefined && Number.isFinite(requestedDelay)
+          ? Math.max(0, Math.round(requestedDelay))
+          : defaultBackoffMs
         if (attempt < maxRetries - 1) {
+          control?.onRetry?.({ ...retryInfo, delayMs: backoffMs })
           logger.warn('network.image.retry', '图片请求异常，准备重试', {
             method: 'GET',
             url: sanitizeLogText(url),
+            ...(status === undefined ? {} : { status }),
             attempt: attempt + 1,
             maxAttempts: maxRetries,
             backoffMs,

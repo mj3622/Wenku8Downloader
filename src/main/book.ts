@@ -1,4 +1,8 @@
-import type { WebCrawler } from './crawler'
+import type {
+  CrawlerRequestControlFactory,
+  CrawlerRequestKind,
+  WebCrawler,
+} from './crawler'
 import type { TitleFormat } from '../shared/config-types'
 import { formatBookTitle } from '../shared/title-format'
 import type { BasicInfo, Chapter } from './types'
@@ -21,18 +25,26 @@ export class Book {
   }
 
   private crawler: WebCrawler
+  private readonly requestControlFactory?: CrawlerRequestControlFactory
+  private readonly chapterImageUrlCache = new Map<string, string[] | null>()
 
-  private constructor(bookId: string, crawler: WebCrawler) {
+  private constructor(
+    bookId: string,
+    crawler: WebCrawler,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ) {
     this.bookId = bookId
     this.crawler = crawler
+    this.requestControlFactory = requestControlFactory
   }
 
   static async create(
     bookId: string,
     crawler: WebCrawler,
     signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
   ): Promise<Book> {
-    const book = new Book(bookId, crawler)
+    const book = new Book(bookId, crawler, requestControlFactory)
 
     // 顺序与 Python 一致：章节 → 图片映射 → 基本信息
     const [baseUrl, volumes] = await book.fetchChapters(signal)
@@ -44,11 +56,29 @@ export class Book {
     return book
   }
 
+  private requestControl(
+    kind: CrawlerRequestKind,
+    url: string,
+    requestControlFactory = this.requestControlFactory,
+  ) {
+    if (!requestControlFactory) return undefined
+    let absoluteUrl = url
+    try {
+      absoluteUrl = new URL(url, 'https://www.wenku8.net/').toString()
+    } catch {
+      // WebCrawler will surface the malformed URL; the scheduler still groups it safely.
+    }
+    return requestControlFactory(kind, absoluteUrl)
+  }
+
   private async fetchChapters(
     signal?: AbortSignal,
   ): Promise<[string, Record<string, Chapter[]>]> {
     const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl, true, signal)
+    const bookControl = this.requestControl('document', bookUrl)
+    const $ = bookControl
+      ? await this.crawler.fetch(bookUrl, true, signal, bookControl)
+      : await this.crawler.fetch(bookUrl, true, signal)
 
     // 找到 "小说目录" 链接
     let chapterIndexUrl = ''
@@ -64,7 +94,10 @@ export class Book {
       throw new Error('未找到小说目录链接')
     }
 
-    const index$ = await this.crawler.fetch(chapterIndexUrl, true, signal)
+    const indexControl = this.requestControl('document', chapterIndexUrl)
+    const index$ = indexControl
+      ? await this.crawler.fetch(chapterIndexUrl, true, signal, indexControl)
+      : await this.crawler.fetch(chapterIndexUrl, true, signal)
     const baseUrl = chapterIndexUrl.replace(/index\.htm$/, '')
 
     const volumes: Record<string, Chapter[]> = {}
@@ -105,7 +138,10 @@ export class Book {
 
   private async fetchBasicInfo(signal?: AbortSignal): Promise<BasicInfo> {
     const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl, true, signal)
+    const control = this.requestControl('document', bookUrl)
+    const $ = control
+      ? await this.crawler.fetch(bookUrl, true, signal, control)
+      : await this.crawler.fetch(bookUrl, true, signal)
 
     const contentDiv = $('#content')
     const table = contentDiv.find('table').first()
@@ -169,13 +205,21 @@ export class Book {
   async getChapterImageUrls(
     volumeName?: string,
     signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
   ): Promise<string[] | null> {
     if (!volumeName) return null
+    if (this.chapterImageUrlCache.has(volumeName)) {
+      const cached = this.chapterImageUrlCache.get(volumeName)
+      return cached ? [...cached] : null
+    }
     const pictureUrl = this.pictureUrls[volumeName]
     if (!pictureUrl) return null
 
     const url = `${this.baseChapterUrl}${pictureUrl}`
-    const $ = await this.crawler.fetch(url, true, signal)
+    const control = this.requestControl('document', url, requestControlFactory)
+    const $ = control
+      ? await this.crawler.fetch(url, true, signal, control)
+      : await this.crawler.fetch(url, true, signal)
     const urls: string[] = []
 
     $('img').each((_i, img) => {
@@ -183,13 +227,21 @@ export class Book {
       if (src) urls.push(src)
     })
 
-    return urls.length > 0 ? urls : null
+    const result = urls.length > 0 ? urls : null
+    this.chapterImageUrlCache.set(volumeName, result)
+    return result ? [...result] : null
   }
 
-  async getCoverContent(signal?: AbortSignal): Promise<Buffer> {
+  async getCoverContent(
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ): Promise<Buffer> {
     const coverUrl = this.basicInfo['cover']
     if (!coverUrl) throw new Error('无封面图片')
-    const content = await this.crawler.getImageContent(coverUrl, 3, undefined, signal)
+    const control = this.requestControl('image', coverUrl, requestControlFactory)
+    const content = control
+      ? await this.crawler.getImageContent(coverUrl, 3, undefined, signal, control)
+      : await this.crawler.getImageContent(coverUrl, 3, undefined, signal)
     if (!content || content.byteLength === 0) throw new Error('封面下载失败')
     return content
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { DownloadTask } from '../../shared/ipc-types'
 import { DownloadCancelledError } from '../download-cancellation'
+import type { CrawlerRequestControlFactory } from '../crawler'
 import type { DownloadProgress } from '../downloader'
 import {
   createDownloadExecutor,
@@ -65,6 +66,8 @@ function setup(
   const loadBook = vi.fn<(
     bookId: string,
     signal: AbortSignal,
+    requestControlFactory: CrawlerRequestControlFactory,
+    onThrottleWait: (waitMs: number) => void,
   ) => Promise<DownloadExecutorBook>>(async () => targetBook)
   const executor = createDownloadExecutor({
     config: {
@@ -123,9 +126,10 @@ describe('createDownloadExecutor', () => {
           taskId: '123e4567-e89b-42d3-a456-426614174000',
         },
         signal: controller.signal,
+        rateLimiter: expect.anything(),
       },
     )
-    expect(setOnProgress).toHaveBeenCalledWith(onProgress)
+    expect(setOnProgress).toHaveBeenCalledWith(expect.any(Function))
     expect(downloadNovel).toHaveBeenCalledWith(expect.anything(), undefined)
   })
 
@@ -144,11 +148,34 @@ describe('createDownloadExecutor', () => {
       onProgress: vi.fn(),
     })
 
-    await vi.waitFor(() => expect(loadBook).toHaveBeenCalledWith('100', controller.signal))
+    await vi.waitFor(() => expect(loadBook).toHaveBeenCalledWith(
+      '100',
+      controller.signal,
+      expect.any(Function),
+      expect.any(Function),
+    ))
     controller.abort()
     await expect(execution).rejects.toBeInstanceOf(DownloadCancelledError)
     expect(loadSignal?.aborted).toBe(true)
     expect(createDownloader).not.toHaveBeenCalled()
+  })
+
+  it('publishes throttle waits reported while loading shared book metadata', async () => {
+    const { executor, loadBook } = setup()
+    loadBook.mockImplementation(async (_bookId, _signal, _factory, onThrottleWait) => {
+      onThrottleWait(120_000)
+      return book()
+    })
+    const onProgress = vi.fn()
+
+    await executor.execute(task(), {
+      signal: new AbortController().signal,
+      onProgress,
+    })
+
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: '服务器限流，已自动减速，约 120 秒后继续',
+    }))
   })
 
   it('executes image downloads for one selected volume', async () => {
@@ -195,6 +222,37 @@ describe('createDownloadExecutor', () => {
       ],
     })
     expect(downloadPictures).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports all-volume image progress across volumes instead of restarting at one hundred percent', async () => {
+    const targetBook = book({
+      volumes: {
+        '第一卷': [{ name: '插图', link: 'first.htm' }],
+        '第二卷': [{ name: '插图', link: 'second.htm' }],
+      },
+      pictureUrls: { '第一卷': 'first.htm', '第二卷': 'second.htm' },
+      getChapterImageUrls: vi.fn(async (volumeName?: string) => (
+        [`https://example.com/${volumeName}.jpg`]
+      )),
+    })
+    const { executor, downloadPictures, setOnProgress } = setup(targetBook)
+    const onProgress = vi.fn<(progress: DownloadProgress) => void>()
+    downloadPictures.mockImplementation(async () => {
+      const reportProgress = setOnProgress.mock.calls.at(-1)?.[0]
+      reportProgress?.({ current: 1, total: 1, phase: '正在下载图片' })
+    })
+
+    await executor.execute(task({ type: 'images' }), {
+      signal: new AbortController().signal,
+      onProgress,
+    })
+
+    expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      { current: 0, total: 2, phase: '正在准备插图 (第一卷)' },
+      { current: 1, total: 2, phase: '正在下载图片' },
+      { current: 1, total: 2, phase: '正在准备插图 (第二卷)' },
+      { current: 2, total: 2, phase: '正在下载图片' },
+    ])
   })
 
   it('does not turn a native abort on the last illustration page into partial success', async () => {
