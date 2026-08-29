@@ -3,6 +3,8 @@ import {
   validateBookId,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
+  validateDiscoveryRankingPayload,
+  validateDiscoveryHomePayload,
   validateEnqueueDownloadInput,
   validateExternalUrl,
   validateLoginOperationId,
@@ -99,6 +101,36 @@ describe('IPC validation', () => {
     expect(validateDownloadHistoryScope('completed')).toBe('completed')
     expect(validateDownloadHistoryScope('terminal')).toBe('terminal')
     expect(() => validateDownloadHistoryScope('everything')).toThrow('清理范围')
+  })
+
+  it('validates and normalizes discovery ranking payloads', () => {
+    expect(validateDiscoveryRankingPayload({
+      type: 'monthvisit',
+      page: 3,
+      refresh: true,
+      ignored: 'value',
+    })).toEqual({ type: 'monthvisit', page: 3, refresh: true })
+
+    expect(validateDiscoveryRankingPayload({ type: 'allvisit', page: 1 }))
+      .toEqual({ type: 'allvisit', page: 1, refresh: false })
+  })
+
+  it('accepts only a boolean discovery home refresh flag', () => {
+    expect(validateDiscoveryHomePayload({})).toEqual({ refresh: false })
+    expect(validateDiscoveryHomePayload({ refresh: true })).toEqual({ refresh: true })
+    expect(() => validateDiscoveryHomePayload({ refresh: 'yes' })).toThrow('发现页')
+    expect(() => validateDiscoveryHomePayload(null)).toThrow('发现页')
+  })
+
+  it.each([
+    { type: 'unknown', page: 1 },
+    { type: 'allvisit', page: 0 },
+    { type: 'allvisit', page: 1.5 },
+    { type: 'allvisit', page: 10_001 },
+    { type: 'allvisit', page: 1, refresh: 'yes' },
+    null,
+  ])('rejects malformed discovery ranking payloads %#', (input) => {
+    expect(() => validateDiscoveryRankingPayload(input)).toThrow('榜单')
   })
 
   it('accepts bounded renderer error reports', () => {

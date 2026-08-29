@@ -130,3 +130,70 @@ export interface CacheClearResult {
 export interface CacheApi {
   clearCache(): Promise<CacheClearResult>
 }
+
+export const RANKING_OPTIONS = [
+  { type: 'allvisit', label: '总排行榜' },
+  { type: 'weekvisit', label: '周排行榜' },
+  { type: 'monthvisit', label: '月排行榜' },
+  { type: 'dayvisit', label: '日排行榜' },
+  { type: 'weekvote', label: '本周推荐榜' },
+  { type: 'goodnum', label: '收藏榜' },
+  { type: 'lastupdate', label: '最近更新' },
+  { type: 'anime', label: '动画化作品' },
+  { type: 'postdate', label: '最新入库' },
+] as const
+
+export type RankingType = typeof RANKING_OPTIONS[number]['type']
+
+export const RANKING_TYPES: readonly RankingType[] = Object.freeze(
+  RANKING_OPTIONS.map(({ type }) => type),
+)
+
+export const RANKING_TITLES: Readonly<Record<RankingType, string>> = Object.freeze(
+  Object.fromEntries(RANKING_OPTIONS.map(({ type, label }) => [type, label])) as Record<
+    RankingType,
+    string
+  >,
+)
+
+export const DISCOVERY_FRESH_MS = 30 * 60 * 1000
+
+export function isDiscoveryFresh(fetchedAt: number, now = Date.now()): boolean {
+  return Number.isFinite(fetchedAt)
+    && Math.max(0, now - fetchedAt) <= DISCOVERY_FRESH_MS
+}
+
+export interface DiscoveryBook {
+  id: string
+  title: string
+  cover: string
+  rank?: number
+}
+
+export interface DiscoverySection {
+  key: string
+  title: string
+  moreRanking: RankingType
+  books: DiscoveryBook[]
+}
+
+export interface DiscoveryHome {
+  sections: DiscoverySection[]
+  fetchedAt: number
+  stale: boolean
+}
+
+export interface RankingPage {
+  type: RankingType
+  title: string
+  page: number
+  totalPages: number
+  books: DiscoveryBook[]
+  fetchedAt: number
+  stale: boolean
+}
+
+export interface DiscoveryApi {
+  getDiscoveryHome(refresh?: boolean): Promise<DiscoveryHome>
+  getRanking(type: RankingType, page: number, refresh?: boolean): Promise<RankingPage>
+}

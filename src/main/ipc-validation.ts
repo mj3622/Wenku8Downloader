@@ -1,11 +1,13 @@
 import {
   DOWNLOAD_TASK_TYPES,
   OPEN_FOLDER_TARGETS,
+  RANKING_TYPES,
   type DownloadHistoryScope,
   type DownloadTaskType,
   type EnqueueDownloadInput,
   type OpenFolderTarget,
   type RendererErrorReport,
+  type RankingType,
 } from '../shared/ipc-types'
 
 const EXTERNAL_HOSTS = new Set(['github.com', 'wenku8.net', 'www.wenku8.net'])
@@ -14,6 +16,7 @@ const MAX_RENDERER_STACK = 32 * 1024
 const MAX_RENDERER_SOURCE = 4 * 1024
 const MAX_RENDERER_REPORT = 64 * 1024
 const MAX_VOLUME_COVER_REQUESTS = 500
+const MAX_RANKING_PAGE = 10_000
 const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
 
@@ -31,6 +34,49 @@ export function validateSearchQuery(value: unknown): string {
     throw new Error('请输入 1 到 100 个字符进行搜索')
   }
   return query
+}
+
+export function validateDiscoveryRankingPayload(value: unknown): {
+  type: RankingType
+  page: number
+  refresh: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('榜单请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.type !== 'string'
+    || !RANKING_TYPES.includes(record.type as RankingType)
+  ) {
+    throw new Error('榜单类型无效')
+  }
+  if (
+    !Number.isSafeInteger(record.page)
+    || (record.page as number) < 1
+    || (record.page as number) > MAX_RANKING_PAGE
+  ) {
+    throw new Error('榜单页码无效')
+  }
+  if (record.refresh !== undefined && typeof record.refresh !== 'boolean') {
+    throw new Error('榜单刷新参数无效')
+  }
+  return {
+    type: record.type as RankingType,
+    page: record.page as number,
+    refresh: record.refresh ?? false,
+  }
+}
+
+export function validateDiscoveryHomePayload(value: unknown): { refresh: boolean } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('发现页请求格式无效')
+  }
+  const refresh = (value as Record<string, unknown>).refresh
+  if (refresh !== undefined && typeof refresh !== 'boolean') {
+    throw new Error('发现页刷新参数无效')
+  }
+  return { refresh: refresh === true }
 }
 
 export function validateExternalUrl(value: unknown): string {

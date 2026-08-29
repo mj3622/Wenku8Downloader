@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DownloadApi,
   CacheApi,
+  DiscoveryApi,
   DownloadStateEvent,
   EnqueueDownloadInput,
 } from '../../shared/ipc-types'
@@ -26,7 +27,7 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & CacheApi & {
+type ExposedApi = DownloadApi & CacheApi & DiscoveryApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
@@ -100,6 +101,20 @@ describe('preload download boundary', () => {
       revalidate: true,
     })
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'cache:clear')
+  })
+
+  it('uses fixed discovery channels and bounded payloads', async () => {
+    mocks.invoke.mockResolvedValue({ sections: [], fetchedAt: 1, stale: false })
+
+    await exposedApi.getDiscoveryHome(true)
+    await exposedApi.getRanking('dayvisit', 2, false)
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'discovery:get-home', { refresh: true })
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'discovery:get-ranking', {
+      type: 'dayvisit',
+      page: 2,
+      refresh: false,
+    })
   })
 
   it('forwards task and history mutation payloads', async () => {

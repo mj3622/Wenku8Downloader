@@ -9,12 +9,14 @@ import type {
   CookieProgress,
   BookLoadOptions,
   CacheApi,
+  DiscoveryApi,
   DownloadApi,
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
   LogStats,
   OpenFolderTarget,
+  RankingType,
   RendererErrorReport,
   VolumeCoverSnapshot,
 } from '../shared/ipc-types'
@@ -55,12 +57,22 @@ const cacheApi: CacheApi = {
   clearCache: () => ipcRenderer.invoke('cache:clear'),
 }
 
+const discoveryApi: DiscoveryApi = {
+  getDiscoveryHome: (refresh = false) => (
+    ipcRenderer.invoke('discovery:get-home', { refresh })
+  ),
+  getRanking: (type: RankingType, page: number, refresh = false) => (
+    ipcRenderer.invoke('discovery:get-ranking', { type, page, refresh })
+  ),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   ...configApi,
   ...downloadApi,
   ...cacheApi,
+  ...discoveryApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),

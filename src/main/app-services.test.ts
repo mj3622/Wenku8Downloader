@@ -1,12 +1,14 @@
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getCookies: vi.fn(async (): Promise<Array<{ name: string; value: string }>> => []),
   setCookie: vi.fn(async (): Promise<void> => undefined),
   removeCookie: vi.fn(async (): Promise<void> => undefined),
+  sessionFetch: vi.fn(),
+  fromPartition: vi.fn(),
   configureLogger: vi.fn(),
   logInfo: vi.fn(),
   logError: vi.fn(),
@@ -22,12 +24,8 @@ vi.mock('electron', () => ({
     isPackaged: false,
     getPath: vi.fn(() => 'unused'),
   },
-  safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (plainText: string) => Buffer.from(plainText, 'utf-8'),
-    decryptString: (encrypted: Buffer) => encrypted.toString('utf-8'),
-  },
   session: {
+    fromPartition: mocks.fromPartition,
     defaultSession: {
       cookies: {
         get: mocks.getCookies,
@@ -41,6 +39,17 @@ vi.mock('electron', () => ({
 
 const originalCwd = process.cwd()
 
+beforeEach(() => {
+  mocks.fromPartition.mockReturnValue({
+    cookies: {
+      get: mocks.getCookies,
+      set: mocks.setCookie,
+      remove: mocks.removeCookie,
+    },
+    fetch: mocks.sessionFetch,
+  })
+})
+
 afterEach(() => {
   process.chdir(originalCwd)
   mocks.getCookies.mockReset()
@@ -49,6 +58,8 @@ afterEach(() => {
   mocks.setCookie.mockResolvedValue(undefined)
   mocks.removeCookie.mockReset()
   mocks.removeCookie.mockResolvedValue(undefined)
+  mocks.sessionFetch.mockReset()
+  mocks.fromPartition.mockReset()
   mocks.configureLogger.mockReset()
   mocks.logInfo.mockReset()
   mocks.logError.mockReset()
@@ -65,12 +76,23 @@ describe('createAppServices', () => {
       const { createAppServices } = await import('./app-services')
       await expect(stat(configDir)).rejects.toThrow()
 
-      createAppServices()
+      const services = createAppServices()
+
+      expect(services.discovery).toEqual(expect.objectContaining({
+        getHome: expect.any(Function),
+        getRanking: expect.any(Function),
+        clearMemory: expect.any(Function),
+      }))
+      expect(mocks.fromPartition).toHaveBeenCalledWith('wenku8')
+      expect(services.networkSession).toBe(mocks.fromPartition.mock.results[0]?.value)
 
       expect((await readdir(configDir)).sort()).toEqual([
         'secrets.enc',
         'settings.toml',
       ])
+      await expect(readFile(join(configDir, 'secrets.enc'), 'utf-8')).resolves.toContain(
+        '"cipher": "local-aes-256-gcm-v1"',
+      )
       await expect(stat(taskStatePath)).rejects.toThrow()
     } finally {
       process.chdir(originalCwd)

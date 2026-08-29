@@ -53,6 +53,7 @@ function createWindow(services: AppServices): void {
     title: '轻小说文库下载器',
     icon: getIconPath(),
     webPreferences: {
+      session: services.networkSession,
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,

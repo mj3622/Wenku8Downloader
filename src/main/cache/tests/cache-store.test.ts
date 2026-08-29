@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { BookSnapshot } from '../../book-cache-model'
 import { createBookVersion, parseBookSnapshot } from '../../book-cache-model'
 import { GIB, UNUSED_MAX_AGE_MS } from '../cache-policy'
-import { CacheStore, type CacheAddress } from '../cache-store'
+import {
+  CacheStore,
+  type CacheAddress,
+  type SharedCacheAddress,
+} from '../cache-store'
 import { hashCacheKey } from '../cache-key'
 
 const roots: string[] = []
@@ -71,6 +75,10 @@ function imageAddress(): CacheAddress {
   }
 }
 
+function discoveryAddress(sourceKey = 'ranking:allvisit:1'): SharedCacheAddress {
+  return { namespace: 'discovery', sourceKey }
+}
+
 async function createStore(options: {
   freeBytes?: number
   now?: () => number
@@ -106,6 +114,42 @@ describe('CacheStore', () => {
     await expect(store.readJson(chapterAddress(), parseChapter)).resolves.toEqual(chapter)
     const serializedPaths = JSON.stringify(await import('fs/promises').then(fs => fs.readdir(root, { recursive: true })))
     expect(serializedPaths).not.toContain('wenku8.net')
+  })
+
+  it('writes shared JSON with hashed keys and clears it only during a full clear', async () => {
+    const { root, store } = await createStore()
+    const address = discoveryAddress()
+    await expect(store.writeSharedJson(address, { value: 'cached' }, store.captureWriteGuard()))
+      .resolves.toBe(true)
+    await expect(store.readSharedJson(address, value => value as { value: string }))
+      .resolves.toEqual({ value: 'cached' })
+    const paths = JSON.stringify(await import('fs/promises').then(fs => fs.readdir(root, { recursive: true })))
+    expect(paths).not.toContain(address.sourceKey)
+
+    await store.clearSnapshots()
+    await expect(store.readSharedJson(address, value => value as { value: string }))
+      .resolves.toEqual({ value: 'cached' })
+
+    await store.clear()
+    await expect(store.readSharedJson(address, value => value as { value: string }))
+      .resolves.toBeNull()
+  })
+
+  it('removes corrupt and unused shared JSON entries', async () => {
+    const now = UNUSED_MAX_AGE_MS + 10_000
+    const { root, store } = await createStore({ now: () => now })
+    const corrupt = discoveryAddress('corrupt')
+    const stale = discoveryAddress('stale')
+    await store.writeSharedJson(corrupt, { ok: true }, store.captureWriteGuard())
+    await store.writeSharedJson(stale, { ok: true }, store.captureWriteGuard())
+    const corruptPath = join(root, 'shared', 'discovery', `${hashCacheKey(corrupt.sourceKey)}.json`)
+    const stalePath = join(root, 'shared', 'discovery', `${hashCacheKey(stale.sourceKey)}.json`)
+    await writeFile(corruptPath, '{broken')
+    await utimes(stalePath, new Date(1), new Date(1))
+
+    await expect(store.readSharedJson(corrupt, value => value)).resolves.toBeNull()
+    await store.prune('scheduled')
+    await expect(store.readSharedJson(stale, value => value)).resolves.toBeNull()
   })
 
   it('rejects resource addresses without a generation and zero-byte binaries', async () => {

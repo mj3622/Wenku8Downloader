@@ -161,6 +161,14 @@ function createServices(
       fetch: vi.fn(),
       getImageContent: vi.fn(async () => null),
     },
+    discovery: {
+      getHome: vi.fn(async () => ({
+        sections: [], fetchedAt: 1, stale: false,
+      })),
+      getRanking: vi.fn(async (type, page) => ({
+        type, page, title: '排行榜', totalPages: 1, books: [], fetchedAt: 1, stale: false,
+      })),
+    },
     books: {
       get: vi.fn(() => bookPromise),
     },
@@ -457,6 +465,23 @@ describe('registerIpcHandlers application operations', () => {
     })).rejects.toThrow('请求参数格式无效')
   })
 
+  it('validates and forwards discovery requests', async () => {
+    await invoke('discovery:get-home', {}, { refresh: true })
+    await invoke('discovery:get-ranking', {}, {
+      type: 'monthvisit', page: 3, refresh: false,
+    })
+
+    expect(services.discovery.getHome).toHaveBeenCalledWith({ refresh: true })
+    expect(services.discovery.getRanking).toHaveBeenCalledWith(
+      'monthvisit',
+      3,
+      { refresh: false },
+    )
+    await expect(invoke('discovery:get-ranking', {}, {
+      type: 'arbitrary', page: 1,
+    })).rejects.toThrow('榜单类型')
+  })
+
   it('exposes only a parameter-free full cache clear', async () => {
     vi.mocked(services.clearCache).mockResolvedValueOnce({ deferred: true })
 
@@ -612,5 +637,19 @@ describe('registerIpcHandlers application operations', () => {
       message: '正在登录...',
     })
     expect(services.invalidateBookCache).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves a safe Cloudflare verification error for the renderer', async () => {
+    mocks.acquireCookie.mockRejectedValueOnce(
+      new Error('安全验证未完成，请重新刷新登录状态'),
+    )
+
+    await expect(invoke(
+      'cookie:auto',
+      { sender: { send: vi.fn() } },
+      { operationId: 'login-123-2' },
+    )).rejects.toThrow('安全验证未完成，请重新刷新登录状态')
+
+    expect(services.invalidateBookCache).not.toHaveBeenCalled()
   })
 })

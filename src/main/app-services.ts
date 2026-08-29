@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, session, type Session } from 'electron'
 import { Book } from './book'
 import { BookService } from './book-service'
 import { ConfigService } from './config/config-service'
@@ -25,10 +25,16 @@ import {
   pruneLegacyDownloadCache,
 } from './cache/legacy-download-cache'
 import { BookCacheRepository } from './book-cache-repository'
+import { DiscoveryCacheRepository } from './discovery-cache-repository'
+import { DiscoveryService } from './discovery-service'
+import { WenkuDiscoverySource } from './discovery-source'
+import { ElectronCloudflareChallengeSolver } from './cloudflare-challenge'
 
 export interface AppServices {
+  networkSession: Session
   config: ConfigService
   crawler: WebCrawler
+  discovery: DiscoveryService
   books: BookService
   downloads: DownloadManager
   initializeCache(): Promise<void>
@@ -74,7 +80,17 @@ export function createAppServices(): AppServices {
     secretStore,
     legacyPath: paths.legacyPath,
   })
-  const crawler = new WebCrawler(config)
+  // Keep Chromium storage in memory; the existing encrypted config remains the only Cookie persistence.
+  const wenkuSession = session.fromPartition('wenku8')
+  const cloudflareChallenge = new ElectronCloudflareChallengeSolver({
+    networkSession: wenkuSession,
+  })
+  const crawler = new WebCrawler(
+    config,
+    undefined,
+    cloudflareChallenge,
+    wenkuSession,
+  )
   const environment = {
     isPackaged: app.isPackaged,
     downloadsPath: app.getPath('downloads'),
@@ -87,6 +103,10 @@ export function createAppServices(): AppServices {
   }))
   const bookCache = new BookCacheRepository(cacheStore)
   const assetCache = new DownloadAssetCache(cacheStore)
+  const discovery = new DiscoveryService({
+    source: new WenkuDiscoverySource(crawler),
+    cache: new DiscoveryCacheRepository(cacheStore),
+  })
   const createControlFactory = (onThrottleWait?: (waitMs: number) => void) => (
     (kind, url) => sharedDownloadRateLimiter.createRequestControl(
       kind,
@@ -184,6 +204,7 @@ export function createAppServices(): AppServices {
 
   const clearCache = async (): Promise<CacheClearResult> => {
     books.clearMemory()
+    discovery.clearMemory()
     try {
       const result = await cacheStore.clear()
       await clearLegacyDownloadCache(currentDownloadRoot())
@@ -223,8 +244,10 @@ export function createAppServices(): AppServices {
   }
 
   return {
+    networkSession: wenkuSession,
     config,
     crawler,
+    discovery,
     books,
     downloads,
     initializeCache,

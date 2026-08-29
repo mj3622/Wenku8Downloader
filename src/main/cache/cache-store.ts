@@ -30,6 +30,11 @@ export interface CacheAddress {
   sourceKey: string
 }
 
+export interface SharedCacheAddress {
+  namespace: 'discovery'
+  sourceKey: string
+}
+
 export interface CachedBinary {
   data: Buffer
   extension: string
@@ -272,6 +277,70 @@ export class CacheStore {
     }
   }
 
+  async readSharedJson<T>(
+    address: SharedCacheAddress,
+    parse: (value: unknown) => T | null,
+  ): Promise<T | null> {
+    const targetPath = this.resolveSharedAddress(address)
+    if (!targetPath) return null
+    return this.withBookLock(this.sharedLockKey(address), async () => {
+      try {
+        const envelope = JSON.parse(await readFile(targetPath, 'utf8')) as unknown
+        if (!isRecord(envelope) || envelope.schemaVersion !== CACHE_SCHEMA_VERSION) {
+          await this.removeCorrupt([targetPath], 'discovery')
+          return null
+        }
+        const parsed = parse(envelope.value)
+        if (parsed === null) {
+          await this.removeCorrupt([targetPath], 'discovery')
+          return null
+        }
+        await this.touch(targetPath)
+        return parsed
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          await this.removeCorrupt([targetPath], 'discovery')
+        }
+        return null
+      }
+    })
+  }
+
+  async writeSharedJson(
+    address: SharedCacheAddress,
+    value: unknown,
+    guard: CacheWriteGuard,
+  ): Promise<boolean> {
+    const targetPath = this.resolveSharedAddress(address)
+    if (!targetPath || !this.isGuardValid(guard)) return false
+    const envelope: JsonEnvelope = {
+      schemaVersion: CACHE_SCHEMA_VERSION,
+      touchedAt: this.now(),
+      value,
+    }
+    const data = Buffer.from(JSON.stringify(envelope), 'utf8')
+    this.pendingWriteBytes += data.byteLength
+    try {
+      if (!await this.ensureCapacity()) return false
+      return await this.withBookLock(this.sharedLockKey(address), async () => {
+        const previousSize = await this.fileSize(targetPath)
+        const committed = await atomicWriteCacheJson(targetPath, envelope, {
+          canCommit: () => this.isGuardValid(guard),
+        })
+        if (committed) this.adjustUsage(data.byteLength - previousSize)
+        return committed
+      })
+    } catch (error) {
+      logger.warn('cache.write.failed', '缓存 JSON 写入失败', {
+        cacheType: address.namespace,
+        error,
+      })
+      return false
+    } finally {
+      this.pendingWriteBytes = Math.max(0, this.pendingWriteBytes - data.byteLength)
+    }
+  }
+
   async readBinary(address: CacheAddress): Promise<CachedBinary | null> {
     const resolved = this.resolveAddress(address)
     if (!resolved?.metadataPath) return null
@@ -439,7 +508,7 @@ export class CacheStore {
     this.lastTouched.clear()
     let failed = false
     let deferred = this.markActiveGenerationsForDeletion(this.manualDeleteOnRelease)
-    for (const name of ['books', 'tmp']) {
+    for (const name of ['books', 'shared', 'tmp']) {
       try {
         await this.removePath(join(this.rootPath, name))
       } catch {
@@ -545,6 +614,24 @@ export class CacheStore {
       }
     }
     return { dataPath: `${basePath}.json`, generationIdentity }
+  }
+
+  private resolveSharedAddress(address: SharedCacheAddress): string | null {
+    if (
+      address.namespace !== 'discovery'
+      || !address.sourceKey
+      || address.sourceKey.length > 2_048
+    ) return null
+    return join(
+      this.rootPath,
+      'shared',
+      address.namespace,
+      `${hashCacheKey(address.sourceKey)}.json`,
+    )
+  }
+
+  private sharedLockKey(address: SharedCacheAddress): string {
+    return `shared:${address.namespace}:${hashCacheKey(address.sourceKey)}`
   }
 
   private generationIdentity(bookId: string, generationKey: string): string {
@@ -717,6 +804,8 @@ export class CacheStore {
       await this.initialize()
       await this.removeOldTemporaryFiles(this.rootPath)
       await this.removeCorruptCacheEntries()
+      await this.removeCorruptSharedCacheEntries()
+      await this.removeUnusedSharedEntries()
       const currentGenerations = await this.currentGenerations()
       const candidates: Array<{
         path: string
@@ -930,6 +1019,48 @@ export class CacheStore {
     }
   }
 
+  private async removeCorruptSharedCacheEntries(): Promise<void> {
+    const sharedRoot = join(this.rootPath, 'shared')
+    for (const namespaceEntry of await this.safeReadDir(sharedRoot)) {
+      const namespacePath = join(sharedRoot, namespaceEntry.name)
+      if (!namespaceEntry.isDirectory() || namespaceEntry.isSymbolicLink()) {
+        await this.removePath(namespacePath)
+        continue
+      }
+      for (const entry of await this.safeReadDir(namespacePath)) {
+        const entryPath = join(namespacePath, entry.name)
+        if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith('.json')) {
+          await this.removePath(entryPath)
+          continue
+        }
+        try {
+          const envelope = JSON.parse(await readFile(entryPath, 'utf8')) as unknown
+          if (!isRecord(envelope) || envelope.schemaVersion !== CACHE_SCHEMA_VERSION) {
+            throw new Error('invalid shared JSON cache envelope')
+          }
+        } catch {
+          await this.removePath(entryPath)
+        }
+      }
+    }
+  }
+
+  private async removeUnusedSharedEntries(): Promise<void> {
+    const sharedRoot = join(this.rootPath, 'shared')
+    for (const namespaceEntry of await this.safeReadDir(sharedRoot)) {
+      if (!namespaceEntry.isDirectory() || namespaceEntry.isSymbolicLink()) continue
+      const namespacePath = join(sharedRoot, namespaceEntry.name)
+      for (const entry of await this.safeReadDir(namespacePath)) {
+        if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith('.json')) continue
+        const entryPath = join(namespacePath, entry.name)
+        const lastUsedAt = await this.fileMtime(entryPath)
+        if (lastUsedAt > 0 && this.now() - lastUsedAt > UNUSED_MAX_AGE_MS) {
+          await this.removePath(entryPath)
+        }
+      }
+    }
+  }
+
   private async removeUnusedGenerationEntries(generationPath: string): Promise<void> {
     for (const kindEntry of await this.safeReadDir(generationPath)) {
       if (!kindEntry.isDirectory() || kindEntry.isSymbolicLink()) continue
@@ -995,7 +1126,7 @@ export class CacheStore {
     }
   }
 
-  private async removeCorrupt(paths: string[], kind: CacheEntryKind): Promise<void> {
+  private async removeCorrupt(paths: string[], kind: CacheEntryKind | 'discovery'): Promise<void> {
     await Promise.all(paths.map(path => this.removePath(path).catch(() => undefined)))
     await this.refreshUsage()
     logger.warn('cache.corrupt', '已忽略并清理损坏缓存', { cacheType: kind })

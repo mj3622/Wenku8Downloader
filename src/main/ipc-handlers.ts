@@ -14,6 +14,8 @@ import type { DownloadExecutorBook } from './download-executor'
 import { resolveWithin } from './path-safety'
 import {
   validateBookId,
+  validateDiscoveryHomePayload,
+  validateDiscoveryRankingPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateEnqueueDownloadInput,
@@ -33,6 +35,7 @@ import {
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
 import type { BookGetOptions } from './book-service'
 import type { CacheClearResult } from '../shared/ipc-types'
+import type { DiscoveryService } from './discovery-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -60,6 +63,7 @@ export interface IpcServices {
     WebCrawler,
     'syncCookies' | 'search' | 'getCookie' | 'fetch' | 'getImageContent'
   >
+  discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
   }
@@ -221,13 +225,9 @@ export function registerIpcHandlers(services: IpcServices): void {
       {},
       async () => {
         const service = new CookieService(services.crawler, services.config)
-        try {
-          await service.acquire((progress) => {
-            event.sender.send('cookie:progress', { ...progress, operationId })
-          })
-        } catch (error) {
-          throw new Error('登录失败或登录状态无法保存，请检查账号后重试', { cause: error })
-        }
+        await service.acquire((progress) => {
+          event.sender.send('cookie:progress', { ...progress, operationId })
+        })
         await services.invalidateBookCache()
         return { status: 'ok', message: '登录成功，登录状态已更新' }
       },
@@ -252,6 +252,28 @@ export function registerIpcHandlers(services: IpcServices): void {
       const results = await services.crawler.search(query, 'title')
       context.resultCount = results.length
       return { results }
+    })
+  })
+
+  ipcMain.handle('discovery:get-home', (_event, rawPayload: unknown) => {
+    const { refresh } = validateDiscoveryHomePayload(rawPayload)
+    const context: LogContext = { refresh }
+    return runLoggedOperation('discovery.home', context, async () => {
+      const result = await services.discovery.getHome({ refresh })
+      context.resultCount = result.sections.reduce((sum, section) => sum + section.books.length, 0)
+      context.stale = result.stale
+      return result
+    })
+  })
+
+  ipcMain.handle('discovery:get-ranking', (_event, rawPayload: unknown) => {
+    const { type, page, refresh } = validateDiscoveryRankingPayload(rawPayload)
+    const context: LogContext = { rankingType: type, page, refresh }
+    return runLoggedOperation('discovery.ranking', context, async () => {
+      const result = await services.discovery.getRanking(type, page, { refresh })
+      context.resultCount = result.books.length
+      context.stale = result.stale
+      return result
     })
   })
 
