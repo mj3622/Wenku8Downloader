@@ -100,14 +100,15 @@
 ### 长期分支
 
 - 当前稳定主分支为 `master`：只保存经过发布验证、可交付的版本。
-- `dev` 是下一版本的长期集成分支：保存已经审核、尚未发布的开发成果。
+- `dev` 是下一版本的长期集成分支：保存已经完成必要验证、尚未发布的开发成果。
 - 仓库管理员负责从选定的最新 `master` 基线创建并维护 `dev`。如果远程尚无 `dev`，贡献者先联系管理员，不各自创建同名集成分支。
-- `master` 和 `dev` 都应设置分支保护：通过 Pull Request 合并，要求已配置的检查通过，禁止直接推送、强制推送和删除。
+- `master` 必须设置分支保护：所有变更通过 Pull Request 合入，并对管理员生效；禁止直接推送、强制推送和删除。
+- `dev` 允许具备写权限的贡献者直接推送，也可以通过 Pull Request 合入；仍禁止强制推送和删除。
 - 项目采用上述双长期分支模型，不混用“从 `master` 创建普通功能分支、再合入 `dev`”的流程。
 
 ### 工作分支
 
-- 普通功能、修复、重构、测试、文档和维护工作都从规范仓库最新的 `dev` 创建短期分支，完成后通过 Pull Request 合入 `dev`；使用 fork 时，规范仓库的远程名可能是 `upstream` 而不是 `origin`。
+- 普通、低风险且无需独立审核的改动可以直接在最新 `dev` 上提交并推送。需要隔离开发、协作或代码审核时，从最新 `dev` 创建短期工作分支，完成后通过 Pull Request 合入 `dev`；使用 fork 时，规范仓库的远程名可能是 `upstream` 而不是 `origin`。
 - 分支名使用小写英文 kebab-case，格式如下：
   - `feature/<short-description>`：新功能，例如 `feature/log-retention-settings`
   - `fix/<short-description>`：普通缺陷修复，例如 `fix/renderer-error-reporting`
@@ -120,7 +121,7 @@
 
 ### Pull Request 与发布
 
-- 工作分支的 Pull Request 以 `dev` 为目标，包含变更目的、范围、验证结果、兼容性影响和已知风险。
+- 工作分支的 Pull Request 以 `dev` 为目标，包含变更目的、范围、验证结果、兼容性影响和已知风险；直接推送 `dev` 的改动不强制创建 Pull Request。
 - Pull Request 通过审核及必要检查后，由具备权限的维护者合入 `dev`；具体使用 merge、squash 或 rebase merge 由仓库合并策略决定。
 - 仓库管理员定期从 `dev` 向 `master` 创建发布 Pull Request。发布前执行完整验证、检查发布差异；合并后按版本策略创建 tag。
 - 需要独立稳定发布候选时，可从 `dev` 创建 `release/<version>`，只接受发布修复，最终由仓库管理员合入 `master`，并把发布分支中的额外修复同步回 `dev`。
@@ -132,4 +133,4 @@
 - 每个提交只表达一个可独立理解和回退的逻辑变更，不混合无关格式化、重构和功能修改。
 - Commit Message 使用中文 Conventional Commits：`<type>(english-scope): 中文描述`。
 - 提交或 Pull Request 不包含凭证、运行数据、构建产物、临时调试内容和任务外改动。
-- 合并前检查 staged、unstaged 和 untracked 文件，并记录实际运行的验证及未运行原因。
+- 推送或合并前检查 staged、unstaged 和 untracked 文件，并记录实际运行的验证及未运行原因。
