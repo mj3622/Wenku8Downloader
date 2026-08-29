@@ -61,6 +61,7 @@ describe('App routing', () => {
 
     expect(container.textContent).toContain('轻小说文库下载器')
     expect(container.textContent).toContain('页面不存在')
+    expect(container.querySelector('a[href="#/discover"]')?.textContent).toContain('发现')
     expect(container.textContent).toContain('返回首页')
     expect(container.querySelector('a[href="#/"]')).not.toBeNull()
     expect(useToastStore.getState().items).toHaveLength(0)

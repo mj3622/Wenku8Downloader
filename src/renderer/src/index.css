@@ -67,6 +67,14 @@ body {
   transition: transform 240ms var(--motion-ease-out);
 }
 
+.horizontal-book-shelf {
+  scrollbar-width: none;
+}
+
+.horizontal-book-shelf::-webkit-scrollbar {
+  display: none;
+}
+
 .motion-spinner {
   animation-duration: 700ms;
 }

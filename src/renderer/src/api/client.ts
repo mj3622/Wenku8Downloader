@@ -7,11 +7,14 @@ import type {
   CookieProgress,
   BookLoadOptions,
   CacheClearResult,
+  DiscoveryHome,
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
   LogStats,
   OpenFolderTarget,
+  RankingPage,
+  RankingType,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 import {
@@ -53,6 +56,14 @@ export const api = {
   // 搜索
   searchAuthor: (q: string) => invoke('search', () => window.electronAPI.searchAuthor(q)),
   searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
+
+  // 发现
+  getDiscoveryHome: (refresh = false): Promise<DiscoveryHome> => (
+    invoke('discovery', () => window.electronAPI.getDiscoveryHome(refresh))
+  ),
+  getRanking: (type: RankingType, page: number, refresh = false): Promise<RankingPage> => (
+    invoke('discovery', () => window.electronAPI.getRanking(type, page, refresh))
+  ),
 
   // 书籍
   getBook: (id: string, options?: BookLoadOptions) => (

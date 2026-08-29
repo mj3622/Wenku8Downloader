@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import {
+  IconCompass,
   IconDownload,
   IconHome,
   IconSearch,
@@ -18,6 +19,11 @@ const navItems: { to: string; label: string; icon: Icon }[] = [
     to: '/search',
     label: '检索',
     icon: IconSearch,
+  },
+  {
+    to: '/discover',
+    label: '发现',
+    icon: IconCompass,
   },
   {
     to: '/download',
