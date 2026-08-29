@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_LOG_CONFIG,
   DEFAULT_SETTINGS_CONFIG,
+  DEFAULT_UI_CONFIG,
   parseSettingsDocument,
   validateDownloadConfig,
   validateLogConfig,
@@ -66,7 +67,7 @@ describe('parseSettingsDocument', () => {
 
     expect(result.state).toBe('migrated')
     expect(result.value.logging).toEqual(DEFAULT_LOG_CONFIG)
-    expect(result.raw.config_version).toBe(2)
+    expect(result.raw.config_version).toBe(3)
   })
 
   it('migrates a v1 disk document to the combined domain model', () => {
@@ -87,6 +88,7 @@ describe('parseSettingsDocument', () => {
         downloadPath: booksPath,
       },
       logging: DEFAULT_LOG_CONFIG,
+      ui: DEFAULT_UI_CONFIG,
     })
   })
 
@@ -109,6 +111,7 @@ describe('parseSettingsDocument', () => {
         downloadPath: '',
       },
       logging: DEFAULT_LOG_CONFIG,
+      ui: DEFAULT_UI_CONFIG,
     })
     expect(result.raw).toMatchObject({
       future: { enabled: true },
@@ -135,6 +138,7 @@ describe('parseSettingsDocument', () => {
           downloadPath: booksPath,
         },
         logging: DEFAULT_LOG_CONFIG,
+        ui: DEFAULT_UI_CONFIG,
       },
     })
   })
@@ -157,6 +161,32 @@ describe('parseSettingsDocument', () => {
         downloadPath: '',
       },
       logging: DEFAULT_LOG_CONFIG,
+      ui: DEFAULT_UI_CONFIG,
+    })
+  })
+
+  it('migrates v2 settings with an unseen project introduction', () => {
+    const result = parseSettingsDocument({
+      config_version: 2,
+      download: {
+        full_title: 'FULL',
+        default_cover_index: 0,
+        download_path: '',
+      },
+      logging: {
+        retention_days: 30,
+        max_file_size_mb: 100,
+        max_total_size_mb: 200,
+      },
+    })
+
+    expect(result).toMatchObject({
+      state: 'migrated',
+      value: { ui: { projectIntroSeen: false } },
+      raw: {
+        config_version: 3,
+        ui: { project_intro_seen: false },
+      },
     })
   })
 

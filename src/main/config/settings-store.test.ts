@@ -7,6 +7,7 @@ import {
   DEFAULT_DOWNLOAD_CONFIG,
   DEFAULT_LOG_CONFIG,
   DEFAULT_SETTINGS_CONFIG,
+  DEFAULT_UI_CONFIG,
 } from './config-schema'
 import { SettingsStore } from './settings-store'
 
@@ -31,7 +32,10 @@ describe('SettingsStore', () => {
     await expect(stat(settingsPath)).rejects.toMatchObject({ code: 'ENOENT' })
 
     expect(store.initializeDefaults()).toEqual(DEFAULT_SETTINGS_CONFIG)
-    expect(parse(await readFile(settingsPath, 'utf-8'))).toMatchObject({ config_version: 2 })
+    expect(parse(await readFile(settingsPath, 'utf-8'))).toMatchObject({
+      config_version: 3,
+      ui: { project_intro_seen: false },
+    })
   })
 
   it('persists logging settings without changing download settings', () => {
@@ -39,6 +43,7 @@ describe('SettingsStore', () => {
     const saved = store.save({
       download: { ...DEFAULT_DOWNLOAD_CONFIG },
       logging: { retentionDays: 14, maxFileSizeMb: 64, maxTotalSizeMb: 256 },
+      ui: { ...DEFAULT_UI_CONFIG },
     })
 
     expect(saved.logging).toEqual({
@@ -49,6 +54,19 @@ describe('SettingsStore', () => {
     expect(saved.download).toEqual(DEFAULT_DOWNLOAD_CONFIG)
     expect(store.load()).toEqual({ state: 'ok', value: saved })
     expect(saved.logging).not.toEqual(DEFAULT_LOG_CONFIG)
+  })
+
+  it('persists the project introduction marker with ordinary settings', () => {
+    const store = new SettingsStore(settingsPath)
+    const initial = store.initializeDefaults()
+
+    const saved = store.save({
+      ...initial,
+      ui: { projectIntroSeen: true },
+    })
+
+    expect(saved.ui.projectIntroSeen).toBe(true)
+    expect(new SettingsStore(settingsPath).load()).toEqual({ state: 'ok', value: saved })
   })
 
   it('preserves malformed TOML byte-for-byte', async () => {
@@ -77,16 +95,18 @@ describe('SettingsStore', () => {
       value: {
         download: { fullTitle: 'OUT', defaultCoverIndex: 3, downloadPath: '' },
         logging: DEFAULT_LOG_CONFIG,
+        ui: DEFAULT_UI_CONFIG,
       },
     })
     expect(parse(await readFile(settingsPath, 'utf-8'))).toMatchObject({
-      config_version: 2,
+      config_version: 3,
       download: { default_cover_index: 3 },
       logging: {
         retention_days: 30,
         max_file_size_mb: 100,
         max_total_size_mb: 200,
       },
+      ui: { project_intro_seen: false },
     })
   })
 
@@ -103,6 +123,7 @@ describe('SettingsStore', () => {
     store.save({
       download: { fullTitle: 'IN', defaultCoverIndex: 2, downloadPath: booksPath },
       logging: { ...DEFAULT_LOG_CONFIG },
+      ui: { ...DEFAULT_UI_CONFIG },
     })
 
     expect(parse(await readFile(settingsPath, 'utf-8'))).toMatchObject({

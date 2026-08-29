@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route } from 'react-router-dom'
+import { HashRouter, Navigate, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
 import SearchPage from './pages/SearchPage'
@@ -18,7 +18,8 @@ export default function App() {
       <HashRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<Navigate to="/discover" replace />} />
+            <Route path="/about" element={<HomePage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
             <Route path="/discover/ranking/:type" element={<RankingPage />} />

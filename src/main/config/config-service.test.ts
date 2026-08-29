@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import type { DownloadConfig, LogConfig } from '../../shared/config-types'
@@ -20,6 +20,7 @@ import { SettingsStore, type SettingsLoadResult } from './settings-store'
 import {
   DEFAULT_LOG_CONFIG,
   DEFAULT_SETTINGS_CONFIG,
+  DEFAULT_UI_CONFIG,
   type SettingsConfig,
 } from './config-schema'
 
@@ -65,6 +66,7 @@ function cloneSettings(value: SettingsConfig): SettingsConfig {
   return {
     download: { ...value.download },
     logging: { ...value.logging },
+    ui: { ...value.ui },
   }
 }
 
@@ -72,6 +74,7 @@ function createStores(secretValue: SecretPayloadV1 = emptySecretPayload()) {
   let settings: SettingsConfig = {
     download: { ...initialDownload },
     logging: { ...DEFAULT_LOG_CONFIG },
+    ui: { ...DEFAULT_UI_CONFIG },
   }
   let secrets = cloneSecrets(secretValue)
   const settingsStore: SettingsStorePort = {
@@ -119,7 +122,25 @@ describe('ConfigService', () => {
     expect(settingsStore.save).toHaveBeenCalledWith({
       download: next,
       logging: DEFAULT_LOG_CONFIG,
+      ui: DEFAULT_UI_CONFIG,
     })
+  })
+
+  it('persists the project introduction marker once', () => {
+    const { settingsStore, secretStore } = createStores()
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+    vi.mocked(settingsStore.save).mockClear()
+
+    expect(service.hasSeenProjectIntro()).toBe(false)
+    service.markProjectIntroSeen()
+    expect(service.hasSeenProjectIntro()).toBe(true)
+    expect(settingsStore.save).toHaveBeenCalledTimes(1)
+    expect(settingsStore.save).toHaveBeenCalledWith(expect.objectContaining({
+      ui: { projectIntroSeen: true },
+    }))
+
+    service.markProjectIntroSeen()
+    expect(settingsStore.save).toHaveBeenCalledTimes(1)
   })
 
   it('updates logging settings without changing download settings', () => {
@@ -364,6 +385,52 @@ describe('ConfigService', () => {
     })
   })
 
+  it('archives legacy safeStorage secrets and starts with an empty local envelope', async () => {
+    const settingsStore = new SettingsStore(join(root, 'settings.toml'))
+    const secretsPath = join(root, 'secrets.enc')
+    const secretStore = new SecretStore(secretsPath, availableCodec)
+    const legacyEnvelope = JSON.stringify({
+      version: 1,
+      cipher: 'electron-safe-storage',
+      data: Buffer.from('legacy-cipher').toString('base64'),
+    })
+    await writeFile(secretsPath, legacyEnvelope, 'utf-8')
+
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+
+    expect(service.getPublicSnapshot()).toMatchObject({
+      account: { username: '', hasPassword: false, hasCookies: false },
+      health: { state: 'ok' },
+    })
+    expect(JSON.parse(await readFile(secretsPath, 'utf-8'))).toMatchObject({
+      version: 2,
+      cipher: 'test-cipher',
+    })
+    const backupName = (await readdir(root)).find((name) => (
+      name.startsWith('secrets.enc.invalid-')
+    ))
+    expect(backupName).toBeDefined()
+    await expect(readFile(join(root, backupName!), 'utf-8')).resolves.toBe(legacyEnvelope)
+  })
+
+  it('keeps recovery visible when the legacy safeStorage envelope cannot be archived', () => {
+    const { settingsStore, secretStore } = createStores()
+    vi.mocked(secretStore.load).mockReturnValue({
+      state: 'recovery-required',
+      value: emptySecretPayload(),
+      reason: 'legacy-safe-storage',
+      message: 'legacy secrets',
+    })
+    vi.mocked(secretStore.backupCorrupt).mockImplementation(() => {
+      throw new Error('disk is read-only')
+    })
+
+    const service = ConfigService.load({ settingsStore, secretStore, legacyPath })
+
+    expect(service.getPublicSnapshot().health.state).toBe('recovery-required')
+    expect(secretStore.save).not.toHaveBeenCalled()
+  })
+
   it('retains the raw settings load error without exposing it publicly', () => {
     const { settingsStore, secretStore } = createStores()
     const loadError = new Error('invalid TOML at line 2')
@@ -512,6 +579,7 @@ describe('ConfigService', () => {
       value: {
         download: customDownload,
         logging: { ...DEFAULT_LOG_CONFIG },
+        ui: { ...DEFAULT_UI_CONFIG },
       },
     })
     vi.mocked(secretStore.load).mockReturnValue({

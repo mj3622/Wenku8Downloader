@@ -49,6 +49,7 @@ function cloneSettings(value: SettingsConfig): SettingsConfig {
   return {
     download: { ...value.download },
     logging: { ...value.logging },
+    ui: { ...value.ui },
   }
 }
 
@@ -186,9 +187,34 @@ export class ConfigService {
     secretStore: SecretStorePort
     legacyPath: string
   }): ConfigService {
-    const migration = migrateLegacyConfig(input)
+    let migration = migrateLegacyConfig(input)
     let settingsLoad = input.settingsStore.load()
     let secretLoad = input.secretStore.load()
+
+    if (
+      secretLoad.state === 'recovery-required'
+      && secretLoad.reason === 'legacy-safe-storage'
+      && input.secretStore.isEncryptionAvailable()
+    ) {
+      try {
+        const backupPath = input.secretStore.backupCorrupt()
+        if (!backupPath) throw new Error('旧版敏感配置不存在')
+        migration = migrateLegacyConfig(input)
+        settingsLoad = input.settingsStore.load()
+        secretLoad = input.secretStore.load()
+      } catch {
+        settingsLoad = input.settingsStore.load()
+        const currentSecrets = input.secretStore.load()
+        secretLoad = currentSecrets.state === 'missing'
+          ? {
+              state: 'recovery-required',
+              value: currentSecrets.value,
+              reason: 'legacy-safe-storage',
+              message: '旧版敏感配置自动迁移失败，原文件或恢复备份已保留',
+            }
+          : currentSecrets
+      }
+    }
 
     const mayInitialize = migration.state !== 'recovery-required'
       && migration.state !== 'read-only-newer-version'
@@ -255,6 +281,32 @@ export class ConfigService {
     return { ...this.settings.logging }
   }
 
+  hasSeenProjectIntro(): boolean {
+    return this.settings.ui.projectIntroSeen
+  }
+
+  markProjectIntroSeen(): void {
+    if (this.settings.ui.projectIntroSeen) return
+    if (
+      this.settingsLoad.state === 'recovery-required'
+      || this.settingsLoad.state === 'read-only-newer-version'
+    ) {
+      throw new Error('界面设置当前不可修改，请先恢复配置')
+    }
+    let saved: SettingsConfig
+    try {
+      saved = this.settingsStore.save({
+        download: { ...this.settings.download },
+        logging: { ...this.settings.logging },
+        ui: { projectIntroSeen: true },
+      })
+    } catch (error) {
+      throw new Error('项目介绍状态保存失败', { cause: error })
+    }
+    this.settings = cloneSettings(saved)
+    this.settingsLoad = { state: 'ok', value: cloneSettings(saved) }
+  }
+
   getLoadDiagnostics(): ConfigLoadDiagnostics {
     const settingsMessage = 'message' in this.settingsLoad
       ? this.settingsLoad.message
@@ -297,6 +349,7 @@ export class ConfigService {
       saved = this.settingsStore.save({
         download: { ...input },
         logging: { ...this.settings.logging },
+        ui: { ...this.settings.ui },
       })
     } catch (error) {
       throw new Error('下载设置保存失败', { cause: error })
@@ -318,6 +371,7 @@ export class ConfigService {
       saved = this.settingsStore.save({
         download: { ...this.settings.download },
         logging: { ...input },
+        ui: { ...this.settings.ui },
       })
     } catch (error) {
       throw new Error('日志设置保存失败', { cause: error })

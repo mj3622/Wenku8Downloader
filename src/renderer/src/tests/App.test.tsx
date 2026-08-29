@@ -41,6 +41,11 @@ beforeEach(() => {
         legacyImportCompleted: true,
       }),
       onDownloadStateChanged: () => () => undefined,
+      getDiscoveryHome: async () => ({
+        sections: [],
+        fetchedAt: Date.now(),
+        stale: false,
+      }),
     } as unknown as Window['electronAPI'],
   })
 })
@@ -62,8 +67,28 @@ describe('App routing', () => {
     expect(container.textContent).toContain('轻小说文库下载器')
     expect(container.textContent).toContain('页面不存在')
     expect(container.querySelector('a[href="#/discover"]')?.textContent).toContain('发现')
-    expect(container.textContent).toContain('返回首页')
-    expect(container.querySelector('a[href="#/"]')).not.toBeNull()
+    expect(container.textContent).toContain('返回发现')
     expect(useToastStore.getState().items).toHaveLength(0)
+  })
+
+  it('uses discovery as the default renderer route', async () => {
+    window.location.hash = '#/'
+
+    await act(async () => root.render(<App />))
+
+    expect(window.location.hash).toBe('#/discover')
+    expect(container.querySelector('h1')?.textContent).toBe('发现')
+  })
+
+  it('keeps project information available after the primary navigation', async () => {
+    window.location.hash = '#/about'
+
+    await act(async () => root.render(<App />))
+
+    const labels = [...container.querySelectorAll('aside nav a')]
+      .map(link => link.textContent?.trim())
+    expect(labels).toEqual(['发现', '检索', '下载', '配置', '项目介绍'])
+    expect(container.querySelector('a[href="#/about"]')).not.toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('轻小说文库下载器')
   })
 })

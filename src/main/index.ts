@@ -9,6 +9,7 @@ import { registerAppLogging, registerProcessLogging, registerWebContentsLogging 
 import { initializeLogger, logger } from './logging/logger'
 import { sanitizeLogLine } from './logging/redaction'
 import { registerSingleInstanceGuard } from './single-instance'
+import { resolveStartupRoute } from './startup-route'
 
 try {
   app.setAppLogsPath()
@@ -45,6 +46,9 @@ function getIconPath(): string {
 }
 
 function createWindow(services: AppServices): void {
+  const startupRoute = resolveStartupRoute(services.config, (error) => {
+    logger.warn('app.project-intro.persist-failed', '项目介绍状态暂时无法保存', { error })
+  })
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -67,9 +71,11 @@ function createWindow(services: AppServices): void {
   registerWebContentsLogging(mainWindow.webContents, mainWindow.id)
 
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL!)
+    const rendererUrl = new URL(process.env.ELECTRON_RENDERER_URL!)
+    rendererUrl.hash = startupRoute
+    mainWindow.loadURL(rendererUrl.toString())
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: startupRoute })
   }
 }
 

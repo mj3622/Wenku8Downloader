@@ -2,18 +2,20 @@ import { NavLink, Outlet } from 'react-router-dom'
 import {
   IconCompass,
   IconDownload,
-  IconHome,
+  IconInfoCircle,
   IconSearch,
   IconSettings,
   type Icon,
 } from '@tabler/icons-react'
 import logoUrl from '../../../../resources/icon.png'
 
-const navItems: { to: string; label: string; icon: Icon }[] = [
+type NavigationItem = { to: string; label: string; icon: Icon }
+
+const primaryNavItems: NavigationItem[] = [
   {
-    to: '/',
-    label: '主页',
-    icon: IconHome,
+    to: '/discover',
+    label: '发现',
+    icon: IconCompass,
   },
   {
     to: '/search',
@@ -21,21 +23,46 @@ const navItems: { to: string; label: string; icon: Icon }[] = [
     icon: IconSearch,
   },
   {
-    to: '/discover',
-    label: '发现',
-    icon: IconCompass,
-  },
-  {
     to: '/download',
     label: '下载',
     icon: IconDownload,
   },
+]
+
+const secondaryNavItems: NavigationItem[] = [
   {
     to: '/config',
     label: '配置',
     icon: IconSettings,
   },
+  {
+    to: '/about',
+    label: '项目介绍',
+    icon: IconInfoCircle,
+  },
 ]
+
+function NavigationItems({ items }: { items: NavigationItem[] }) {
+  return items.map((item) => {
+    const Glyph = item.icon
+    return (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        className={({ isActive }) =>
+          `flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 ${
+            isActive
+              ? 'bg-apple-accent-light font-medium text-apple-accent'
+              : 'text-apple-secondary hover:bg-apple-accent-light hover:text-apple-heading'
+          }`
+        }
+      >
+        <Glyph aria-hidden="true" className="flex-shrink-0" size={20} stroke={1.7} />
+        <span className="flex-1">{item.label}</span>
+      </NavLink>
+    )
+  })
+}
 
 export default function Layout() {
   return (
@@ -55,27 +82,13 @@ export default function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex flex-1 flex-col gap-0.5 px-2">
-          {navItems.map((item) => {
-            const Glyph = item.icon
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 ${
-                    isActive
-                      ? 'bg-apple-accent-light font-medium text-apple-accent'
-                      : 'text-apple-secondary hover:bg-apple-accent-light hover:text-apple-heading'
-                  }`
-                }
-              >
-                <Glyph aria-hidden="true" className="flex-shrink-0" size={20} stroke={1.7} />
-                <span className="flex-1">{item.label}</span>
-              </NavLink>
-            )
-          })}
+        <nav className="flex flex-1 flex-col px-2 pb-1">
+          <div className="space-y-0.5">
+            <NavigationItems items={primaryNavItems} />
+          </div>
+          <div className="mt-auto space-y-0.5 border-t border-apple-border-subtle pt-2">
+            <NavigationItems items={secondaryNavItems} />
+          </div>
         </nav>
 
         {/* Version */}

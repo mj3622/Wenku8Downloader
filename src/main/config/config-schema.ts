@@ -5,7 +5,7 @@ import type {
   TitleFormat,
 } from '../../shared/config-types'
 
-export const CURRENT_CONFIG_VERSION = 2 as const
+export const CURRENT_CONFIG_VERSION = 3 as const
 
 export const DEFAULT_DOWNLOAD_CONFIG: DownloadConfig = Object.freeze({
   fullTitle: 'FULL',
@@ -19,20 +19,31 @@ export const DEFAULT_LOG_CONFIG: LogConfig = Object.freeze({
   maxTotalSizeMb: 200,
 })
 
+export interface UiConfig {
+  projectIntroSeen: boolean
+}
+
+export const DEFAULT_UI_CONFIG: UiConfig = Object.freeze({
+  projectIntroSeen: false,
+})
+
 export interface SettingsConfig {
   download: DownloadConfig
   logging: LogConfig
+  ui: UiConfig
 }
 
 export const DEFAULT_SETTINGS_CONFIG: Readonly<SettingsConfig> = Object.freeze({
   download: DEFAULT_DOWNLOAD_CONFIG,
   logging: DEFAULT_LOG_CONFIG,
+  ui: DEFAULT_UI_CONFIG,
 })
 
 export type SettingsDocument = Record<string, unknown> & {
   config_version: number
   download: Record<string, unknown>
   logging: Record<string, unknown>
+  ui: Record<string, unknown>
 }
 
 export type SettingsParseResult =
@@ -66,6 +77,7 @@ function cloneSettings(value: SettingsConfig): SettingsConfig {
   return {
     download: cloneDownload(value.download),
     logging: cloneLogging(value.logging),
+    ui: { ...value.ui },
   }
 }
 
@@ -160,6 +172,14 @@ export function validateLogConfig(value: unknown): LogConfig {
   return { retentionDays, maxFileSizeMb, maxTotalSizeMb }
 }
 
+export function validateUiConfig(value: unknown): UiConfig {
+  const record = requireRecord(value, '界面设置格式无效')
+  if (typeof record.projectIntroSeen !== 'boolean') {
+    throw new Error('项目介绍状态格式无效')
+  }
+  return { projectIntroSeen: record.projectIntroSeen }
+}
+
 function normalizeLegacyDownload(record: Record<string, unknown>): DownloadConfig {
   const fullTitle: TitleFormat = record.full_title === 'IN' || record.full_title === 'OUT'
     ? record.full_title
@@ -190,6 +210,9 @@ export function toSettingsDocument(
   const existingLogging = root.logging && typeof root.logging === 'object' && !Array.isArray(root.logging)
     ? root.logging as Record<string, unknown>
     : {}
+  const existingUi = root.ui && typeof root.ui === 'object' && !Array.isArray(root.ui)
+    ? root.ui as Record<string, unknown>
+    : {}
 
   return {
     ...root,
@@ -205,6 +228,10 @@ export function toSettingsDocument(
       retention_days: value.logging.retentionDays,
       max_file_size_mb: value.logging.maxFileSizeMb,
       max_total_size_mb: value.logging.maxTotalSizeMb,
+    },
+    ui: {
+      ...existingUi,
+      project_intro_seen: value.ui.projectIntroSeen,
     },
   }
 }
@@ -229,6 +256,7 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
     const normalized: SettingsConfig = {
       download: normalizeLegacyDownload(download),
       logging: cloneLogging(DEFAULT_LOG_CONFIG),
+      ui: { ...DEFAULT_UI_CONFIG },
     }
     return {
       state: 'migrated',
@@ -245,6 +273,29 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
         downloadPath: download.download_path,
       }),
       logging: cloneLogging(DEFAULT_LOG_CONFIG),
+      ui: { ...DEFAULT_UI_CONFIG },
+    }
+    return {
+      state: 'migrated',
+      value: normalized,
+      raw: toSettingsDocument(normalized, root),
+    }
+  }
+
+  if (version === 2) {
+    const logging = requireRecord(root.logging, '日志设置格式无效')
+    const normalized: SettingsConfig = {
+      download: validateDownloadConfig({
+        fullTitle: download.full_title,
+        defaultCoverIndex: download.default_cover_index,
+        downloadPath: download.download_path,
+      }),
+      logging: validateLogConfig({
+        retentionDays: logging.retention_days,
+        maxFileSizeMb: logging.max_file_size_mb,
+        maxTotalSizeMb: logging.max_total_size_mb,
+      }),
+      ui: { ...DEFAULT_UI_CONFIG },
     }
     return {
       state: 'migrated',
@@ -258,6 +309,7 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
   }
 
   const logging = requireRecord(root.logging, '日志设置格式无效')
+  const ui = requireRecord(root.ui, '界面设置格式无效')
   const normalized: SettingsConfig = {
     download: validateDownloadConfig({
       fullTitle: download.full_title,
@@ -268,6 +320,9 @@ export function parseSettingsDocument(value: unknown): SettingsParseResult {
       retentionDays: logging.retention_days,
       maxFileSizeMb: logging.max_file_size_mb,
       maxTotalSizeMb: logging.max_total_size_mb,
+    }),
+    ui: validateUiConfig({
+      projectIntroSeen: ui.project_intro_seen,
     }),
   }
   return {

@@ -11,6 +11,7 @@ import {
   toSettingsDocument,
   validateDownloadConfig,
   validateLogConfig,
+  validateUiConfig,
   type SettingsConfig,
   type SettingsDocument,
 } from './config-schema'
@@ -30,6 +31,7 @@ function cloneSettings(value: SettingsConfig): SettingsConfig {
   return {
     download: { ...value.download },
     logging: { ...value.logging },
+    ui: { ...value.ui },
   }
 }
 
@@ -71,7 +73,7 @@ export class SettingsStore {
       return {
         state: 'recovery-required',
         value: cloneSettings(DEFAULT_SETTINGS_CONFIG),
-        message: '下载设置无法读取，原文件已保留',
+        message: '设置文件无法完整读取，原文件已保留',
         error,
       }
     }
@@ -94,6 +96,7 @@ export class SettingsStore {
     const value: SettingsConfig = {
       download: validateDownloadConfig(next.download),
       logging: validateLogConfig(next.logging),
+      ui: validateUiConfig(next.ui),
     }
     const currentRaw = preservedDownload === undefined
       ? this.rawDocument

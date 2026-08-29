@@ -118,7 +118,7 @@ describe('SecretStore', () => {
     await expect(readFile(secretsPath, 'utf-8')).resolves.toBe(raw)
   })
 
-  it('preserves the legacy safeStorage envelope for explicit reset', async () => {
+  it('identifies the legacy safeStorage envelope for automatic migration', async () => {
     const raw = JSON.stringify({
       version: 1,
       cipher: 'electron-safe-storage',
@@ -130,6 +130,7 @@ describe('SecretStore', () => {
 
     expect(result).toMatchObject({
       state: 'recovery-required',
+      reason: 'legacy-safe-storage',
       message: expect.stringContaining('旧版钥匙串加密配置'),
     })
     await expect(readFile(secretsPath, 'utf-8')).resolves.toBe(raw)

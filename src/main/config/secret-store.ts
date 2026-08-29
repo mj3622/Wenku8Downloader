@@ -24,7 +24,12 @@ interface SecretEnvelopeV2 {
 export type SecretLoadResult =
   | { state: 'ok'; value: SecretPayloadV1 }
   | { state: 'missing'; value: SecretPayloadV1 }
-  | { state: 'recovery-required'; value: SecretPayloadV1; message: string }
+  | {
+      state: 'recovery-required'
+      value: SecretPayloadV1
+      message: string
+      reason?: 'legacy-safe-storage' | 'invalid'
+    }
   | { state: 'encryption-unavailable'; value: SecretPayloadV1; message: string }
   | { state: 'read-only-newer-version'; value: SecretPayloadV1; message: string }
 
@@ -131,7 +136,8 @@ export class SecretStore {
         return {
           state: 'recovery-required',
           value: fallback,
-          message: '检测到旧版钥匙串加密配置，原文件已保留，请重置后重新登录',
+          reason: 'legacy-safe-storage',
+          message: '检测到旧版钥匙串加密配置，等待迁移到本地敏感信息存储',
         }
       }
       if (
@@ -149,6 +155,7 @@ export class SecretStore {
       return {
         state: 'recovery-required',
         value: fallback,
+        reason: 'invalid',
         message: '敏感配置无法读取，原文件已保留',
       }
     }
