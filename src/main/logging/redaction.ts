@@ -35,6 +35,7 @@ const SENSITIVE_KEYS = new Set([
   'sig',
   'credential',
   'credentials',
+  'searchkey',
   'x-amz-signature',
   'x-amz-credential',
   'encrypted',

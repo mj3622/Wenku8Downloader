@@ -5,6 +5,8 @@ import type {
 } from '../../../shared/config-types'
 import type {
   CookieProgress,
+  BookLoadOptions,
+  CacheClearResult,
   DownloadHistoryScope,
   DownloadStateEvent,
   EnqueueDownloadInput,
@@ -53,7 +55,9 @@ export const api = {
   searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
 
   // 书籍
-  getBook: (id: string) => invoke('book', () => window.electronAPI.getBook(id)),
+  getBook: (id: string, options?: BookLoadOptions) => (
+    invoke('book', () => window.electronAPI.getBook(id, options))
+  ),
   getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
   getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
     invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
@@ -75,6 +79,10 @@ export const api = {
     invoke('download', () => window.electronAPI.importLegacyDownloadHistory(tasks)),
   onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) =>
     window.electronAPI.onDownloadStateChanged(callback),
+
+  // 缓存
+  clearCache: (): Promise<CacheClearResult> =>
+    invoke('cache-clear', () => window.electronAPI.clearCache()),
 
   // 文件
   openFolder: (target: OpenFolderTarget) =>

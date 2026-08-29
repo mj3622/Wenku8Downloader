@@ -112,6 +112,8 @@ const publicSnapshot = {
 function createBookFixture() {
   return {
     bookId: '3057',
+    generationKey: 'a'.repeat(64),
+    legacyImportGenerationKey: 'a'.repeat(64),
     baseChapterUrl: 'https://www.wenku8.net/novel/3/3057/',
     basicInfo: {
       '标题': '测试作品',
@@ -161,8 +163,9 @@ function createServices(
     },
     books: {
       get: vi.fn(() => bookPromise),
-      clear: vi.fn(),
     },
+    clearCache: vi.fn(async () => ({ deferred: false })),
+    invalidateBookCache: vi.fn(async () => undefined),
     resolveVolumeCovers: mocks.resolveVolumeCovers,
     downloads: {
       getSnapshot: mocks.getDownloadSnapshot,
@@ -257,7 +260,7 @@ describe('registerIpcHandlers configuration boundary', () => {
     expect(services.config.updateDownload).not.toHaveBeenCalled()
     expect(services.config.updateCredentials).not.toHaveBeenCalled()
     expect(services.crawler.syncCookies).not.toHaveBeenCalled()
-    expect(services.books.clear).not.toHaveBeenCalled()
+    expect(services.invalidateBookCache).not.toHaveBeenCalled()
   })
 
   it('persists credentials before synchronizing cookies and clearing books', async () => {
@@ -269,7 +272,7 @@ describe('registerIpcHandlers configuration boundary', () => {
     vi.mocked(services.crawler.syncCookies).mockImplementation(async () => {
       events.push('sync')
     })
-    vi.mocked(services.books.clear).mockImplementation(() => {
+    vi.mocked(services.invalidateBookCache).mockImplementation(async () => {
       events.push('clear')
     })
 
@@ -292,7 +295,7 @@ describe('registerIpcHandlers configuration boundary', () => {
     })).rejects.toThrow('disk full')
 
     expect(services.crawler.syncCookies).not.toHaveBeenCalled()
-    expect(services.books.clear).not.toHaveBeenCalled()
+    expect(services.invalidateBookCache).not.toHaveBeenCalled()
   })
 
   it('reports a safe error when persisted credentials cannot synchronize', async () => {
@@ -304,7 +307,7 @@ describe('registerIpcHandlers configuration boundary', () => {
     })).rejects.toThrow('账号设置已保存，但登录状态同步失败')
 
     expect(services.config.updateCredentials).toHaveBeenCalledTimes(1)
-    expect(services.books.clear).not.toHaveBeenCalled()
+    expect(services.invalidateBookCache).not.toHaveBeenCalled()
   })
 
   it('explains that credentials were cleared when stale login cleanup fails', async () => {
@@ -319,7 +322,7 @@ describe('registerIpcHandlers configuration boundary', () => {
       username: '',
       password: '',
     })
-    expect(services.books.clear).not.toHaveBeenCalled()
+    expect(services.invalidateBookCache).not.toHaveBeenCalled()
   })
 
   it('returns the latest canonical snapshot after credential synchronization', async () => {
@@ -435,11 +438,32 @@ describe('registerIpcHandlers application operations', () => {
       expect.any(String),
       expect.any(Error),
       expect.objectContaining({
-        query: '败犬女主',
         operationId: expect.any(String),
         durationMs: expect.any(Number),
       }),
     )
+    expect(mocks.logger.error.mock.calls.at(-1)?.[3]).not.toHaveProperty('query')
+  })
+
+  it('validates and forwards explicit book revalidation', async () => {
+    await invoke('book:get', {}, { bookId: '3057', revalidate: true })
+
+    expect(services.books.get).toHaveBeenCalledWith('3057', { revalidate: true })
+    await expect(invoke('book:get', {}, {
+      bookId: '3057', revalidate: 'yes',
+    })).rejects.toThrow('请求参数格式无效')
+    await expect(invoke('book:get', {}, {
+      bookId: '3057', revalidate: true, path: '/tmp',
+    })).rejects.toThrow('请求参数格式无效')
+  })
+
+  it('exposes only a parameter-free full cache clear', async () => {
+    vi.mocked(services.clearCache).mockResolvedValueOnce({ deferred: true })
+
+    await expect(invoke('cache:clear', {})).resolves.toEqual({ deferred: true })
+    expect(services.clearCache).toHaveBeenCalledTimes(1)
+    await expect(invoke('cache:clear', {}, { path: '/tmp' }))
+      .rejects.toThrow('请求参数格式无效')
   })
 
   it('accepts renderer error reports through a one-way channel', () => {
@@ -587,6 +611,6 @@ describe('registerIpcHandlers application operations', () => {
       step: 'login',
       message: '正在登录...',
     })
-    expect(services.books.clear).toHaveBeenCalledTimes(1)
+    expect(services.invalidateBookCache).toHaveBeenCalledTimes(1)
   })
 })

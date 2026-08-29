@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DownloadApi,
+  CacheApi,
   DownloadStateEvent,
   EnqueueDownloadInput,
 } from '../../shared/ipc-types'
@@ -25,10 +26,11 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & {
+type ExposedApi = DownloadApi & CacheApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
+  getBook: (bookId: string, options?: { revalidate?: boolean }) => Promise<unknown>
 }
 
 const exposedApi = (
@@ -85,6 +87,19 @@ describe('preload download boundary', () => {
       bookId: '3057',
       volumes: ['第一卷'],
     })
+  })
+
+  it('uses fixed channels for revalidation and full cache clearing', async () => {
+    mocks.invoke.mockResolvedValue({ deferred: false })
+
+    await exposedApi.getBook('3057', { revalidate: true })
+    await expect(exposedApi.clearCache()).resolves.toEqual({ deferred: false })
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'book:get', {
+      bookId: '3057',
+      revalidate: true,
+    })
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'cache:clear')
   })
 
   it('forwards task and history mutation payloads', async () => {

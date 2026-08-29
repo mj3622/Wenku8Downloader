@@ -216,7 +216,8 @@ describe('WebCrawler.fetch logging', () => {
 
     const context = mocks.logger.warn.mock.calls[0]?.[2]
     const serialized = JSON.stringify(context)
-    expect(serialized).toContain('searchkey=败犬')
+    expect(serialized).toContain('searchkey=[REDACTED]')
+    expect(serialized).not.toContain('败犬')
     expect(serialized).not.toContain('password')
     expect(serialized).not.toContain('secret')
     expect(serialized).not.toContain('Cookie')

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DownloadTask } from '../../shared/ipc-types'
 import { DownloadCancelledError } from '../download-cancellation'
 import type { CrawlerRequestControlFactory } from '../crawler'
+import type { DownloadAssetCache, DownloadCacheContext } from '../cache/download-asset-cache'
 import type { DownloadProgress } from '../downloader'
 import {
   createDownloadExecutor,
@@ -10,6 +11,8 @@ import {
   type DownloadExecutorBook,
   type DownloadRunner,
 } from '../download-executor'
+
+const CACHE_KEY = 'a'.repeat(64)
 
 function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
   return {
@@ -46,11 +49,14 @@ function book(overrides: Partial<DownloadExecutorBook> = {}): DownloadExecutorBo
     getChapterImageUrls: vi.fn(async () => ['https://example.com/1.jpg']),
     getCoverContent: vi.fn(async () => Buffer.from('cover')),
     ...overrides,
+    generationKey: overrides.generationKey ?? CACHE_KEY,
+    legacyImportGenerationKey: overrides.legacyImportGenerationKey ?? CACHE_KEY,
   }
 }
 
 function setup(
   targetBook: DownloadExecutorBook | Promise<DownloadExecutorBook> = book(),
+  assetCache?: DownloadAssetCache,
 ) {
   const setOnProgress = vi.fn()
   const downloadNovel = vi.fn(async () => undefined)
@@ -88,6 +94,7 @@ function setup(
       devRoot: '/repo',
     },
     createDownloader,
+    ...(assetCache ? { assetCache } : {}),
   })
   return {
     executor,
@@ -134,6 +141,40 @@ describe('createDownloadExecutor', () => {
     )
     expect(setOnProgress).toHaveBeenCalledWith(expect.any(Function))
     expect(downloadNovel).toHaveBeenCalledWith(expect.anything(), undefined)
+  })
+
+  it('holds one generation lease for the complete image task', async () => {
+    const release = vi.fn(async () => undefined)
+    const cacheContext = {
+      bookId: '100',
+      generationKey: CACHE_KEY,
+      allowLegacyImport: true,
+      lease: { bookId: '100', generationKey: CACHE_KEY, leaseId: 'lease', release },
+    } satisfies DownloadCacheContext
+    const acquire = vi.fn(() => cacheContext)
+    const taskGuard = { epoch: 7 }
+    const captureTaskGuard = vi.fn(() => taskGuard)
+    const assetCache = { acquire, captureTaskGuard } as unknown as DownloadAssetCache
+    const getChapterImageUrls = vi.fn(async () => {
+      expect(acquire).toHaveBeenCalledTimes(1)
+      expect(release).not.toHaveBeenCalled()
+      return ['https://example.com/1.jpg']
+    })
+    const { executor, createDownloader } = setup(book({ getChapterImageUrls }), assetCache)
+
+    await executor.execute(task({ type: 'images', volume: '第一卷' }), {
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+    })
+
+    expect(captureTaskGuard).toHaveBeenCalledTimes(1)
+    expect(acquire).toHaveBeenCalledWith('100', CACHE_KEY, CACHE_KEY, taskGuard)
+    expect(createDownloader).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ assetCache, cacheContext }),
+    )
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   it('cancels the task-owned book load before starting the next stage', async () => {
@@ -199,6 +240,8 @@ describe('createDownloadExecutor', () => {
       '第一卷',
       '测试作品',
       '100',
+      CACHE_KEY,
+      CACHE_KEY,
       0,
     )
     expect(onVolumeCover).toHaveBeenCalledWith('https://example.com/1.jpg')

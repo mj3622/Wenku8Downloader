@@ -9,6 +9,7 @@ export type FeedbackContext =
   | 'config-reset'
   | 'download'
   | 'download-warning'
+  | 'cache-clear'
   | 'open-folder'
   | 'open-log-folder'
   | 'log-stats'
@@ -67,6 +68,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   'download-warning': {
     title: '下载完成，但有部分内容缺失',
     message: '部分附加资源未能保存，正文内容仍可正常阅读。',
+  },
+  'cache-clear': {
+    title: '缓存清除失败',
+    message: '缓存清除失败，请稍后重试。',
   },
   'open-folder': {
     title: '无法打开文件夹',

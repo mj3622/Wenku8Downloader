@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { EpubBuilder, escapeXml, guessMediaType } from './epub-builder'
 import type { Book } from './book'
@@ -18,6 +18,12 @@ import {
   DownloadCancelledError,
   throwIfDownloadCancelled,
 } from './download-cancellation'
+import {
+  DownloadAssetCache,
+  hasUsableChapterContent,
+  type DownloadCacheContext,
+} from './cache/download-asset-cache'
+import { legacyBookCacheDir } from './cache/legacy-download-cache'
 
 export interface DownloadRuntimeConfig extends DownloadConfig {
   rootPath: string
@@ -33,6 +39,8 @@ export interface DownloaderOptions {
   logContext?: DownloaderLogContext
   signal?: AbortSignal
   onVolumeCover?: (cover: string) => void
+  assetCache?: DownloadAssetCache
+  cacheContext?: DownloadCacheContext
 }
 
 export type DownloaderCrawler = Pick<WebCrawler, 'fetch' | 'getImageContent'>
@@ -40,6 +48,8 @@ export type DownloaderCrawler = Pick<WebCrawler, 'fetch' | 'getImageContent'>
 export type DownloaderBook = Pick<
   Book,
   | 'bookId'
+  | 'generationKey'
+  | 'legacyImportGenerationKey'
   | 'baseChapterUrl'
   | 'volumes'
   | 'basicInfo'
@@ -66,6 +76,38 @@ export type DownloadProgress = {
   current: number
   total: number
   phase: string
+}
+
+export const OUTPUT_MANIFEST_NAME = '.wenku8-output.json'
+
+export interface OutputManifest {
+  schemaVersion: 1
+  bookId: string
+  generationKey: string
+  volumeName: string
+  imageCount: number
+}
+
+export function parseOutputManifest(value: unknown): OutputManifest | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const data = value as Record<string, unknown>
+  if (data.schemaVersion !== 1
+    || typeof data.bookId !== 'string'
+    || !/^\d+$/.test(data.bookId)
+    || typeof data.generationKey !== 'string'
+    || !/^[a-f0-9]{64}$/.test(data.generationKey)
+    || typeof data.volumeName !== 'string'
+    || data.volumeName.length > 2_048
+    || typeof data.imageCount !== 'number'
+    || !Number.isSafeInteger(data.imageCount)
+    || data.imageCount < 0) return null
+  return {
+    schemaVersion: 1,
+    bookId: data.bookId,
+    generationKey: data.generationKey,
+    volumeName: data.volumeName,
+    imageCount: data.imageCount,
+  }
 }
 
 export function buildBookKey(bookTitle: string, bookId: string): string {
@@ -120,9 +162,10 @@ export async function atomicWriteDownloadFile(
   overrides: Partial<AtomicDownloadFileOps> = {},
 ): Promise<void> {
   const ops = { ...DEFAULT_ATOMIC_DOWNLOAD_FILE_OPS, ...overrides }
+  const targetName = basename(targetPath)
   const tempPath = resolveWithin(
     dirname(targetPath),
-    `.${basename(targetPath)}.tmp-${process.pid}-${randomUUID()}`,
+    `${targetName.startsWith('.') ? targetName : `.${targetName}`}.tmp-${process.pid}-${randomUUID()}`,
   )
   let handle: Awaited<ReturnType<typeof open>> | undefined
 
@@ -151,30 +194,6 @@ export async function atomicWriteDownloadFile(
   }
 }
 
-// ---- 下载缓存：支持断点续传 ----
-
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 小时后缓存自动失效
-
-function cacheRoot(rootPath: string): string {
-  return resolveWithin(rootPath, '.cache')
-}
-
-function bookCacheDir(rootPath: string, bookId: string): string {
-  return resolveWithin(cacheRoot(rootPath), safePathSegment(bookId, 'book'))
-}
-
-interface CachedChapter { title: string; content: string }
-
-function hasUsableChapterContent(content: string): boolean {
-  if (!content.trim()) return false
-  if (/<img\b/i.test(content)) return true
-  return content
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(?:nbsp|#160);/gi, ' ')
-    .trim()
-    .length > 0
-}
-
 function httpStatusFromError(error: unknown): number | undefined {
   const seen = new Set<unknown>()
   let current = error
@@ -187,72 +206,6 @@ function httpStatusFromError(error: unknown): number | undefined {
     current = record.cause
   }
   return undefined
-}
-
-async function saveChapterCache(
-  rootPath: string,
-  bookId: string,
-  vol: string,
-  idx: number,
-  ch: CachedChapter,
-): Promise<void> {
-  const p = resolveWithin(bookCacheDir(rootPath, bookId), 'chapters', safePathSegment(vol, 'volume'), `${idx}.json`)
-  await mkdir(dirname(p), { recursive: true })
-  await writeFile(p, JSON.stringify(ch), 'utf-8')
-}
-
-async function loadChapterCache(
-  rootPath: string,
-  bookId: string,
-  vol: string,
-  idx: number,
-): Promise<CachedChapter | null> {
-  const p = resolveWithin(bookCacheDir(rootPath, bookId), 'chapters', safePathSegment(vol, 'volume'), `${idx}.json`)
-  try {
-    if (Date.now() - (await stat(p)).mtimeMs > CACHE_TTL_MS) return null
-    const cached = JSON.parse(await readFile(p, 'utf-8')) as CachedChapter
-    return hasUsableChapterContent(cached.content) ? cached : null
-  } catch {
-    return null
-  }
-}
-
-async function saveImageCache(
-  rootPath: string,
-  bookId: string,
-  vol: string,
-  idx: number,
-  data: Buffer,
-  ext: string,
-): Promise<void> {
-  const dir = resolveWithin(bookCacheDir(rootPath, bookId), 'images', safePathSegment(vol, 'volume'))
-  await mkdir(dir, { recursive: true })
-  await Promise.all([
-    writeFile(join(dir, `${idx}.bin`), data),
-    writeFile(join(dir, `${idx}.meta`), ext, 'utf-8'),
-  ])
-}
-
-async function loadImageCache(
-  rootPath: string,
-  bookId: string,
-  vol: string,
-  idx: number,
-): Promise<{ data: Buffer; ext: string } | null> {
-  const dir = resolveWithin(bookCacheDir(rootPath, bookId), 'images', safePathSegment(vol, 'volume'))
-  const dp = join(dir, `${idx}.bin`)
-  const mp = join(dir, `${idx}.meta`)
-  try {
-    if (Date.now() - (await stat(dp)).mtimeMs > CACHE_TTL_MS) return null
-    const [data, ext] = await Promise.all([readFile(dp), readFile(mp, 'utf-8')])
-    return data.byteLength > 0 ? { data, ext } : null
-  } catch {
-    return null
-  }
-}
-
-async function clearBookCache(rootPath: string, bookId: string): Promise<void> {
-  await rm(bookCacheDir(rootPath, bookId), { recursive: true, force: true })
 }
 
 /** 并发池：限制同时执行的 Promise 数量，保持结果顺序 */
@@ -386,6 +339,8 @@ export class Downloader {
   private readonly logContext: DownloaderLogContext
   private readonly signal?: AbortSignal
   private readonly onVolumeCover?: (cover: string) => void
+  private readonly assetCache?: DownloadAssetCache
+  private activeCacheContext?: DownloadCacheContext
   private readonly warnings: string[] = []
   private onProgress: ((p: DownloadProgress) => void) | null = null
   private lastProgress: DownloadProgress | null = null
@@ -402,26 +357,61 @@ export class Downloader {
       this.logContext = {}
       this.signal = undefined
       this.onVolumeCover = undefined
+      this.assetCache = undefined
     } else if (
       'rateLimiter' in optionsOrRateLimiter
       || 'logContext' in optionsOrRateLimiter
       || 'signal' in optionsOrRateLimiter
       || 'onVolumeCover' in optionsOrRateLimiter
+      || 'assetCache' in optionsOrRateLimiter
+      || 'cacheContext' in optionsOrRateLimiter
     ) {
       this.rateLimiter = optionsOrRateLimiter.rateLimiter ?? sharedDownloadRateLimiter
       this.logContext = { ...optionsOrRateLimiter.logContext }
       this.signal = optionsOrRateLimiter.signal
       this.onVolumeCover = optionsOrRateLimiter.onVolumeCover
+      this.assetCache = optionsOrRateLimiter.assetCache
+      this.activeCacheContext = optionsOrRateLimiter.cacheContext
     } else {
       this.rateLimiter = sharedDownloadRateLimiter
       this.logContext = { ...(optionsOrRateLimiter as DownloaderLogContext) }
       this.signal = undefined
       this.onVolumeCover = undefined
+      this.assetCache = undefined
     }
   }
 
   setOnProgress(cb: (p: DownloadProgress) => void): void {
     this.onProgress = cb
+  }
+
+  private async withCacheContext<T>(
+    bookId: string,
+    generationKey: string,
+    legacyImportGenerationKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.assetCache) return operation()
+    if (this.activeCacheContext) {
+      if (this.activeCacheContext.bookId !== bookId
+        || this.activeCacheContext.generationKey !== generationKey) {
+        throw new Error('下载缓存上下文与作品版本不一致')
+      }
+      return operation()
+    }
+    const context = await this.assetCache.acquire(
+      bookId,
+      generationKey,
+      legacyImportGenerationKey,
+    )
+    const previous = this.activeCacheContext
+    this.activeCacheContext = context
+    try {
+      return await operation()
+    } finally {
+      this.activeCacheContext = previous
+      await context.lease.release()
+    }
   }
 
   private emitProgress(current: number, total: number, phase: string): void {
@@ -591,6 +581,31 @@ export class Downloader {
     volumeName: string,
     novelName: string,
     bookId: string,
+    generationKey: string,
+    legacyImportGenerationKey: string,
+    volumeIndex?: number,
+  ): Promise<void> {
+    return this.withCacheContext(
+      bookId,
+      generationKey,
+      legacyImportGenerationKey,
+      () => this.downloadPicturesWithCache(
+        urls,
+        volumeName,
+        novelName,
+        bookId,
+        generationKey,
+        volumeIndex,
+      ),
+    )
+  }
+
+  private async downloadPicturesWithCache(
+    urls: string[],
+    volumeName: string,
+    novelName: string,
+    bookId: string,
+    generationKey: string,
     volumeIndex?: number,
   ): Promise<void> {
     // 每次调用对应一个独立分卷，不能沿用上一卷的单调进度基线。
@@ -608,25 +623,49 @@ export class Downloader {
     const volumePath = resolveWithin(savePath, 'pics', bookKey, dirName)
     await mkdir(volumePath, { recursive: true })
 
-    // 检查已有文件，跳过已下载的图片
-    const existingIndices = new Set<number>()
-    for (const entry of await readdir(volumePath, { withFileTypes: true })) {
-      throwIfDownloadCancelled(this.signal)
-      if (!entry.isFile()) continue
-      const match = entry.name.match(/^(\d+)\./)
-      if (!match) continue
-      const metadata = await stat(resolveWithin(volumePath, entry.name))
-      if (metadata.size > 0) existingIndices.add(parseInt(match[1]) - 1)
+    const manifest: OutputManifest = {
+      schemaVersion: 1,
+      bookId,
+      generationKey,
+      volumeName,
+      imageCount: urls.length,
     }
+    let savedManifest: OutputManifest | null = null
+    try {
+      savedManifest = parseOutputManifest(JSON.parse(
+        await readFile(resolveWithin(volumePath, OUTPUT_MANIFEST_NAME), 'utf8'),
+      ))
+    } catch {
+      // A missing or malformed manifest forces a full refresh of this volume.
+    }
+    const canReuseOutput = savedManifest?.bookId === manifest.bookId
+      && savedManifest.generationKey === manifest.generationKey
+      && savedManifest.volumeName === manifest.volumeName
+      && savedManifest.imageCount === manifest.imageCount
 
-    const toFetch: { url: string; idx: number }[] = []
-    for (let i = 0; i < urls.length; i++) {
-      if (!existingIndices.has(i)) {
-        toFetch.push({ url: urls[i], idx: i })
+    const existingIndices = new Set<number>()
+    const currentFiles = new Set<string>()
+    if (canReuseOutput) {
+      for (const entry of await readdir(volumePath, { withFileTypes: true })) {
+        throwIfDownloadCancelled(this.signal)
+        if (!entry.isFile()) continue
+        const match = entry.name.match(/^(\d+)\.[a-zA-Z0-9]+$/)
+        if (!match) continue
+        const metadata = await stat(resolveWithin(volumePath, entry.name))
+        const index = parseInt(match[1]) - 1
+        if (metadata.size > 0 && index >= 0 && index < urls.length) {
+          existingIndices.add(index)
+          currentFiles.add(entry.name)
+        }
       }
     }
 
-    const skipped = urls.length - toFetch.length
+    const unresolved: { url: string; idx: number }[] = []
+    for (let i = 0; i < urls.length; i++) {
+      if (!existingIndices.has(i)) unresolved.push({ url: urls[i], idx: i })
+    }
+
+    const skipped = urls.length - unresolved.length
     const summaryContext = {
       ...this.logContext,
       bookId,
@@ -637,31 +676,65 @@ export class Downloader {
       outputPath: volumePath,
     }
 
-    if (toFetch.length === 0) {
+    if (unresolved.length === 0) {
       this.emitProgress(urls.length, urls.length, `图片已全部下载，跳过 (${volumeName})`)
       logger.info('download.pictures.volume-completed', '插图卷下载完成', summaryContext)
       return
     }
 
     let writtenBytes = 0
+    let cacheHits = 0
+    const toFetch: { url: string; idx: number }[] = []
+    for (const item of unresolved) {
+      throwIfDownloadCancelled(this.signal)
+      const cached = this.assetCache && this.activeCacheContext
+        ? await this.assetCache.loadImage(this.activeCacheContext, item.url, {
+            downloadRoot: this.runtimeConfig.rootPath,
+            volumeKey: dirName,
+            index: item.idx,
+          })
+        : null
+      if (!cached) {
+        toFetch.push(item)
+        continue
+      }
+      const fileName = `${item.idx + 1}.${cached.extension}`
+      await atomicWriteDownloadFile(resolveWithin(volumePath, fileName), cached.data)
+      currentFiles.add(fileName)
+      writtenBytes += cached.data.byteLength
+      cacheHits++
+    }
+    const guard = this.assetCache && this.activeCacheContext
+      ? this.assetCache.captureWriteGuard(this.activeCacheContext)
+      : undefined
     const outcome = await this.downloadImagesWithConcurrency(
       toFetch.map(x => x.url),
       async (content, ext, batchIdx) => {
         throwIfDownloadCancelled(this.signal)
         const i = toFetch[batchIdx].idx
-        const filePath = resolveWithin(volumePath, `${i + 1}.${ext}`)
+        const fileName = `${i + 1}.${ext}`
+        const filePath = resolveWithin(volumePath, fileName)
         await atomicWriteDownloadFile(filePath, content)
+        currentFiles.add(fileName)
         writtenBytes += content.byteLength
+        if (this.assetCache && this.activeCacheContext && guard) {
+          await this.assetCache.saveImage(
+            this.activeCacheContext,
+            toFetch[batchIdx].url,
+            { data: content, extension: ext },
+            guard,
+          )
+        }
       },
       (completed, _total) => {
         this.emitProgress(
-          existingIndices.size + completed,
+          skipped + cacheHits + completed,
           urls.length,
           `正在下载图片 (${volumeName})`,
         )
       },
     )
-    if (skipped + outcome.succeeded === 0) {
+    if (skipped + cacheHits + outcome.succeeded === 0) {
       if (outcome.firstError !== undefined) throw outcome.firstError
       throw new NoUsableDownloadContentError('该分卷没有可保存的插图')
     }
@@ -670,9 +743,22 @@ export class Downloader {
         `“${volumeName}”有 ${outcome.failedIndices.length} 张插图未能下载，已保存其余插图。`,
       )
     }
+    if (outcome.failedIndices.length === 0
+      && skipped + cacheHits + outcome.succeeded === urls.length) {
+      for (const entry of await readdir(volumePath, { withFileTypes: true })) {
+        if (!entry.isFile()
+          || !/^\d+\.[a-zA-Z0-9]+$/.test(entry.name)
+          || currentFiles.has(entry.name)) continue
+        await rm(resolveWithin(volumePath, entry.name), { force: true })
+      }
+      await atomicWriteDownloadFile(
+        resolveWithin(volumePath, OUTPUT_MANIFEST_NAME),
+        Buffer.from(JSON.stringify(manifest), 'utf8'),
+      )
+    }
     logger.info('download.output.written', '插图文件已写入', {
       ...summaryContext,
-      itemCount: outcome.succeeded,
+      itemCount: cacheHits + outcome.succeeded,
       byteCount: writtenBytes,
     })
     logger.info('download.pictures.volume-completed', '插图卷下载完成', summaryContext)
@@ -715,12 +801,16 @@ export class Downloader {
   }
 
   async downloadNovel(book: DownloaderBook, volumeName?: string): Promise<void> {
-    throwIfDownloadCancelled(this.signal)
-    if (volumeName) {
-      await this.downloadSingleVolume(book, volumeName)
-    } else {
-      await this.downloadFullBook(book)
-    }
+    return this.withCacheContext(
+      String(book.bookId),
+      book.generationKey,
+      book.legacyImportGenerationKey,
+      async () => {
+        throwIfDownloadCancelled(this.signal)
+        if (volumeName) await this.downloadSingleVolume(book, volumeName)
+        else await this.downloadFullBook(book)
+      },
+    )
   }
 
   private async downloadSingleVolume(book: DownloaderBook, volumeName: string): Promise<void> {
@@ -743,7 +833,7 @@ export class Downloader {
 
     const bookId = String(book.bookId)
     await migrateLegacyVolumeCache(
-      bookCacheDir(this.runtimeConfig.rootPath, bookId),
+      legacyBookCacheDir(this.runtimeConfig.rootPath, bookId),
       volumeName,
       volumeKey,
       volumeNames,
@@ -870,7 +960,6 @@ export class Downloader {
       outputPath,
       byteCount: epubBuffer.byteLength,
     })
-    await clearBookCache(this.runtimeConfig.rootPath, bookId)
   }
 
   private async downloadVolumeImagesCached(
@@ -898,8 +987,14 @@ export class Downloader {
     const cachedImgs: { data: Buffer; ext: string; idx: number }[] = []
     for (let i = 0; i < urls.length; i++) {
       throwIfDownloadCancelled(this.signal)
-      const c = await loadImageCache(this.runtimeConfig.rootPath, bookId, volumeKey, i)
-      if (c) cachedImgs.push({ ...c, idx: i })
+      const c = this.assetCache && this.activeCacheContext
+        ? await this.assetCache.loadImage(this.activeCacheContext, urls[i], {
+            downloadRoot: this.runtimeConfig.rootPath,
+            volumeKey,
+            index: i,
+          })
+        : null
+      if (c) cachedImgs.push({ data: c.data, ext: c.extension, idx: i })
     }
 
     // 从缓存恢复图片
@@ -922,12 +1017,22 @@ export class Downloader {
       .filter(x => !cachedImgs.some(r => r.idx === x.idx))
 
     if (toFetch.length > 0) {
+      const guard = this.assetCache && this.activeCacheContext
+        ? this.assetCache.captureWriteGuard(this.activeCacheContext)
+        : undefined
       const outcome = await this.downloadImagesWithConcurrency(
         toFetch.map(x => x.url),
         async (data, ext, batchIdx) => {
           throwIfDownloadCancelled(this.signal)
           const idx = toFetch[batchIdx].idx
-          await saveImageCache(this.runtimeConfig.rootPath, bookId, volumeKey, idx, data, ext)
+          if (this.assetCache && this.activeCacheContext && guard) {
+            await this.assetCache.saveImage(
+              this.activeCacheContext,
+              toFetch[batchIdx].url,
+              { data, extension: ext },
+              guard,
+            )
+          }
           const imgName = `images/${volumeKey}_${idx + 1}.${ext}`
           images.push({ fileName: imgName, data, mediaType: guessMediaType(ext) })
           htmlParts += `<img src="${imgName}"/>`
@@ -973,7 +1078,14 @@ export class Downloader {
     // 加载已缓存的章节
     for (let i = 0; i < chapterItems.length; i++) {
       throwIfDownloadCancelled(this.signal)
-      const c = await loadChapterCache(this.runtimeConfig.rootPath, bookId, volumeKey, i)
+      const chapterUrl = new URL(chapterItems[i].link, book.baseChapterUrl).toString()
+      const c = this.assetCache && this.activeCacheContext
+        ? await this.assetCache.loadChapter(this.activeCacheContext, chapterUrl, {
+            downloadRoot: this.runtimeConfig.rootPath,
+            volumeKey,
+            index: i,
+          })
+        : null
       if (c) {
         results.push({ ...c, idx: i })
         completed++
@@ -986,19 +1098,23 @@ export class Downloader {
       .filter(x => !results.some(r => r.idx === x.idx))
 
     if (toFetch.length > 0) {
+      const guard = this.assetCache && this.activeCacheContext
+        ? this.assetCache.captureWriteGuard(this.activeCacheContext)
+        : undefined
       const fetched = await asyncPool(
         this.speed.chapterConcurrency,
         toFetch,
         async ({ item, idx }) => {
-          const link = `${book.baseChapterUrl}${item.link}`
+          const link = new URL(item.link, book.baseChapterUrl).toString()
           const html = await this.fetchChapterContent(link)
-          await saveChapterCache(
-            this.runtimeConfig.rootPath,
-            bookId,
-            volumeKey,
-            idx,
-            { title: item.name, content: html },
-          )
+          if (this.assetCache && this.activeCacheContext && guard) {
+            await this.assetCache.saveChapter(
+              this.activeCacheContext,
+              link,
+              { title: item.name, content: html },
+              guard,
+            )
+          }
           completed++
           this.emitProgress(completed, totalChapters,
             `正在下载: ${item.name} (${completed}/${totalChapters})`)
@@ -1092,7 +1208,7 @@ export class Downloader {
       let htmlParts = ''
       const volumeKey = buildVolumeKey(volName, volumeIndex)
       await migrateLegacyVolumeCache(
-        bookCacheDir(this.runtimeConfig.rootPath, bookId),
+        legacyBookCacheDir(this.runtimeConfig.rootPath, bookId),
         volName,
         volumeKey,
         volumeNames,
@@ -1205,8 +1321,6 @@ export class Downloader {
       byteCount: epubBuffer.byteLength,
     })
 
-    // 下载成功，清理缓存
-    await clearBookCache(this.runtimeConfig.rootPath, bookId)
   }
 }
 

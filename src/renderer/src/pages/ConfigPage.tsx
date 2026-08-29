@@ -45,6 +45,8 @@ const RECOVERY_CONFIRMATION =
   '确定要处理配置问题吗？损坏文件将保留恢复备份，已迁移的旧明文配置将被清理'
 const CLEAR_CREDENTIALS_CONFIRMATION =
   '确定要清除已保存的登录信息吗？此操作不会删除已下载文件'
+const CLEAR_CACHE_CONFIRMATION =
+  '清除作品缓存？已下载的 EPUB 和插图不会被删除。'
 
 type LogField = 'retentionDays' | 'maxFileSizeMb' | 'maxTotalSizeMb'
 
@@ -719,6 +721,15 @@ function DownloadTab() {
   const [downloadPath, setDownloadPath] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>('saved')
+  const [clearingCache, setClearingCache] = useState(false)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!snapshot) return
@@ -782,6 +793,24 @@ function DownloadTab() {
       await api.openFolder('root')
     } catch (openError) {
       toast.error(getUserFeedback(openError, 'open-folder'))
+    }
+  }
+
+  const handleClearCache = async () => {
+    if (clearingCache || !window.confirm(CLEAR_CACHE_CONFIRMATION)) return
+    setClearingCache(true)
+    try {
+      const result = await api.clearCache()
+      toast.success({
+        title: '缓存已清除',
+        message: result.deferred
+          ? '缓存已清除，正在下载的任务所使用的数据将在任务结束后自动处理'
+          : '作品缓存已清除，已下载内容保持不变',
+      })
+    } catch (clearError) {
+      toast.error(getUserFeedback(clearError, 'cache-clear'))
+    } finally {
+      if (mounted.current) setClearingCache(false)
     }
   }
 
@@ -933,6 +962,23 @@ function DownloadTab() {
         <p className="mt-1.5 text-sm text-apple-tertiary">
           留空使用默认目录，仅影响后续下载
         </p>
+      </div>
+      <div className="flex items-center justify-between gap-6 border-t border-apple-border-subtle pt-5">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-apple-heading">缓存</h3>
+          <p className="mt-1 text-sm text-apple-tertiary">
+            作品内容会按更新时间自动复用；搜索结果始终实时获取。
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={clearingCache}
+          onClick={() => void handleClearCache()}
+          className="motion-pressable inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {clearingCache && <IconLoader2 aria-hidden="true" size={15} className="animate-spin" />}
+          {clearingCache ? '正在清除…' : '清除缓存'}
+        </button>
       </div>
     </div>
   )

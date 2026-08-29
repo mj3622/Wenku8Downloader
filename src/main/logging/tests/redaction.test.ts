@@ -7,12 +7,12 @@ import {
 } from '../redaction'
 
 describe('log redaction', () => {
-  it('redacts only sensitive URL parameters and keeps diagnostic parameters', () => {
+  it('redacts sensitive and search URL parameters while keeping diagnostic parameters', () => {
     const value = sanitizeLogText(
       'GET https://www.wenku8.net/search?searchkey=败犬&token=secret&volume=第一卷',
     )
 
-    expect(value).toContain('searchkey=败犬')
+    expect(value).toContain('searchkey=[REDACTED]')
     expect(value).toContain('volume=第一卷')
     expect(value).toContain('token=[REDACTED]')
     expect(value).not.toContain('secret')
@@ -30,8 +30,9 @@ describe('log redaction', () => {
 
     expect(value).toContain('"password":"[REDACTED]"')
     expect(value).toContain('access%5Ftoken=[REDACTED]')
-    expect(value).toContain('"searchkey":"败犬"')
-    expect(value).toContain('searchkey=%E8%B4%A5%E7%8A%AC')
+    expect(value).toContain('"searchkey":"[REDACTED]"')
+    expect(value).toContain('searchkey=[REDACTED]')
+    expect(value).not.toContain('败犬')
     expect(value).not.toContain('hunter2')
     expect(value).not.toContain('secret')
   })
@@ -92,7 +93,7 @@ describe('log redaction', () => {
     expect(sanitizeLogText(undefined as never)).toBe('undefined')
   })
 
-  it('redacts nested credentials without hiding ordinary keys or paths', () => {
+  it('redacts nested credentials and searches without hiding ordinary keys or paths', () => {
     expect(sanitizeLogValue({
       password: 'secret',
       searchkey: '败犬',
@@ -102,7 +103,7 @@ describe('log redaction', () => {
       encryptedPayload: 'cipher-value',
     })).toEqual({
       password: '[REDACTED]',
-      searchkey: '败犬',
+      searchkey: '[REDACTED]',
       path: 'D:\\Books\\第一卷.epub',
       nested: { authorization: '[REDACTED]', bookId: '3057' },
       clientSecret: '[REDACTED]',
