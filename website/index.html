@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="轻小说文库下载器是一款面向 macOS 与 Windows 的开源桌面工具，支持作品发现、精准检索、EPUB 导出与插图整理"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>轻小说文库下载器｜把喜欢的轻小说打包带走</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <header class="site-header" data-site-header>
+      <div class="header-inner">
+        <a class="brand" href="#top" aria-label="轻小说文库下载器首页">
+          <img src="assets/icon.png" alt="" width="36" height="36" aria-hidden="true" />
+          <span>轻小说文库下载器</span>
+        </a>
+
+        <button
+          class="menu-button"
+          type="button"
+          aria-label="打开导航菜单"
+          aria-controls="site-navigation"
+          aria-expanded="false"
+          data-menu-button
+        >
+          <span aria-hidden="true" data-menu-label>菜单</span>
+        </button>
+
+        <nav id="site-navigation" class="site-navigation" aria-label="主要导航" data-navigation>
+          <a href="#experience">产品体验</a>
+          <a href="#capabilities">核心能力</a>
+          <a href="#principles">项目原则</a>
+          <a href="#faq">常见问题</a>
+        </nav>
+
+        <a
+          class="header-action pressable"
+          href="https://github.com/mj3622/Wenku8Downloader/releases"
+          target="_blank"
+          rel="noreferrer"
+        >
+          下载桌面版
+          <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section id="top" class="hero">
+        <div class="page-shell hero-copy">
+          <p class="eyebrow">Wenku8 Downloader 2.1</p>
+          <h1>把喜欢的轻小说<br />打包带走</h1>
+          <p class="hero-summary">
+            从发现、检索到 EPUB 导出，在一个安静、清晰的桌面工具里完成
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button button-primary pressable"
+              href="https://github.com/mj3622/Wenku8Downloader/releases"
+              target="_blank"
+              rel="noreferrer"
+            >
+              获取最新版本
+              <span aria-hidden="true">↗</span>
+            </a>
+            <a
+              class="button button-secondary pressable"
+              href="https://github.com/mj3622/Wenku8Downloader"
+              target="_blank"
+              rel="noreferrer"
+            >
+              在 GitHub 查看
+            </a>
+          </div>
+          <p class="hero-meta">适用于 macOS 13 及更高版本、Windows x64</p>
+        </div>
+
+        <div class="page-shell hero-stage" aria-label="产品界面预览">
+          <div class="window-frame">
+            <div class="window-toolbar" aria-hidden="true">
+              <span class="window-dots"><i></i><i></i><i></i></span>
+              <span>Wenku8 Downloader</span>
+              <span class="window-spacer"></span>
+            </div>
+            <div class="hero-screen">
+              <img
+                src="assets/discover.webp"
+                alt="轻小说文库下载器发现页，展示热门榜单与新书推荐"
+                width="1600"
+                height="1024"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="product-note" aria-label="产品定位">
+        <div class="page-shell product-note-inner">
+          <p>为个人阅读整理而设计</p>
+          <ul aria-label="产品特性">
+            <li>开源免费</li>
+            <li>本地优先</li>
+            <li>macOS</li>
+            <li>Windows</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="intro-section section-space reveal">
+        <div class="page-shell intro-grid">
+          <p class="section-label">更顺手的阅读起点</p>
+          <div>
+            <h2>少在网页间来回<br />多花时间真正阅读</h2>
+            <p>
+              找到想读的作品，选择需要的内容，然后交给应用完成整理。复杂的目录、封面与章节处理留在幕后，你只需要打开阅读器
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="experience" class="showcase-section section-space reveal">
+        <div class="page-shell">
+          <div class="section-heading">
+            <p class="section-label">一条完整的收藏路径</p>
+            <h2>从下一本想读的书开始</h2>
+          </div>
+
+          <div class="showcase">
+            <div class="showcase-tabs" role="tablist" aria-label="产品使用场景">
+              <button
+                id="showcase-tab-discover"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="showcase-panel-discover"
+                data-showcase-tab="discover"
+              >
+                <span>01</span>
+                发现好书
+              </button>
+              <button
+                id="showcase-tab-search"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="showcase-panel-search"
+                tabindex="-1"
+                data-showcase-tab="search"
+              >
+                <span>02</span>
+                快速检索
+              </button>
+              <button
+                id="showcase-tab-export"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="showcase-panel-export"
+                tabindex="-1"
+                data-showcase-tab="export"
+              >
+                <span>03</span>
+                整理导出
+              </button>
+            </div>
+
+            <div class="showcase-panels">
+              <article
+                id="showcase-panel-discover"
+                class="showcase-panel"
+                role="tabpanel"
+                aria-labelledby="showcase-tab-discover"
+                data-showcase-panel="discover"
+                data-active="true"
+              >
+                <div class="showcase-media">
+                  <img
+                    src="assets/discover.webp"
+                    alt="发现页中的今日热榜、本月热点与新书推荐"
+                    width="1600"
+                    height="1024"
+                  />
+                </div>
+                <div class="showcase-copy">
+                  <p class="showcase-index">01 / 03</p>
+                  <h3>在封面和榜单之间，遇见下一本想读的书</h3>
+                  <p>热门排行、新书推荐和关注榜集中呈现，不必在多个网页之间反复翻找</p>
+                  <a href="#capabilities">了解发现功能 <span aria-hidden="true">↓</span></a>
+                </div>
+              </article>
+
+              <article
+                id="showcase-panel-search"
+                class="showcase-panel"
+                role="tabpanel"
+                aria-labelledby="showcase-tab-search"
+                aria-hidden="true"
+                data-showcase-panel="search"
+                data-active="false"
+              >
+                <div class="showcase-media">
+                  <img
+                    src="assets/search-results.webp"
+                    alt="按书名搜索作品并展示封面、作者和状态的结果页"
+                    width="1600"
+                    height="1024"
+                    loading="lazy"
+                  />
+                </div>
+                <div class="showcase-copy">
+                  <p class="showcase-index">02 / 03</p>
+                  <h3>记得书名、作者或编号，就能快速定位作品</h3>
+                  <p>三种检索方式覆盖常见找书场景，结果直接呈现封面、状态与更新时间</p>
+                  <a href="#capabilities">了解检索功能 <span aria-hidden="true">↓</span></a>
+                </div>
+              </article>
+
+              <article
+                id="showcase-panel-export"
+                class="showcase-panel"
+                role="tabpanel"
+                aria-labelledby="showcase-tab-export"
+                aria-hidden="true"
+                data-showcase-panel="export"
+                data-active="false"
+              >
+                <div class="showcase-media">
+                  <img
+                    src="assets/book-detail.webp"
+                    alt="作品详情页中的整本、分卷与插图下载选项"
+                    width="1600"
+                    height="1024"
+                    loading="lazy"
+                  />
+                </div>
+                <div class="showcase-copy">
+                  <p class="showcase-index">03 / 03</p>
+                  <h3>整本、分卷或插图，按自己的方式收藏</h3>
+                  <p>章节、目录、封面与插图自动整理，导出后即可放进常用阅读器</p>
+                  <a href="#capabilities">了解导出功能 <span aria-hidden="true">↓</span></a>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="capabilities" class="capabilities-section section-space reveal">
+        <div class="page-shell">
+          <div class="section-heading split-heading">
+            <div>
+              <p class="section-label">围绕阅读整理</p>
+              <h2>需要的能力<br />恰好都在</h2>
+            </div>
+            <p>
+              从第一次找到作品，到最后在阅读器里打开 EPUB，每一环都围绕同一个目标设计
+            </p>
+          </div>
+
+          <div class="capability-grid">
+            <article>
+              <span>发现</span>
+              <h3>热门与新书排行</h3>
+              <p>从首页推荐与多维榜单中浏览近期值得关注的作品</p>
+            </article>
+            <article>
+              <span>检索</span>
+              <h3>三种查找方式</h3>
+              <p>支持按书名、作者或作品编号检索，减少无效翻页</p>
+            </article>
+            <article>
+              <span>导出</span>
+              <h3>完整 EPUB</h3>
+              <p>保留目录、封面和正文插图，支持整本合并或分卷导出</p>
+            </article>
+            <article>
+              <span>收藏</span>
+              <h3>单独整理插图</h3>
+              <p>按分卷保存封面、彩插与正文插画，方便独立归档</p>
+            </article>
+            <article>
+              <span>任务</span>
+              <h3>下载进度管理</h3>
+              <p>集中查看进行中、失败和已完成任务，支持取消与重试</p>
+            </article>
+            <article>
+              <span>路径</span>
+              <h3>文件去向可控</h3>
+              <p>自定义 EPUB 与插图保存位置，输出结构保持清晰</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="principles" class="principles-section section-space reveal">
+        <div class="page-shell">
+          <div class="principles-heading">
+            <p class="section-label">克制、透明、可靠</p>
+            <h2>一款知道边界<br />在哪里的工具</h2>
+          </div>
+
+          <div class="principles-list">
+            <article>
+              <span>01</span>
+              <h3>本地优先</h3>
+              <p>配置、任务与缓存保留在本机，不接入项目自建云端服务</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>节制访问</h3>
+              <p>统一管理请求间隔、重试与限流，尽量减少对数据源的额外压力</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>开源透明</h3>
+              <p>项目基于 MIT 许可证开源，实现、问题和发布记录均可查阅</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="steps-section section-space reveal">
+        <div class="page-shell">
+          <div class="section-heading split-heading">
+            <div>
+              <p class="section-label">打开应用之后</p>
+              <h2>三步收进<br />自己的书架</h2>
+            </div>
+            <p>登录数据源账号并设置保存路径后，就可以开始整理自己的离线书库</p>
+          </div>
+
+          <ol class="steps-list">
+            <li>
+              <span>01</span>
+              <div>
+                <h3>找到作品</h3>
+                <p>从发现页浏览，或直接按书名、作者和编号检索</p>
+              </div>
+            </li>
+            <li>
+              <span>02</span>
+              <div>
+                <h3>选择内容</h3>
+                <p>下载整本 EPUB、指定分卷，或者只整理插图</p>
+              </div>
+            </li>
+            <li>
+              <span>03</span>
+              <div>
+                <h3>开始阅读</h3>
+                <p>任务完成后，把文件放进常用的阅读器、平板或手机</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="faq" class="faq-section section-space reveal">
+        <div class="page-shell faq-grid">
+          <div>
+            <p class="section-label">常见问题</p>
+            <h2>开始之前<br />你可能想知道</h2>
+          </div>
+
+          <div class="faq-list">
+            <details>
+              <summary>这个工具提供小说内容吗？<span aria-hidden="true">+</span></summary>
+              <p>不提供。应用只帮助用户从数据源检索并整理内容，使用时仍需遵守站点规则与相关版权要求</p>
+            </details>
+            <details>
+              <summary>支持哪些系统？<span aria-hidden="true">+</span></summary>
+              <p>当前提供 macOS Apple Silicon、macOS Intel 和 Windows x64 版本，macOS 需要 13 Ventura 或更高版本</p>
+            </details>
+            <details>
+              <summary>账号和下载记录会上传吗？<span aria-hidden="true">+</span></summary>
+              <p>不会上传到项目自建服务。普通配置、任务和缓存均保留在本机</p>
+            </details>
+            <details>
+              <summary>可以只下载某一卷或插图吗？<span aria-hidden="true">+</span></summary>
+              <p>可以。作品详情页支持整本、分卷和插图三种下载方式</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta reveal">
+        <div class="page-shell final-cta-inner">
+          <img src="assets/icon.png" alt="" width="72" height="72" aria-hidden="true" />
+          <p class="section-label">轻小说文库下载器</p>
+          <h2>下一本想读的书<br />现在就带走</h2>
+          <div class="hero-actions">
+            <a
+              class="button button-primary pressable"
+              href="https://github.com/mj3622/Wenku8Downloader/releases"
+              target="_blank"
+              rel="noreferrer"
+            >
+              前往下载
+              <span aria-hidden="true">↗</span>
+            </a>
+            <a
+              class="button button-secondary pressable"
+              href="https://github.com/mj3622/Wenku8Downloader"
+              target="_blank"
+              rel="noreferrer"
+            >
+              查看源代码
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="page-shell footer-inner">
+        <div class="footer-brand">
+          <img src="assets/icon.png" alt="" width="32" height="32" aria-hidden="true" />
+          <span>轻小说文库下载器</span>
+        </div>
+        <p>开源的桌面端轻小说整理工具</p>
+        <div class="footer-links">
+          <a href="https://github.com/mj3622/Wenku8Downloader" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/mj3622/Wenku8Downloader/releases" target="_blank" rel="noreferrer">Releases</a>
+          <a href="https://github.com/mj3622/Wenku8Downloader/blob/master/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
