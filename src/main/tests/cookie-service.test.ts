@@ -71,4 +71,31 @@ describe('CookieService', () => {
     })
     expect(progress).toEqual(['正在登录...', '登录成功', '登录成功，登录状态已更新'])
   })
+
+  it('reports when the user needs to finish Cloudflare verification', async () => {
+    const crawler = {
+      getCookie: vi.fn(async (onChallenge?: () => void) => {
+        onChallenge?.()
+      }),
+    }
+    const config = createConfig({
+      cookies: {
+        PHPSESSID: 'sess',
+        jieqiUserInfo: 'user-info',
+        jieqiVisitInfo: 'visit-info',
+        cf_clearance: 'clearance',
+      },
+    })
+    const progress: string[] = []
+    const service = new CookieService(crawler, config)
+
+    await service.acquire((event) => progress.push(event.message))
+
+    expect(progress).toEqual([
+      '正在登录...',
+      '请在弹出窗口完成安全验证',
+      '登录成功',
+      '登录成功，登录状态已更新',
+    ])
+  })
 })

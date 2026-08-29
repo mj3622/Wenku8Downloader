@@ -36,7 +36,12 @@ vi.mock('./download-cancellation', async (importOriginal) => ({
 }))
 vi.mock('./logging/logger', () => ({ logger: mocks.logger }))
 
-import { parseRetryAfter, WebCrawler, type CrawlerConfig } from './crawler'
+import {
+  parseRetryAfter,
+  WebCrawler,
+  type CrawlerConfig,
+  type CrawlerNetworkSession,
+} from './crawler'
 import { DownloadCancelledError } from './download-cancellation'
 import {
   COOKIE_NAMES,
@@ -100,6 +105,111 @@ afterEach(() => {
 })
 
 describe('WebCrawler.fetch logging', () => {
+  it('includes Wenku8 session cookies in document requests', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/index.php',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+    })
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await crawler.fetch('https://www.wenku8.net/index.php')
+
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      'https://www.wenku8.net/index.php',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('uses an injected Electron session for requests and cookies', async () => {
+    const sessionFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/index.php',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+    }))
+    const sessionCookies = {
+      get: vi.fn(async () => []),
+      set: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    }
+    const networkSession = {
+      fetch: sessionFetch,
+      cookies: sessionCookies,
+    } as unknown as CrawlerNetworkSession
+    const crawler = new WebCrawler(createConfig(), {}, undefined, networkSession)
+
+    await crawler.syncCookies()
+    await crawler.fetch('https://www.wenku8.net/index.php')
+
+    expect(sessionFetch).toHaveBeenCalledTimes(1)
+    expect(sessionCookies.remove).toHaveBeenCalledTimes(COOKIE_NAMES.length)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.removeCookie).not.toHaveBeenCalled()
+  })
+
+  it('opens one verification window when a Wenku8 document returns a challenge header', async () => {
+    const fixture = createMutableLoginConfig()
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/index.php',
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    mocks.getCookies.mockResolvedValue([{
+      name: 'cf_clearance',
+      value: 'clearance',
+    }])
+    const crawler = new WebCrawler(fixture.config, {}, { solve: solveChallenge })
+
+    await expect(crawler.fetch('https://www.wenku8.net/index.php')).resolves.toBeDefined()
+
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.sleepWithSignal).not.toHaveBeenCalled()
+    expect(fixture.replaceCookies).toHaveBeenCalledWith(expect.objectContaining({
+      cf_clearance: 'clearance',
+    }))
+  })
+
+  it('retries the document request when a challenge follows the final network retry', async () => {
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockRejectedValueOnce(new Error('first failure'))
+      .mockRejectedValueOnce(new Error('second failure'))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: 'https://www.wenku8.net/index.php',
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+      })
+    mocks.getCookies.mockResolvedValue([{ name: 'cf_clearance', value: 'clearance' }])
+    const crawler = new WebCrawler(createConfig(), {}, { solve: solveChallenge })
+
+    await expect(crawler.fetch('https://www.wenku8.net/index.php')).resolves.toBeDefined()
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(4)
+    expect(mocks.sleepWithSignal).toHaveBeenCalledTimes(2)
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+  })
+
   it('parses Retry-After seconds and HTTP dates', () => {
     const now = Date.parse('2026-08-29T00:00:00Z')
 
@@ -357,6 +467,82 @@ describe('WebCrawler.search', () => {
 })
 
 describe('WebCrawler.getImageContent response reporting', () => {
+  it('includes session cookies only for Wenku8 image requests', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('image')),
+    })
+    const crawler = new WebCrawler(createConfig(), {})
+
+    await crawler.getImageContent('https://www.wenku8.net/image.jpg')
+    await crawler.getImageContent('https://example.com/image.jpg')
+
+    expect(mocks.fetch.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ credentials: 'include' }),
+    )
+    expect(mocks.fetch.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ credentials: 'omit' }),
+    )
+  })
+
+  it('reuses the verification session when a Wenku8 image returns a challenge header', async () => {
+    const fixture = createMutableLoginConfig()
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('image')),
+      })
+    mocks.getCookies.mockResolvedValue([{
+      name: 'cf_clearance',
+      value: 'clearance',
+    }])
+    const crawler = new WebCrawler(fixture.config, {}, { solve: solveChallenge })
+
+    await expect(crawler.getImageContent('https://www.wenku8.net/image.jpg'))
+      .resolves.toEqual(Buffer.from('image'))
+
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.sleepWithSignal).not.toHaveBeenCalled()
+  })
+
+  it('retries the image request when a challenge follows the final network retry', async () => {
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockRejectedValueOnce(new Error('first failure'))
+      .mockRejectedValueOnce(new Error('second failure'))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: vi.fn(async () => Buffer.from('image')),
+      })
+    mocks.getCookies.mockResolvedValue([{ name: 'cf_clearance', value: 'clearance' }])
+    const crawler = new WebCrawler(createConfig(), {}, { solve: solveChallenge })
+
+    await expect(crawler.getImageContent('https://www.wenku8.net/image.jpg'))
+      .resolves.toEqual(Buffer.from('image'))
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(4)
+    expect(mocks.sleepWithSignal).toHaveBeenCalledTimes(2)
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+  })
+
   it('does not retry an image request cancelled by its caller', async () => {
     const controller = new AbortController()
     mocks.fetch.mockImplementationOnce((_url: string, init: RequestInit) => (
@@ -477,6 +663,71 @@ describe('WebCrawler.syncCookies', () => {
 })
 
 describe('WebCrawler.getCookie credential consistency', () => {
+  it('runs an interactive Cloudflare challenge during preflight, then logs in with the same session', async () => {
+    const fixture = createMutableLoginConfig()
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers() })
+    mocks.getCookies.mockResolvedValue([
+      { name: 'PHPSESSID', value: 'session' },
+      { name: 'jieqiUserInfo', value: 'user-info' },
+      { name: 'jieqiVisitInfo', value: 'visit-info' },
+      { name: 'cf_clearance', value: 'clearance' },
+    ])
+    const crawler = new WebCrawler(
+      fixture.config,
+      {},
+      { solve: solveChallenge },
+    )
+
+    await expect(crawler.getCookie()).resolves.toBeUndefined()
+
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.fetch.mock.calls.every(([, init]) => init.credentials === 'include')).toBe(true)
+    expect(mocks.sleep).not.toHaveBeenCalled()
+    expect(fixture.replaceCookies).toHaveBeenCalledWith(expect.objectContaining({
+      cf_clearance: 'clearance',
+    }))
+  })
+
+  it('retries login when a challenge follows the final network retry', async () => {
+    const fixture = createMutableLoginConfig()
+    const solveChallenge = vi.fn(async () => undefined)
+    mocks.fetch
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers() })
+      .mockRejectedValueOnce(new Error('first failure'))
+      .mockRejectedValueOnce(new Error('second failure'))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ 'cf-mitigated': 'challenge' }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers() })
+    mocks.getCookies.mockResolvedValue([
+      { name: 'PHPSESSID', value: 'session' },
+      { name: 'jieqiUserInfo', value: 'user-info' },
+      { name: 'jieqiVisitInfo', value: 'visit-info' },
+      { name: 'cf_clearance', value: 'clearance' },
+    ])
+    const crawler = new WebCrawler(fixture.config, {}, { solve: solveChallenge })
+
+    await expect(crawler.getCookie()).resolves.toBeUndefined()
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(5)
+    expect(mocks.sleep).toHaveBeenCalledTimes(2)
+    expect(solveChallenge).toHaveBeenCalledTimes(1)
+    expect(fixture.replaceCookies).toHaveBeenCalledWith(expect.objectContaining({
+      jieqiUserInfo: 'user-info',
+      jieqiVisitInfo: 'visit-info',
+    }))
+  })
+
   it('rejects a 200 response that only leaves an anonymous session cookie', async () => {
     const fixture = createMutableLoginConfig()
     mocks.fetch.mockResolvedValue({ ok: true, status: 200 })

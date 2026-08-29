@@ -17,12 +17,13 @@ export class CookieService {
   ) {}
 
   /**
-   * 通过 net.fetch POST 登录轻小说文库
-   * 已验证该接口不会被 Cloudflare 拦截
+   * 使用共享 Wenku8 会话登录；遇到 Cloudflare 验证时由 crawler 打开验证窗口。
    */
   async acquire(onProgress?: (p: CookieProgress) => void): Promise<CookieResult> {
     onProgress?.({ step: 'login', message: '正在登录...' })
-    const loginCookies = await this.login()
+    const loginCookies = await this.login(() => {
+      onProgress?.({ step: 'login', message: '请在弹出窗口完成安全验证' })
+    })
     if (!hasAuthenticatedCookies(loginCookies)) {
       throw new Error('登录后未检测到有效登录状态')
     }
@@ -31,14 +32,16 @@ export class CookieService {
     return { loginCookies }
   }
 
-  private async login(): Promise<Omit<CookieSnapshot, 'cf_clearance'>> {
+  private async login(
+    onCloudflareChallenge?: () => void,
+  ): Promise<Omit<CookieSnapshot, 'cf_clearance'>> {
     const { username, password } = this.config.getCredentials()
 
     if (!username || !password) {
       throw new Error('请先配置登录账号和密码')
     }
 
-    await this.crawler.getCookie()
+    await this.crawler.getCookie(onCloudflareChallenge)
 
     const cookies = this.config.getCookies()
     return {

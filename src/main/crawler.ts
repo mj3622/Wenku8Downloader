@@ -1,4 +1,4 @@
-import { net, session } from 'electron'
+import { net, session, type Session } from 'electron'
 import * as cheerio from 'cheerio'
 import iconv from 'iconv-lite'
 import {
@@ -16,6 +16,11 @@ import {
 } from './download-cancellation'
 import { logger } from './logging/logger'
 import { sanitizeLogText } from './logging/redaction'
+import type { CloudflareChallengeSolver } from './cloudflare-challenge'
+import {
+  WENKU_BASE_URL,
+  wenkuRequestCredentials,
+} from './wenku-network'
 
 type CheerioDocument = ReturnType<typeof cheerio.load>
 
@@ -23,10 +28,9 @@ const COMMON_HEADERS: Record<string, string> = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Upgrade-Insecure-Requests': '1',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
 
-const BASE_URL = 'https://www.wenku8.net'
+const BASE_URL = WENKU_BASE_URL
 const REQUEST_TIMEOUT_MS = 30_000
 const LOGIN_COOKIE_NAMES = ['PHPSESSID', 'jieqiUserInfo', 'jieqiVisitInfo'] as const
 export interface CrawlerConfig {
@@ -34,6 +38,14 @@ export interface CrawlerConfig {
   getCredentials(): Readonly<Credentials>
   getCookies(): Readonly<CookieSnapshot>
   replaceCookies(input: CookieSnapshot): void
+}
+
+export type CrawlerNetworkSession = Pick<Session, 'cookies' | 'fetch'>
+
+export function isCloudflareChallengeResponse(
+  response: { headers?: { get(name: string): string | null } },
+): boolean {
+  return response.headers?.get('cf-mitigated')?.trim().toLowerCase() === 'challenge'
 }
 
 export interface CrawlerResponseInfo {
@@ -89,6 +101,16 @@ export class HttpStatusError extends Error {
   }
 }
 
+export class CloudflareChallengeResponseError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super('网站要求完成安全验证，请在验证窗口中完成操作后重试')
+    this.name = 'CloudflareChallengeResponseError'
+    this.status = status
+  }
+}
+
 export function parseRetryAfter(value: string | null | undefined, nowMs = Date.now()): number | undefined {
   const normalized = value?.trim()
   if (!normalized) return undefined
@@ -108,6 +130,12 @@ function errorMessage(error: unknown): string {
 
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(errorMessage(error))
+}
+
+async function discardResponseBody(
+  response: { body?: { cancel(): Promise<void> } | null },
+): Promise<void> {
+  await response.body?.cancel().catch(() => undefined)
 }
 
 function encodeKey(key: string): string {
@@ -154,11 +182,19 @@ function parseSearchStatus(statusText: string) {
 
 export class WebCrawler {
   private cookies: Record<string, string>
+  private readonly networkSession: CrawlerNetworkSession
+
   constructor(
     private readonly config: CrawlerConfig,
     cookie?: Record<string, string>,
+    private readonly cloudflareChallenge?: CloudflareChallengeSolver,
+    networkSession?: CrawlerNetworkSession,
   ) {
     this.cookies = cookie ?? this.getCookieDefaults()
+    this.networkSession = networkSession ?? {
+      cookies: session.defaultSession.cookies,
+      fetch: (input, init) => net.fetch(input, init),
+    }
   }
 
   async syncCookies(): Promise<void> {
@@ -183,15 +219,14 @@ export class WebCrawler {
   }
 
   private async injectCookies(clearExisting = false): Promise<void> {
-    const ses = session.defaultSession
     if (clearExisting) {
       for (const name of COOKIE_NAMES) {
-        await ses.cookies.remove(BASE_URL, name)
+        await this.networkSession.cookies.remove(BASE_URL, name)
       }
     }
     for (const [name, value] of Object.entries(this.cookies)) {
       if (value) {
-        await ses.cookies.set({
+        await this.networkSession.cookies.set({
           url: BASE_URL,
           name,
           value,
@@ -200,6 +235,69 @@ export class WebCrawler {
         })
       }
     }
+  }
+
+  private async persistClearanceFromSession(): Promise<void> {
+    try {
+      const sessionCookies = await this.networkSession.cookies.get({
+        url: BASE_URL,
+        name: 'cf_clearance',
+      })
+      const clearance = sessionCookies.find((cookie) => cookie.name === 'cf_clearance')?.value
+      if (!clearance) return
+      this.cookies.cf_clearance = clearance
+      const current = this.config.getCookies()
+      if (current.cf_clearance === clearance) return
+      try {
+        this.config.replaceCookies({ ...current, cf_clearance: clearance })
+      } catch (error) {
+        logger.warn('network.cloudflare-cookie.persist-failed', '安全验证状态暂时无法持久化', {
+          error: sanitizeLogText(errorMessage(error)),
+        })
+      }
+    } catch (error) {
+      logger.warn('network.cloudflare-cookie.read-failed', '安全验证状态暂时无法读取', {
+        error: sanitizeLogText(errorMessage(error)),
+      })
+    }
+  }
+
+  private async solveCloudflareChallenge(onChallenge?: () => void): Promise<void> {
+    if (!this.cloudflareChallenge) throw new CloudflareChallengeResponseError(403)
+    onChallenge?.()
+    logger.info('network.cloudflare-challenge.started', '开始 Wenku8 安全验证')
+    try {
+      await this.cloudflareChallenge.solve()
+      await this.persistClearanceFromSession()
+      logger.info('network.cloudflare-challenge.completed', 'Wenku8 安全验证完成')
+    } catch (error) {
+      logger.error('network.cloudflare-challenge.failed', 'Wenku8 安全验证失败', error)
+      throw error
+    }
+  }
+
+  private async preflightCloudflareChallenge(onChallenge?: () => void): Promise<boolean> {
+    if (!this.cloudflareChallenge) return false
+    let response: Response
+    try {
+      response = await this.networkSession.fetch(`${BASE_URL}/index.php`, {
+        method: 'GET',
+        headers: COMMON_HEADERS,
+        credentials: 'include',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+    } catch (error) {
+      logger.debug('network.cloudflare-preflight.skipped', '安全验证预检未完成，继续尝试登录', {
+        error: sanitizeLogText(errorMessage(error)),
+      })
+      return false
+    }
+    const isChallenge = isCloudflareChallengeResponse(response)
+    await discardResponseBody(response)
+    if (!isChallenge) return false
+    await this.solveCloudflareChallenge(onChallenge)
+    return true
   }
 
   async fetch(
@@ -227,6 +325,7 @@ export class WebCrawler {
     const maxRetries = 3
     let lastError: Error | null = null
     let lastStatus: number | undefined
+    let challengeAttempted = false
     const startedAt = performance.now()
     if (parse) {
       logger.debug('network.request.started', '开始网页请求', {
@@ -236,7 +335,8 @@ export class WebCrawler {
       })
     }
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
       throwIfDownloadCancelled(signal)
       let attemptAcquired = false
       const releaseAttempt = (): void => {
@@ -256,14 +356,27 @@ export class WebCrawler {
           'Referer': `${BASE_URL}/`,
         }
 
-        const resp = await net.fetch(url, {
+        const resp = await this.networkSession.fetch(url, {
           method: 'GET',
           headers,
+          credentials: wenkuRequestCredentials(url),
           redirect: 'follow',
           signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
         lastStatus = resp.status
         const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
+        if (
+          wenkuRequestCredentials(url) === 'include'
+          && isCloudflareChallengeResponse(resp)
+        ) {
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
+        }
         if (!resp.ok) {
           control?.onResponse?.({
             status: resp.status,
@@ -308,13 +421,20 @@ export class WebCrawler {
         releaseAttempt()
         throwIfDownloadCancelled(signal)
         lastError = normalizeError(err)
-        if (attempt < maxRetries - 1) {
+        if (lastError instanceof CloudflareChallengeResponseError) {
+          if (challengeAttempted || !this.cloudflareChallenge) throw lastError
+          challengeAttempted = true
+          await this.solveCloudflareChallenge()
+          continue
+        }
+        attempt++
+        if (attempt < maxRetries) {
           const status = lastError instanceof HttpStatusError ? lastError.status : undefined
           const retryAfterMs = lastError instanceof HttpStatusError
             ? lastError.retryAfterMs
             : undefined
           const retryInfo: CrawlerRetryInfo = {
-            attempt: attempt + 1,
+            attempt,
             ...(status === undefined ? {} : { status }),
             ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
             error: lastError,
@@ -328,7 +448,7 @@ export class WebCrawler {
             method: 'GET',
             url: sanitizeLogText(url),
             status: lastStatus,
-            attempt: attempt + 1,
+            attempt,
             maxAttempts: maxRetries,
             backoffMs,
             error: sanitizeLogText(lastError.message),
@@ -354,13 +474,14 @@ export class WebCrawler {
     throw finalError
   }
 
-  async getCookie(): Promise<void> {
+  async getCookie(onCloudflareChallenge?: () => void): Promise<void> {
     const credentialRevision = this.config.getCredentialRevision()
     const { username, password } = this.config.getCredentials()
     const startedAt = performance.now()
     const maxRetries = 3
     let lastStatus: number | undefined
-    const ses = session.defaultSession
+    let lastError: Error | null = null
+    let challengeAttempted = false
     logger.info('login.started', '开始刷新登录 Cookie', { maxAttempts: maxRetries })
 
     if (!username || !password) {
@@ -373,14 +494,17 @@ export class WebCrawler {
     }
 
     const loginUrl = `${BASE_URL}/login.php?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php`
+    challengeAttempted = await this.preflightCloudflareChallenge(onCloudflareChallenge)
+    await this.rejectIfCredentialsChanged(credentialRevision)
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
       if (this.config.getCredentialRevision() !== credentialRevision) {
         await this.rejectIfCredentialsChanged(credentialRevision)
       }
       try {
         for (const name of LOGIN_COOKIE_NAMES) {
-          await ses.cookies.remove(BASE_URL, name)
+          await this.networkSession.cookies.remove(BASE_URL, name)
         }
 
         const body = new URLSearchParams({
@@ -391,7 +515,7 @@ export class WebCrawler {
           submit: '',
         })
 
-        const resp = await net.fetch(loginUrl, {
+        const resp = await this.networkSession.fetch(loginUrl, {
           method: 'POST',
           headers: {
             ...COMMON_HEADERS,
@@ -399,6 +523,7 @@ export class WebCrawler {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: body.toString(),
+          credentials: 'include',
           redirect: 'follow',
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
@@ -406,10 +531,14 @@ export class WebCrawler {
 
         await this.rejectIfCredentialsChanged(credentialRevision)
 
+        if (isCloudflareChallengeResponse(resp)) {
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
+        }
         if (!resp.ok) throw new HttpStatusError(resp.status)
 
         // Extract cookies from response
-        const cookies = await ses.cookies.get({ url: BASE_URL })
+        const cookies = await this.networkSession.cookies.get({ url: BASE_URL })
         await this.rejectIfCredentialsChanged(credentialRevision)
         const cookieMap: Record<string, string> = {}
         for (const c of cookies) {
@@ -444,27 +573,39 @@ export class WebCrawler {
         }
         await this.rejectIfCredentialsChanged(credentialRevision)
         const cause = normalizeError(err)
+        lastError = cause
         const message = cause.message
-        if (attempt >= maxRetries - 1) {
-          const finalError = new Error(`登录失败: ${message}`, { cause })
-          logger.error('login.failed', '登录 Cookie 刷新失败', finalError, {
-            status: lastStatus,
-            attempt: attempt + 1,
-            maxAttempts: maxRetries,
-            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-          })
-          throw finalError
+        if (cause instanceof CloudflareChallengeResponseError) {
+          if (challengeAttempted || !this.cloudflareChallenge) throw cause
+          challengeAttempted = true
+          await this.solveCloudflareChallenge(onCloudflareChallenge)
+          await this.rejectIfCredentialsChanged(credentialRevision)
+          continue
         }
-        logger.warn('login.retry', '登录请求失败，准备重试', {
-          status: lastStatus,
-          attempt: attempt + 1,
-          maxAttempts: maxRetries,
-          backoffMs: 5000,
-          error: sanitizeLogText(message),
-        })
-        await sleep(5000)
+        attempt++
+        if (attempt < maxRetries) {
+          logger.warn('login.retry', '登录请求失败，准备重试', {
+            status: lastStatus,
+            attempt,
+            maxAttempts: maxRetries,
+            backoffMs: 5000,
+            error: sanitizeLogText(message),
+          })
+          await sleep(5000)
+        }
       }
     }
+
+    const finalError = new Error(`登录失败: ${lastError?.message ?? '未知错误'}`, {
+      cause: lastError ?? undefined,
+    })
+    logger.error('login.failed', '登录 Cookie 刷新失败', finalError, {
+      status: lastStatus,
+      attempt: maxRetries,
+      maxAttempts: maxRetries,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    })
+    throw finalError
   }
 
   async getImageContent(
@@ -477,8 +618,10 @@ export class WebCrawler {
     url = url.replace('http://', 'https://')
     let lastError: string | null = null
     let lastCause: Error | null = null
+    let challengeAttempted = false
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
       throwIfDownloadCancelled(signal)
       let attemptAcquired = false
       const releaseAttempt = (): void => {
@@ -493,15 +636,29 @@ export class WebCrawler {
           throwIfDownloadCancelled(signal)
         }
         const attemptStartedAt = performance.now()
-        const resp = await net.fetch(url, {
+        const resp = await this.networkSession.fetch(url, {
           method: 'GET',
           headers: {
             ...COMMON_HEADERS,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
+          credentials: wenkuRequestCredentials(url),
           signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
         const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
+        if (
+          wenkuRequestCredentials(url) === 'include'
+          && isCloudflareChallengeResponse(resp)
+        ) {
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          onResponseStatus?.(resp.status)
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
+        }
         if (resp.ok) {
           const content = Buffer.from(await resp.arrayBuffer())
           control?.onResponse?.({
@@ -526,28 +683,35 @@ export class WebCrawler {
         throwIfDownloadCancelled(signal)
         lastCause = normalizeError(err)
         lastError = lastCause.message
+        if (lastCause instanceof CloudflareChallengeResponseError) {
+          if (challengeAttempted || !this.cloudflareChallenge) throw lastCause
+          challengeAttempted = true
+          await this.solveCloudflareChallenge()
+          continue
+        }
+        attempt++
         const status = lastCause instanceof HttpStatusError ? lastCause.status : undefined
         const retryAfterMs = lastCause instanceof HttpStatusError
           ? lastCause.retryAfterMs
           : undefined
         const retryInfo: CrawlerRetryInfo = {
-          attempt: attempt + 1,
+          attempt,
           ...(status === undefined ? {} : { status }),
           ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
           error: lastCause,
         }
         const requestedDelay = control?.getRetryDelay?.(retryInfo)
-        const defaultBackoffMs = status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
+        const defaultBackoffMs = status === 429 ? 15000 * attempt : 2000 * attempt
         const backoffMs = requestedDelay !== undefined && Number.isFinite(requestedDelay)
           ? Math.max(0, Math.round(requestedDelay))
           : defaultBackoffMs
-        if (attempt < maxRetries - 1) {
+        if (attempt < maxRetries) {
           control?.onRetry?.({ ...retryInfo, delayMs: backoffMs })
           logger.warn('network.image.retry', '图片请求异常，准备重试', {
             method: 'GET',
             url: sanitizeLogText(url),
             ...(status === undefined ? {} : { status }),
-            attempt: attempt + 1,
+            attempt,
             maxAttempts: maxRetries,
             backoffMs,
             error: sanitizeLogText(lastError),
