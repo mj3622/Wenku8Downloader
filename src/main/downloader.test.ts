@@ -4,6 +4,8 @@ import { join } from 'path'
 import { load } from 'cheerio'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 
+const CACHE_KEY = 'a'.repeat(64)
+
 const logMocks = vi.hoisted(() => ({
   debug: vi.fn(),
   info: vi.fn(),
@@ -24,11 +26,15 @@ import {
   Downloader,
   downloadImageBatch,
   guessType,
+  OUTPUT_MANIFEST_NAME,
   selectVolumeCoverUrl,
   type DownloaderBook,
   type DownloaderCrawler,
   type DownloadRuntimeConfig,
 } from './downloader'
+import { DownloadAssetCache } from './cache/download-asset-cache'
+import { GIB } from './cache/cache-policy'
+import { CacheStore } from './cache/cache-store'
 
 function runtimeConfig(rootPath: string): DownloadRuntimeConfig {
   return {
@@ -54,7 +60,12 @@ type DownloaderBookOverrides = Partial<Omit<DownloaderBook, 'basicInfo'>> & {
 }
 
 function createBookFixture(overrides: DownloaderBookOverrides = {}): DownloaderBook {
-  const { basicInfo: basicInfoOverrides, ...bookOverrides } = overrides
+  const {
+    basicInfo: basicInfoOverrides,
+    generationKey = CACHE_KEY,
+    legacyImportGenerationKey = CACHE_KEY,
+    ...bookOverrides
+  } = overrides
   return {
     bookId: '200',
     baseChapterUrl: 'https://www.wenku8.net/novel/2/200/',
@@ -63,6 +74,8 @@ function createBookFixture(overrides: DownloaderBookOverrides = {}): DownloaderB
     getChapterImageUrls: async () => null,
     getCoverContent: async () => Buffer.from('cover'),
     ...bookOverrides,
+    generationKey,
+    legacyImportGenerationKey,
     basicInfo: {
       '标题': '同名作品',
       '作者': '测试作者',
@@ -155,13 +168,135 @@ describe('Downloader.downloadPictures', () => {
     )
 
     try {
-      await downloader.downloadPictures(urls, '第一卷', '测试作品', '100', 0)
-      await downloader.downloadPictures(urls, '第二卷', '测试作品', '100', 1)
+      await downloader.downloadPictures(urls, '第一卷', '测试作品', '100', CACHE_KEY, CACHE_KEY, 0)
+      await downloader.downloadPictures(urls, '第二卷', '测试作品', '100', CACHE_KEY, CACHE_KEY, 1)
 
       expect(progress.filter((item) => item.phase.includes('第二卷'))).toEqual([
         { current: 4, total: 5, phase: '正在下载图片 (第二卷)' },
         { current: 5, total: 5, phase: '正在下载图片 (第二卷)' },
       ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reuses central image cache for the same generation after output is removed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-central-picture-'))
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'wenku8-central-cache-'))
+    const store = new CacheStore(cacheRoot, {
+      statDisk: async () => ({ totalBytes: 100 * GIB, freeBytes: 50 * GIB }),
+    })
+    await store.initialize()
+    const assetCache = new DownloadAssetCache(store)
+    const getImageContent = vi.fn(async () => Buffer.from('image'))
+    const urls = ['https://img.example/1.jpg']
+    try {
+      const first = new Downloader(
+        createCrawlerFixture({ getImageContent }),
+        runtimeConfig(root),
+        { assetCache },
+      )
+      await first.downloadPictures(
+        urls, '第一卷', '作品', '100', CACHE_KEY, CACHE_KEY, 0,
+      )
+      await rm(join(root, 'pics'), { recursive: true, force: true })
+      getImageContent.mockClear()
+
+      const second = new Downloader(
+        createCrawlerFixture({ getImageContent }),
+        runtimeConfig(root),
+        { assetCache },
+      )
+      await second.downloadPictures(
+        urls, '第一卷', '作品', '100', CACHE_KEY, CACHE_KEY, 0,
+      )
+
+      expect(getImageContent).not.toHaveBeenCalled()
+      await expect(readFile(join(root, 'pics', '100_作品', '1_第一卷', '1.jpg')))
+        .resolves.toEqual(Buffer.from('image'))
+    } finally {
+      await Promise.all([
+        rm(root, { recursive: true, force: true }),
+        rm(cacheRoot, { recursive: true, force: true }),
+      ])
+    }
+  })
+
+  it('does not skip a non-empty output when its manifest is missing or from another generation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-picture-manifest-'))
+    const volumePath = join(root, 'pics', '100_作品', '1_第一卷')
+    await mkdir(volumePath, { recursive: true })
+    await writeFile(join(volumePath, '1.jpg'), 'old')
+    const getImageContent = vi.fn(async () => Buffer.from('fresh'))
+    const downloader = new Downloader(
+      createCrawlerFixture({ getImageContent }),
+      runtimeConfig(root),
+    )
+    try {
+      await downloader.downloadPictures(
+        ['https://img.example/1.jpg'],
+        '第一卷',
+        '作品',
+        '100',
+        CACHE_KEY,
+        CACHE_KEY,
+        0,
+      )
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(await readFile(join(volumePath, OUTPUT_MANIFEST_NAME), 'utf8')))
+        .toEqual({
+          schemaVersion: 1,
+          bookId: '100',
+          generationKey: CACHE_KEY,
+          volumeName: '第一卷',
+          imageCount: 1,
+        })
+
+      getImageContent.mockClear()
+      await downloader.downloadPictures(
+        ['https://img.example/1.jpg'],
+        '第一卷',
+        '作品',
+        '100',
+        'b'.repeat(64),
+        CACHE_KEY,
+        0,
+      )
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the previous output manifest when the current image set is incomplete', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-picture-manifest-failure-'))
+    const volumePath = join(root, 'pics', '100_作品', '1_第一卷')
+    const oldManifest = {
+      schemaVersion: 1,
+      bookId: '100',
+      generationKey: CACHE_KEY,
+      volumeName: '第一卷',
+      imageCount: 1,
+    }
+    await mkdir(volumePath, { recursive: true })
+    await writeFile(join(volumePath, OUTPUT_MANIFEST_NAME), JSON.stringify(oldManifest))
+    const downloader = new Downloader(createCrawlerFixture({
+      getImageContent: vi.fn(async (url: string) => (
+        url.endsWith('/1.jpg') ? Buffer.from('ok') : Buffer.alloc(0)
+      )),
+    }), runtimeConfig(root))
+    try {
+      await downloader.downloadPictures(
+        ['https://img.example/1.jpg', 'https://img.example/2.jpg'],
+        '第一卷',
+        '作品',
+        '100',
+        'b'.repeat(64),
+        CACHE_KEY,
+        0,
+      )
+      expect(JSON.parse(await readFile(join(volumePath, OUTPUT_MANIFEST_NAME), 'utf8')))
+        .toEqual(oldManifest)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -186,6 +321,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )).resolves.toBeUndefined()
 
@@ -220,6 +357,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )).rejects.toBeInstanceOf(DownloadCancelledError)
 
@@ -249,6 +388,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -274,6 +415,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )).rejects.toThrow('该分卷没有可保存的插图')
       expect(downloader.getWarnings()).toEqual([])
@@ -296,6 +439,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -326,6 +471,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -354,6 +501,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -382,6 +531,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '同名作品',
         '200',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -426,7 +577,7 @@ describe('Downloader.downloadPictures', () => {
       )
 
       await expect(
-        downloader.downloadPictures([secretUrl], '第一卷', '测试作品', '100', 0),
+        downloader.downloadPictures([secretUrl], '第一卷', '测试作品', '100', CACHE_KEY, CACHE_KEY, 0),
       ).rejects.toThrow('请求过于频繁，已自动降低下载速度，请稍等片刻后重试')
       expect(downloader.getWarnings()).not.toContain(
         '“第一卷”有 1 张插图未能下载，已保存其余插图。',
@@ -444,7 +595,7 @@ describe('Downloader.downloadPictures', () => {
       expect(schedule).toHaveBeenCalledWith(expect.any(Function), 30000)
 
       const nextUrl = 'https://example.com/2.jpg'
-      await downloader.downloadPictures([nextUrl], '第二卷', '测试作品', '100', 1)
+      await downloader.downloadPictures([nextUrl], '第二卷', '测试作品', '100', CACHE_KEY, CACHE_KEY, 1)
       expect(getImageContent).toHaveBeenNthCalledWith(
         2,
         nextUrl,
@@ -500,6 +651,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -548,6 +701,8 @@ describe('Downloader.downloadPictures', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )
 
@@ -608,6 +763,56 @@ describe('Downloader.downloadPictures', () => {
 })
 
 describe('Downloader.downloadNovel', () => {
+  it('reuses chapters and images only inside the same generation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'wenku8-novel-generation-cache-'))
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'wenku8-novel-cache-store-'))
+    const store = new CacheStore(cacheRoot, {
+      statDisk: async () => ({ totalBytes: 100 * GIB, freeBytes: 50 * GIB }),
+    })
+    await store.initialize()
+    const assetCache = new DownloadAssetCache(store)
+    const fetch = vi.fn(async () => load('<div id="content"><p>正文</p></div>'))
+    const getImageContent = vi.fn(async () => Buffer.from('image'))
+    const crawler = createCrawlerFixture({
+      fetch: fetch as unknown as DownloaderCrawler['fetch'],
+      getImageContent,
+    })
+    const targetBook = createBookFixture({
+      volumes: {
+        第一卷: [
+          { name: '插图', link: 'illustrations.htm' },
+          { name: '第一章', link: '1.htm' },
+        ],
+      },
+      getChapterImageUrls: async () => ['https://img.example/1.jpg'],
+    })
+    try {
+      await new Downloader(crawler, runtimeConfig(root), { assetCache })
+        .downloadNovel(targetBook, '第一卷')
+      fetch.mockClear()
+      getImageContent.mockClear()
+
+      await new Downloader(crawler, runtimeConfig(root), { assetCache })
+        .downloadNovel(targetBook, '第一卷')
+      expect(fetch).not.toHaveBeenCalled()
+      expect(getImageContent).not.toHaveBeenCalled()
+
+      await new Downloader(crawler, runtimeConfig(root), { assetCache })
+        .downloadNovel(createBookFixture({
+          ...targetBook,
+          generationKey: 'b'.repeat(64),
+          legacyImportGenerationKey: CACHE_KEY,
+        }), '第一卷')
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(getImageContent).toHaveBeenCalledTimes(1)
+    } finally {
+      await Promise.all([
+        rm(root, { recursive: true, force: true }),
+        rm(cacheRoot, { recursive: true, force: true }),
+      ])
+    }
+  })
+
   it('routes chapter attempts through adaptive control and reports a throttle wait', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-chapters-'))
     const phases: string[] = []
@@ -848,6 +1053,8 @@ describe('Downloader.downloadNovel', () => {
         '第一卷',
         '测试作品',
         '100',
+        CACHE_KEY,
+        CACHE_KEY,
         0,
       )).rejects.toThrow(expectedMessage)
       expect(record).toHaveBeenCalledWith(status)

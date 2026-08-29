@@ -75,11 +75,12 @@ function createWindow(services: AppServices): void {
 if (!registerSingleInstanceGuard()) {
   app.quit()
 } else {
+  let services: AppServices | undefined
   app.whenReady().then(async () => {
     if (process.platform === 'win32') {
       Menu.setApplicationMenu(null)
     }
-    const services = await initializeAppServices()
+    services = await initializeAppServices()
     registerIpcHandlers(services)
     createWindow(services)
   }).catch((error) => {
@@ -93,5 +94,9 @@ if (!registerSingleInstanceGuard()) {
 
   app.on('window-all-closed', () => {
     app.quit()
+  })
+
+  app.on('before-quit', () => {
+    services?.stopCacheMaintenance()
   })
 }

@@ -1,4 +1,5 @@
 import type { Book } from './book'
+import type { DownloadAssetCache } from './cache/download-asset-cache'
 import type { ConfigService } from './config/config-service'
 import type { CrawlerRequestControlFactory } from './crawler'
 import {
@@ -50,6 +51,8 @@ export interface DownloadRunner {
     volumeName: string,
     novelName: string,
     bookId: string,
+    generationKey: string,
+    legacyImportGenerationKey: string,
     volumeIndex?: number,
   ): Promise<void>
   getWarnings(): string[]
@@ -65,6 +68,7 @@ interface DownloadExecutorDependencies {
     onThrottleWait: (waitMs: number) => void,
   ): Promise<DownloadExecutorBook>
   rateLimiter?: DownloadRateLimiter
+  assetCache?: DownloadAssetCache
   environment: {
     isPackaged: boolean
     downloadsPath: string
@@ -162,6 +166,7 @@ export function createDownloadExecutor(
         ...downloadConfig,
         rootPath: resolveDownloadRoot(downloadConfig, dependencies.environment),
       }
+      const cacheTaskGuard = dependencies.assetCache?.captureTaskGuard()
       const book = await dependencies.loadBook(
         task.bookId,
         context.signal,
@@ -169,112 +174,131 @@ export function createDownloadExecutor(
         handleThrottleWait,
       )
       throwIfDownloadCancelled(context.signal)
-      const downloader = createRunner(dependencies.crawler, runtimeConfig, {
-        logContext: { operationId: task.id, taskId: task.id },
-        signal: context.signal,
-        onVolumeCover: context.onVolumeCover,
-        rateLimiter,
-      })
-      downloader.setOnProgress(publishProgress)
-
-      if (task.type === 'epub_full' || task.type === 'epub_volume') {
-        if (task.volume && !book.volumes[task.volume]) {
-          throw new Error(`未找到卷: ${task.volume}`)
-        }
-        await downloader.downloadNovel(book, task.type === 'epub_volume' ? task.volume : undefined)
-        return { warnings: downloader.getWarnings() }
-      }
-
-      if (task.volume) {
-        const volumeIndex = Object.keys(book.volumes).indexOf(task.volume)
-        const urls = await book.getChapterImageUrls(task.volume, context.signal)
-        throwIfDownloadCancelled(context.signal)
-        if (volumeIndex < 0 || !urls?.length) {
-          throw new NoUsableDownloadContentError(`该卷没有可保存的插图: ${task.volume}`)
-        }
-        const cover = selectVolumeCoverUrl(
-          urls,
-          runtimeConfig.defaultCoverIndex,
-          book.baseChapterUrl,
-        )
-        if (cover) context.onVolumeCover?.(cover)
-        await downloader.downloadPictures(
-          urls,
-          task.volume,
-          book.basicInfo['标题'],
+      const cacheContext = dependencies.assetCache
+        ? await dependencies.assetCache.acquire(
           book.bookId,
-          volumeIndex,
+          book.generationKey,
+          book.legacyImportGenerationKey,
+          cacheTaskGuard,
         )
-        return { warnings: downloader.getWarnings() }
-      }
-
-      const volumes = Object.keys(book.pictureUrls)
-      if (volumes.length === 0) {
-        throw new NoUsableDownloadContentError('该作品没有可保存的插图')
-      }
-      const warnings: string[] = []
-      let firstIllustrationError: unknown
-      let completedVolumes = 0
-      for (const [volumePosition, volume] of volumes.entries()) {
-        throwIfDownloadCancelled(context.signal)
-        publishProgress({
-          current: volumePosition,
-          total: volumes.length,
-          phase: `正在准备插图 (${volume})`,
+        : undefined
+      try {
+        const downloader = createRunner(dependencies.crawler, runtimeConfig, {
+          logContext: { operationId: task.id, taskId: task.id },
+          signal: context.signal,
+          onVolumeCover: context.onVolumeCover,
+          rateLimiter,
+          ...(dependencies.assetCache && cacheContext
+            ? { assetCache: dependencies.assetCache, cacheContext }
+            : {}),
         })
-        let urls: string[] | null
-        try {
-          urls = await book.getChapterImageUrls(volume, context.signal)
-        } catch (error) {
+        downloader.setOnProgress(publishProgress)
+
+        if (task.type === 'epub_full' || task.type === 'epub_volume') {
+          if (task.volume && !book.volumes[task.volume]) {
+            throw new Error(`未找到卷: ${task.volume}`)
+          }
+          await downloader.downloadNovel(book, task.type === 'epub_volume' ? task.volume : undefined)
+          return { warnings: downloader.getWarnings() }
+        }
+
+        if (task.volume) {
+          const volumeIndex = Object.keys(book.volumes).indexOf(task.volume)
+          const urls = await book.getChapterImageUrls(task.volume, context.signal)
           throwIfDownloadCancelled(context.signal)
-          if (error instanceof DownloadCancelledError) throw error
-          firstIllustrationError ??= error
-          logger.error(
-            'download.illustration-page.failed',
-            '插图页读取失败，继续处理其他分卷',
-            error,
-            { taskId: task.id, bookId: task.bookId, volumeName: volume },
+          if (volumeIndex < 0 || !urls?.length) {
+            throw new NoUsableDownloadContentError(`该卷没有可保存的插图: ${task.volume}`)
+          }
+          const cover = selectVolumeCoverUrl(
+            urls,
+            runtimeConfig.defaultCoverIndex,
+            book.baseChapterUrl,
           )
-          warnings.push(`“${volume}”的插图页无法读取，已跳过该卷。`)
-          continue
-        }
-        throwIfDownloadCancelled(context.signal)
-        if (!urls?.length) {
-          warnings.push(`“${volume}”没有可保存的插图。`)
-          continue
-        }
-        const volumeIndex = Object.keys(book.volumes).indexOf(volume)
-        try {
-          downloader.setOnProgress((progress) => {
-            const volumeFraction = progress.total > 0
-              ? Math.max(0, Math.min(1, progress.current / progress.total))
-              : 0
-            publishProgress({
-              current: volumePosition + volumeFraction,
-              total: volumes.length,
-              phase: progress.phase,
-            })
-          })
+          if (cover) context.onVolumeCover?.(cover)
           await downloader.downloadPictures(
             urls,
-            volume,
+            task.volume,
             book.basicInfo['标题'],
             book.bookId,
+            book.generationKey,
+            book.legacyImportGenerationKey,
             volumeIndex,
           )
-          completedVolumes++
-        } catch (error) {
-          throwIfDownloadCancelled(context.signal)
-          if (error instanceof DownloadCancelledError) throw error
-          if (!(error instanceof NoUsableDownloadContentError)) throw error
-          warnings.push(`“${volume}”没有可保存的插图。`)
+          return { warnings: downloader.getWarnings() }
         }
+
+        const volumes = Object.keys(book.pictureUrls)
+        if (volumes.length === 0) {
+          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
+        }
+        const warnings: string[] = []
+        let firstIllustrationError: unknown
+        let completedVolumes = 0
+        for (const [volumePosition, volume] of volumes.entries()) {
+          throwIfDownloadCancelled(context.signal)
+          publishProgress({
+            current: volumePosition,
+            total: volumes.length,
+            phase: `正在准备插图 (${volume})`,
+          })
+          let urls: string[] | null
+          try {
+            urls = await book.getChapterImageUrls(volume, context.signal)
+          } catch (error) {
+            throwIfDownloadCancelled(context.signal)
+            if (error instanceof DownloadCancelledError) throw error
+            firstIllustrationError ??= error
+            logger.error(
+              'download.illustration-page.failed',
+              '插图页读取失败，继续处理其他分卷',
+              error,
+              { taskId: task.id, bookId: task.bookId, volumeName: volume },
+            )
+            warnings.push(`“${volume}”的插图页无法读取，已跳过该卷。`)
+            continue
+          }
+          throwIfDownloadCancelled(context.signal)
+          if (!urls?.length) {
+            warnings.push(`“${volume}”没有可保存的插图。`)
+            continue
+          }
+          const volumeIndex = Object.keys(book.volumes).indexOf(volume)
+          try {
+            downloader.setOnProgress((progress) => {
+              const volumeFraction = progress.total > 0
+                ? Math.max(0, Math.min(1, progress.current / progress.total))
+                : 0
+              publishProgress({
+                current: volumePosition + volumeFraction,
+                total: volumes.length,
+                phase: progress.phase,
+              })
+            })
+            await downloader.downloadPictures(
+              urls,
+              volume,
+              book.basicInfo['标题'],
+              book.bookId,
+              book.generationKey,
+              book.legacyImportGenerationKey,
+              volumeIndex,
+            )
+            completedVolumes++
+          } catch (error) {
+            throwIfDownloadCancelled(context.signal)
+            if (error instanceof DownloadCancelledError) throw error
+            if (!(error instanceof NoUsableDownloadContentError)) throw error
+            warnings.push(`“${volume}”没有可保存的插图。`)
+          }
+        }
+        if (completedVolumes === 0) {
+          if (firstIllustrationError !== undefined) throw firstIllustrationError
+          throw new NoUsableDownloadContentError('该作品没有可保存的插图')
+        }
+        return { warnings: [...downloader.getWarnings(), ...warnings] }
+      } finally {
+        await cacheContext?.lease.release()
       }
-      if (completedVolumes === 0) {
-        if (firstIllustrationError !== undefined) throw firstIllustrationError
-        throw new NoUsableDownloadContentError('该作品没有可保存的插图')
-      }
-      return { warnings: [...downloader.getWarnings(), ...warnings] }
     },
   }
 }
