@@ -44,19 +44,18 @@ afterEach(async () => {
 })
 
 describe('HomePage', () => {
-  it('keeps a single page title without duplicate shortcut actions', () => {
+  it('presents the project with one primary route into discovery', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1)
-    expect(container.querySelectorAll('a[href="/search"]')).toHaveLength(1)
-    expect(container.querySelectorAll('a[href="/download"]')).toHaveLength(1)
-    expect(container.querySelectorAll('a[href="/config"]')).toHaveLength(1)
+    expect(container.querySelectorAll('a[href="/discover"]')).toHaveLength(1)
+    expect(container.textContent).toContain('面向 Wenku8 的桌面端开源工具')
   })
 
-  it('groups onboarding and features into compact sections', () => {
-    expect(container.querySelector('#getting-started-title')?.textContent).toBe('快速入门')
-    expect(container.querySelector('#features-title')?.textContent).toBe('功能概览')
-    expect(container.querySelectorAll('a[href="/search"]')).toHaveLength(1)
-    expect(container.textContent).not.toContain('使用提示')
-    expect(container.textContent).not.toContain('默认保存到系统下载目录')
+  it('groups the project positioning, capabilities and principles', () => {
+    expect(container.querySelector('#about-project-title')?.textContent).toBe('项目定位')
+    expect(container.querySelector('#capabilities-title')?.textContent).toBe('核心能力')
+    expect(container.querySelector('#principles-title')?.textContent).toBe('项目原则')
+    expect(container.textContent).toContain('本地优先')
+    expect(container.textContent).toContain('开源透明')
   })
 
   it('shows a safe toast when an external link cannot be opened', async () => {

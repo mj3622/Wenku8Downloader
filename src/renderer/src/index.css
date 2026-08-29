@@ -67,12 +67,19 @@ body {
   transition: transform 240ms var(--motion-ease-out);
 }
 
-.horizontal-book-shelf {
-  scrollbar-width: none;
+.discovery-cover-grid {
+  --discovery-columns-compact: 4;
+  --discovery-columns-wide: 8;
 }
 
-.horizontal-book-shelf::-webkit-scrollbar {
-  display: none;
+.discovery-cover-grid > * {
+  flex: 1 1 calc(100% / var(--discovery-columns-compact) - 0.75rem);
+}
+
+@media (min-width: 1080px) {
+  .discovery-cover-grid > * {
+    flex-basis: calc(100% / var(--discovery-columns-wide) - 0.75rem);
+  }
 }
 
 .motion-spinner {

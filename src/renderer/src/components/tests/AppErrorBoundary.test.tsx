@@ -18,7 +18,7 @@ function RouteAwareView(): ReactNode {
   if (window.location.hash === '#/broken') {
     throw new Error('broken route')
   }
-  return <p>首页已恢复</p>
+  return <p>发现页已恢复</p>
 }
 
 beforeEach(() => {
@@ -55,7 +55,7 @@ describe('AppErrorBoundary', () => {
     })
 
     expect(container.textContent).toContain('页面暂时无法显示')
-    expect(container.textContent).toContain('返回首页')
+    expect(container.textContent).toContain('返回发现')
     expect(container.textContent).not.toContain('secret IPC')
     expect(reportRendererError).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'error',
@@ -63,7 +63,7 @@ describe('AppErrorBoundary', () => {
     }))
   })
 
-  it('clears the failed state before returning to the home route', async () => {
+  it('clears the failed state before returning to discovery', async () => {
     window.location.hash = '#/broken'
     await act(async () => {
       root.render(
@@ -73,17 +73,17 @@ describe('AppErrorBoundary', () => {
       )
     })
 
-    const returnHome = [...container.querySelectorAll('a, button')]
-      .find((element) => element.textContent === '返回首页')
-    expect(returnHome).toBeTruthy()
+    const returnDiscovery = [...container.querySelectorAll('a, button')]
+      .find((element) => element.textContent === '返回发现')
+    expect(returnDiscovery).toBeTruthy()
 
     await act(async () => {
-      returnHome?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      returnDiscovery?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
       await Promise.resolve()
     })
 
-    expect(window.location.hash).toBe('#/')
-    expect(container.textContent).toContain('首页已恢复')
+    expect(window.location.hash).toBe('#/discover')
+    expect(container.textContent).toContain('发现页已恢复')
     expect(container.textContent).not.toContain('页面暂时无法显示')
   })
 })

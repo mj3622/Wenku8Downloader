@@ -18,9 +18,9 @@ interface State {
 export default class AppErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false }
 
-  private handleReturnHome = (event: ReactMouseEvent<HTMLAnchorElement>): void => {
+  private handleReturnDiscovery = (event: ReactMouseEvent<HTMLAnchorElement>): void => {
     event.preventDefault()
-    window.location.hash = '#/'
+    window.location.hash = '#/discover'
     this.setState({ hasError: false })
   }
 
@@ -47,7 +47,7 @@ export default class AppErrorBoundary extends Component<Props, State> {
           </div>
           <h1 className="text-2xl font-semibold text-apple-heading">页面暂时无法显示</h1>
           <p className="mt-3 text-sm leading-6 text-apple-body">
-            你可以重新加载应用；如果问题仍然存在，请返回首页后再试。
+            你可以重新加载应用；如果问题仍然存在，请返回发现页后再试。
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <button
@@ -59,10 +59,10 @@ export default class AppErrorBoundary extends Component<Props, State> {
             </button>
             <a
               className="motion-pressable rounded-lg border border-apple-border-input px-5 py-2.5 text-sm font-medium text-apple-heading hover:bg-black/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30"
-              href="#/"
-              onClick={this.handleReturnHome}
+              href="#/discover"
+              onClick={this.handleReturnDiscovery}
             >
-              返回首页
+              返回发现
             </a>
           </div>
         </section>

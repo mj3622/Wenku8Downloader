@@ -25,13 +25,23 @@ function parsePage(rawPage: string | null): number {
   return Number.isSafeInteger(page) && page >= 1 && page <= 10_000 ? page : 1
 }
 
+const rankingGridClass = 'grid grid-cols-4 gap-x-5 gap-y-8 min-[1100px]:grid-cols-5 min-[1100px]:gap-x-7'
+
 function RankingSkeleton() {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,88px)] gap-x-4 gap-y-7" role="status" aria-label="正在加载排行榜">
-      {Array.from({ length: 15 }, (_, index) => (
+    <div
+      className={rankingGridClass}
+      role="status"
+      aria-label="正在加载排行榜"
+      data-ranking-skeleton
+    >
+      {Array.from({ length: 20 }, (_, index) => (
         <div key={index}>
-          <div className="h-[132px] animate-pulse rounded-lg bg-black/[0.06] motion-reduce:animate-none" />
-          <div className="mt-2 h-3 w-16 animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
+          <div className="aspect-[2/3] animate-pulse rounded-lg bg-black/[0.06] motion-reduce:animate-none" />
+          <div className="mt-2.5 flex gap-2">
+            <div className="h-4 w-6 flex-none animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
+            <div className="h-3 w-20 animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
+          </div>
         </div>
       ))}
     </div>
@@ -135,8 +145,10 @@ export default function RankingPage() {
 
       {data && data.books.length > 0 && (
         <>
-          <div className="grid grid-cols-[repeat(auto-fill,88px)] gap-x-4 gap-y-7">
-            {data.books.map((book) => <DiscoveryBookTile key={book.id} book={book} />)}
+          <div className={rankingGridClass} data-ranking-grid>
+            {data.books.map((book) => (
+              <DiscoveryBookTile key={book.id} book={book} variant="ranking" />
+            ))}
           </div>
           <Pagination
             page={data.page}

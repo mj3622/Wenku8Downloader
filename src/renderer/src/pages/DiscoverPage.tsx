@@ -1,25 +1,63 @@
 import { useEffect } from 'react'
 import { IconBookOff, IconRefresh } from '@tabler/icons-react'
-import HorizontalBookShelf from '../components/HorizontalBookShelf'
+import {
+  DiscoveryCoverSection,
+  DiscoveryRankingSection,
+  isRankedDiscoverySection,
+} from '../components/DiscoverySection'
 import StatusAlert from '../components/StatusAlert'
 import { useDiscoveryStore } from '../stores/discoveryStore'
 
-function DiscoverySkeleton() {
+function CoverSectionSkeleton() {
   return (
-    <div className="space-y-8" role="status" aria-label="正在加载发现内容">
-      {[0, 1, 2].map((section) => (
-        <div key={section}>
-          <div className="mb-3 h-5 w-28 animate-pulse rounded bg-black/[0.07] motion-reduce:animate-none" />
-          <div className="flex gap-3 overflow-hidden">
-            {[0, 1, 2, 3, 4, 5, 6].map((book) => (
-              <div key={book} className="w-[88px] flex-none">
-                <div className="h-[132px] animate-pulse rounded-lg bg-black/[0.06] motion-reduce:animate-none" />
-                <div className="mt-2 h-3 w-16 animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
+    <div data-discovery-cover-skeleton>
+      <div className="mb-4 h-5 w-28 animate-pulse rounded bg-black/[0.07] motion-reduce:animate-none" />
+      <div className="discovery-cover-grid flex w-full flex-wrap gap-x-3 gap-y-6">
+        {Array.from({ length: 8 }, (_, index) => (
+          <div key={index} className="min-w-0">
+            <div className="aspect-[2/3] animate-pulse rounded-lg bg-black/[0.06] motion-reduce:animate-none" />
+            <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RankingBandSkeleton() {
+  return (
+    <div
+      className="grid grid-cols-3 divide-x divide-apple-border-subtle overflow-hidden rounded-xl border border-apple-border-subtle bg-white"
+      data-discovery-ranking-skeleton
+    >
+      {Array.from({ length: 3 }, (_, section) => (
+        <div key={section} className="min-w-0 px-3.5 py-5 min-[1100px]:px-5">
+          <div className="mb-4 h-5 w-20 animate-pulse rounded bg-black/[0.07] motion-reduce:animate-none" />
+          <div className="grid grid-cols-3 gap-2.5">
+            {Array.from({ length: 3 }, (_, book) => (
+              <div key={book}>
+                <div className="aspect-[2/3] animate-pulse rounded-lg bg-black/[0.06] motion-reduce:animate-none" />
+                <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-black/[0.06] motion-reduce:animate-none" />
               </div>
+            ))}
+          </div>
+          <div className="mt-4 space-y-2 border-t border-apple-border-subtle pt-3">
+            {Array.from({ length: 7 }, (_, row) => (
+              <div key={row} className="h-3 animate-pulse rounded bg-black/[0.05] motion-reduce:animate-none" />
             ))}
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function DiscoverySkeleton() {
+  return (
+    <div className="space-y-10" role="status" aria-label="正在加载发现内容">
+      <RankingBandSkeleton />
+      <CoverSectionSkeleton />
+      <CoverSectionSkeleton />
     </div>
   )
 }
@@ -32,6 +70,9 @@ export default function DiscoverPage() {
     homeError,
     loadHome,
   } = useDiscoveryStore()
+
+  const rankingSections = home?.sections.filter(isRankedDiscoverySection) ?? []
+  const coverSections = home?.sections.filter(section => !isRankedDiscoverySection(section)) ?? []
 
   useEffect(() => {
     void loadHome()
@@ -74,9 +115,20 @@ export default function DiscoverPage() {
       )}
 
       {home && home.sections.length > 0 && (
-        <div className="space-y-8">
-          {home.sections.map((section) => (
-            <HorizontalBookShelf key={section.key} section={section} />
+        <div className="space-y-10" data-discovery-content>
+          {rankingSections.length > 0 && (
+            <div
+              className="grid grid-cols-3 divide-x divide-apple-border-subtle overflow-hidden rounded-xl border border-apple-border-subtle bg-white shadow-card"
+              data-discovery-ranking-band
+            >
+              {rankingSections.map((section) => (
+                <DiscoveryRankingSection key={section.key} section={section} />
+              ))}
+            </div>
+          )}
+
+          {coverSections.map((section) => (
+            <DiscoveryCoverSection key={section.key} section={section} />
           ))}
         </div>
       )}
