@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { IconArrowLeft, IconDownload, IconRefresh } from '@tabler/icons-react'
+import {
+  IconArrowLeft,
+  IconDownload,
+  IconExternalLink,
+  IconRefresh,
+} from '@tabler/icons-react'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusAlert from '../components/StatusAlert'
 import BookCover from '../components/BookCover'
 import { toast } from '../stores/toastStore'
+import { api } from '../api/client'
+import { getUserFeedback } from '../utils/userFeedback'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
 
@@ -79,6 +86,16 @@ export default function BookDetailPage() {
     navigate('/download')
   }
 
+  const handleOpenSource = async (): Promise<void> => {
+    if (!book) return
+    const sourceUrl = `https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`
+    try {
+      await api.openExternal(sourceUrl)
+    } catch (error) {
+      toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
   return (
     <div className="max-w-4xl pb-8">
       <button
@@ -124,7 +141,7 @@ export default function BookDetailPage() {
               title={book.basic_info['标题'] ?? '作品'}
               className="w-[130px] h-[184px] rounded-[14px] shadow-md"
             />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h1 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
                 {book.basic_info['标题']}
               </h1>
@@ -133,6 +150,17 @@ export default function BookDetailPage() {
                 {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
                 {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
               </p>
+              <a
+                href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void handleOpenSource()
+                }}
+                className="motion-pressable mt-4 inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-[13px] font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+              >
+                <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
+                在原网站查看
+              </a>
             </div>
           </div>
 

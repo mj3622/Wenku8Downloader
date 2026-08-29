@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   downloadEpub: vi.fn(),
   downloadImages: vi.fn(),
   getVolumeCovers: vi.fn(),
+  openExternal: vi.fn(),
 }))
 
 vi.mock('../../stores/bookStore', () => ({
@@ -38,6 +39,7 @@ vi.mock('../../stores/downloadStore', () => ({
 vi.mock('../../api/client', () => ({
   api: {
     getVolumeCovers: mocks.getVolumeCovers,
+    openExternal: mocks.openExternal,
   },
 }))
 
@@ -62,6 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.book.volumes = {}
   mocks.getVolumeCovers.mockResolvedValue({ covers: {} })
+  mocks.openExternal.mockResolvedValue(undefined)
   useToastStore.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -74,6 +77,30 @@ afterEach(async () => {
 })
 
 describe('BookDetailPage', () => {
+  it('opens the corresponding original detail page through the external-link boundary', async () => {
+    await act(async () => root.render(
+      <MemoryRouter
+        initialEntries={['/book/3057']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const sourceLink = [...container.querySelectorAll('a')]
+      .find((item) => item.textContent?.includes('在原网站查看'))
+    expect(sourceLink?.getAttribute('href')).toBe('https://www.wenku8.net/book/3057.htm')
+
+    await act(async () => {
+      sourceLink?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await Promise.resolve()
+    })
+
+    expect(mocks.openExternal).toHaveBeenCalledWith('https://www.wenku8.net/book/3057.htm')
+  })
+
   it('shows one warning and offers deterministic retry and search actions', async () => {
     await act(async () => root.render(
       <MemoryRouter
