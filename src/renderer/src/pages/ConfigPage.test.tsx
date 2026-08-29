@@ -601,10 +601,16 @@ describe('ConfigPage', () => {
     })
     expect(container.textContent).not.toContain('旧请求已完成')
     await act(async () => {
-      onProgress?.({ operationId, step: 'login', message: '新请求正在登录' })
+      onProgress?.({
+        operationId,
+        step: 'login',
+        message: 'Cloudflare 可能连续显示多轮验证，请按页面提示逐步完成；全部完成后会自动登录',
+      })
       await flush()
     })
-    expect(container.textContent).toContain('新请求正在登录')
+    expect(container.textContent).toContain(
+      'Cloudflare 可能连续显示多轮验证，请按页面提示逐步完成；全部完成后会自动登录',
+    )
 
     await act(async () => {
       for (const resolveLogin of loginResolvers) resolveLogin()

@@ -346,14 +346,14 @@ function CookieStatusCard({
   const stateConfig = COOKIE_STATE_CONFIG[cookieState]
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center gap-2" title={cookieState === 'error' ? cookieMsg : undefined}>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex min-w-0 items-center gap-2" title={cookieState === 'error' ? cookieMsg : undefined}>
         {stateConfig.showSpinner ? (
           <IconLoader2 aria-hidden="true" className="motion-spinner h-4 w-4 animate-spin text-apple-accent" stroke={1.8} />
         ) : (
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${stateConfig.dot}`} />
         )}
-        <span className={`text-sm font-semibold ${stateConfig.text}`}>
+        <span className={`text-sm font-semibold leading-5 ${stateConfig.text}`}>
           {cookieState === 'loading' ? cookieMsg : stateConfig.label}
         </span>
       </div>
