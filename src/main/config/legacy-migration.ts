@@ -128,7 +128,7 @@ export function migrateLegacyConfig(input: {
     if (!input.secretStore.isEncryptionAvailable()) {
       return {
         state: 'encryption-unavailable',
-        message: '系统安全存储不可用，旧明文凭证未迁移',
+        message: '本地敏感信息加密不可用，旧明文凭证未迁移',
       }
     }
     if (secretsBefore.state !== 'ok') {

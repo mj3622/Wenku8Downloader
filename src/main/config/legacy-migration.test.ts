@@ -9,6 +9,7 @@ import { migrateLegacyConfig } from './legacy-migration'
 import { DEFAULT_LOG_CONFIG } from './config-schema'
 
 const availableCodec: SecretCodec = {
+  cipher: 'test-cipher',
   isAvailable: () => true,
   encrypt: (plain) => Buffer.from(`encrypted:${Buffer.from(plain).toString('base64')}`),
   decrypt: (encrypted) => Buffer.from(
@@ -18,6 +19,7 @@ const availableCodec: SecretCodec = {
 }
 
 const unavailableCodec: SecretCodec = {
+  cipher: 'test-cipher',
   isAvailable: () => false,
   encrypt: () => { throw new Error('unavailable') },
   decrypt: () => { throw new Error('unavailable') },

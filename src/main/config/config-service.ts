@@ -139,7 +139,7 @@ function healthFrom(
   ) {
     return {
       state: 'encryption-unavailable',
-      message: '系统安全存储不可用，登录信息无法长期保存',
+      message: '本地敏感信息加密不可用，登录信息无法长期保存',
     }
   }
   return { state: 'ok' }
@@ -332,7 +332,7 @@ export class ConfigService {
       this.secretLoad.state !== 'ok'
       || !this.secretStore.isEncryptionAvailable()
     ) {
-      throw new Error('登录信息当前不可修改，请先恢复系统安全存储')
+      throw new Error('登录信息当前不可修改，请先恢复本地敏感信息存储')
     }
     const validated = validateCredentialsInput(value)
     const clearRequested = validated.username === '' && validated.password === ''
@@ -375,7 +375,7 @@ export class ConfigService {
       this.secretLoad.state !== 'ok'
       || !this.secretStore.isEncryptionAvailable()
     ) {
-      throw new Error('登录状态当前不可保存，请先恢复系统安全存储')
+      throw new Error('登录状态当前不可保存，请先恢复本地敏感信息存储')
     }
     const next: SecretPayloadV1 = {
       login: { ...this.secrets.login },
@@ -400,7 +400,7 @@ export class ConfigService {
     let resetSecrets = this.secretLoad.state === 'missing'
       || this.secretLoad.state === 'recovery-required'
     if (resetSecrets && !this.secretStore.isEncryptionAvailable()) {
-      throw new Error('系统安全存储不可用，无法重置敏感配置')
+      throw new Error('本地敏感信息加密不可用，无法重置敏感配置')
     }
 
     let settings = cloneSettings(this.settings)

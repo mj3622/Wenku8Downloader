@@ -134,7 +134,7 @@ export default function ConfigPage() {
       ? '配置需要处理'
       : health.state === 'read-only-newer-version'
         ? '当前配置为只读'
-        : '系统安全存储不可用'
+        : '本地敏感信息存储不可用'
     toast.warning({ title, message: feedback.message })
   }, [snapshot])
 

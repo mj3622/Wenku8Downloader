@@ -13,9 +13,11 @@ export interface SecretPayloadV1 {
   cookies: CookieSnapshot
 }
 
-interface SecretEnvelopeV1 {
-  version: 1
-  cipher: 'electron-safe-storage'
+const SECRET_ENVELOPE_VERSION = 2
+
+interface SecretEnvelopeV2 {
+  version: typeof SECRET_ENVELOPE_VERSION
+  cipher: string
   data: string
 }
 
@@ -102,7 +104,7 @@ export class SecretStore {
         return {
           state: 'encryption-unavailable',
           value: fallback,
-          message: '系统安全存储不可用，无法保存登录信息',
+          message: '本地敏感信息加密不可用，无法保存登录信息',
         }
       }
       return { state: 'missing', value: fallback }
@@ -111,23 +113,30 @@ export class SecretStore {
       return {
         state: 'encryption-unavailable',
         value: fallback,
-        message: '系统安全存储不可用，无法读取登录信息',
+        message: '本地敏感信息加密不可用，无法读取登录信息',
       }
     }
 
     try {
       const parsed = requireRecord(JSON.parse(readFileSync(this.path, 'utf-8')))
       const version = parsed.version
-      if (typeof version === 'number' && version > 1) {
+      if (typeof version === 'number' && version > SECRET_ENVELOPE_VERSION) {
         return {
           state: 'read-only-newer-version',
           value: fallback,
           message: '敏感配置由更新版本创建，当前版本不会覆盖该文件',
         }
       }
+      if (version === 1 && parsed.cipher === 'electron-safe-storage') {
+        return {
+          state: 'recovery-required',
+          value: fallback,
+          message: '检测到旧版钥匙串加密配置，原文件已保留，请重置后重新登录',
+        }
+      }
       if (
-        version !== 1
-        || parsed.cipher !== 'electron-safe-storage'
+        (version !== 1 && version !== SECRET_ENVELOPE_VERSION)
+        || parsed.cipher !== this.codec.cipher
         || typeof parsed.data !== 'string'
       ) {
         throw new Error('敏感配置封装格式无效')
@@ -147,7 +156,7 @@ export class SecretStore {
 
   save(next: SecretPayloadV1): SecretPayloadV1 {
     if (!this.codec.isAvailable()) {
-      throw new Error('系统安全存储不可用，无法保存登录信息')
+      throw new Error('本地敏感信息加密不可用，无法保存登录信息')
     }
 
     const value = parseSecretPayload(next)
@@ -158,9 +167,9 @@ export class SecretStore {
       throw new Error('敏感配置加密验证失败')
     }
 
-    const envelope: SecretEnvelopeV1 = {
-      version: 1,
-      cipher: 'electron-safe-storage',
+    const envelope: SecretEnvelopeV2 = {
+      version: SECRET_ENVELOPE_VERSION,
+      cipher: this.codec.cipher,
       data: encrypted.toString('base64'),
     }
     const previous = existsSync(this.path) ? readFileSync(this.path) : null

@@ -1,9 +1,9 @@
-import { app, safeStorage } from 'electron'
+import { app } from 'electron'
 import { Book } from './book'
 import { BookService } from './book-service'
 import { ConfigService } from './config/config-service'
 import { resolveConfigPaths } from './config/config-paths'
-import { ElectronSafeStorageCodec } from './config/secret-codec'
+import { LocalSecretCodec } from './config/secret-codec'
 import { SecretStore } from './config/secret-store'
 import { SettingsStore } from './config/settings-store'
 import { WebCrawler, type CrawlerRequestControlFactory } from './crawler'
@@ -67,7 +67,7 @@ export function createAppServices(): AppServices {
   const settingsStore = new SettingsStore(paths.settingsPath)
   const secretStore = new SecretStore(
     paths.secretsPath,
-    new ElectronSafeStorageCodec(safeStorage),
+    new LocalSecretCodec(),
   )
   const config = ConfigService.load({
     settingsStore,

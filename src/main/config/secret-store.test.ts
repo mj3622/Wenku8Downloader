@@ -6,6 +6,7 @@ import { SecretStore, type SecretPayloadV1 } from './secret-store'
 import type { SecretCodec } from './secret-codec'
 
 const availableCodec: SecretCodec = {
+  cipher: 'test-cipher',
   isAvailable: () => true,
   encrypt: (plain) => Buffer.from(`cipher:${Buffer.from(plain).toString('base64')}`),
   decrypt: (encrypted) => Buffer.from(
@@ -15,6 +16,7 @@ const availableCodec: SecretCodec = {
 }
 
 const unavailableCodec: SecretCodec = {
+  cipher: 'test-cipher',
   isAvailable: () => false,
   encrypt: () => { throw new Error('should not encrypt') },
   decrypt: () => { throw new Error('should not decrypt') },
@@ -69,13 +71,29 @@ describe('SecretStore', () => {
     const stored = await readFile(secretsPath, 'utf-8')
     expect(stored).not.toContain('plain-password-sentinel')
     expect(stored).not.toContain('plain-cookie-sentinel')
+    expect(JSON.parse(stored)).toMatchObject({ version: 2, cipher: 'test-cipher' })
     expect(store.load()).toEqual({ state: 'ok', value: payload })
+  })
+
+  it('reads pre-release local envelopes and upgrades them on the next save', async () => {
+    const raw = JSON.stringify({
+      version: 1,
+      cipher: 'test-cipher',
+      data: availableCodec.encrypt(JSON.stringify(payload)).toString('base64'),
+    })
+    await writeFile(secretsPath, raw, 'utf-8')
+    const store = new SecretStore(secretsPath, availableCodec)
+
+    expect(store.load()).toEqual({ state: 'ok', value: payload })
+    store.save(payload)
+
+    await expect(readFile(secretsPath, 'utf-8')).resolves.toContain('"version": 2')
   })
 
   it('keeps unsupported newer envelopes read-only', async () => {
     const raw = JSON.stringify({
       version: 99,
-      cipher: 'electron-safe-storage',
+      cipher: 'future-cipher',
       data: 'future-data',
     })
     await writeFile(secretsPath, raw, 'utf-8')
@@ -89,7 +107,7 @@ describe('SecretStore', () => {
   it('preserves an envelope that cannot be decrypted', async () => {
     const raw = JSON.stringify({
       version: 1,
-      cipher: 'electron-safe-storage',
+      cipher: 'test-cipher',
       data: Buffer.from('not-a-valid-cipher').toString('base64'),
     })
     await writeFile(secretsPath, raw, 'utf-8')
@@ -100,10 +118,27 @@ describe('SecretStore', () => {
     await expect(readFile(secretsPath, 'utf-8')).resolves.toBe(raw)
   })
 
+  it('preserves the legacy safeStorage envelope for explicit reset', async () => {
+    const raw = JSON.stringify({
+      version: 1,
+      cipher: 'electron-safe-storage',
+      data: Buffer.from('legacy-cipher').toString('base64'),
+    })
+    await writeFile(secretsPath, raw, 'utf-8')
+
+    const result = new SecretStore(secretsPath, availableCodec).load()
+
+    expect(result).toMatchObject({
+      state: 'recovery-required',
+      message: expect.stringContaining('旧版钥匙串加密配置'),
+    })
+    await expect(readFile(secretsPath, 'utf-8')).resolves.toBe(raw)
+  })
+
   it('does not create plaintext fallback storage when encryption is unavailable', async () => {
     const store = new SecretStore(secretsPath, unavailableCodec)
 
-    expect(() => store.save(payload)).toThrow('系统安全存储不可用')
+    expect(() => store.save(payload)).toThrow('本地敏感信息加密不可用')
     await expect(stat(secretsPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

@@ -30,6 +30,7 @@ const initialDownload: DownloadConfig = {
 }
 
 const availableCodec: SecretCodec = {
+  cipher: 'test-cipher',
   isAvailable: () => true,
   encrypt: (plain) => Buffer.from(`encrypted:${Buffer.from(plain).toString('base64')}`),
   decrypt: (encrypted) => Buffer.from(
