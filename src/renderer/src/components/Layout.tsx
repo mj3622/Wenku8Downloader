@@ -93,7 +93,7 @@ export default function Layout() {
 
         {/* Version */}
         <div className="px-5 py-4">
-          <p className="text-[12px] text-apple-tertiary">v2.0.0</p>
+          <p className="text-[12px] text-apple-tertiary">v2.1.0</p>
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto p-8">

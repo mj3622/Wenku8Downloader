@@ -76,7 +76,7 @@ export default function HomePage() {
           <div className="min-w-0 flex-1">
             <div className="mb-3 flex flex-wrap items-center gap-2.5">
               <span className="rounded-full bg-apple-accent-light px-2.5 py-1 text-xs font-medium text-apple-accent">
-                v2.0.0
+                v2.1.0
               </span>
               <span className="text-[13px] font-medium text-apple-secondary">
                 面向 Wenku8 的桌面端开源工具
