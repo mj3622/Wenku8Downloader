@@ -97,7 +97,8 @@ describe('BookDetailPage', () => {
     const retry = [...container.querySelectorAll('button')]
       .find((item) => item.textContent === '重新加载')
     await act(async () => retry?.click())
-    expect(mocks.fetchBook).toHaveBeenCalledTimes(2)
+    expect(mocks.fetchBook).toHaveBeenNthCalledWith(1, '3057')
+    expect(mocks.fetchBook).toHaveBeenNthCalledWith(2, '3057', { revalidate: true })
 
     const backToSearch = [...container.querySelectorAll('button')]
       .find((item) => item.textContent === '返回检索')
@@ -106,7 +107,7 @@ describe('BookDetailPage', () => {
     expect(useToastStore.getState().items).toHaveLength(1)
   })
 
-  it('resolves each selected volume cover before enqueueing tasks', async () => {
+  it('enqueues selected volumes immediately and lets each task resolve its cover later', async () => {
     mocks.book.volumes = { '第一卷': [], '第二卷': [] }
     mocks.getVolumeCovers.mockResolvedValue({
       covers: {
@@ -138,10 +139,10 @@ describe('BookDetailPage', () => {
       await Promise.resolve()
     })
 
-    expect(mocks.getVolumeCovers).toHaveBeenCalledWith('3057', ['第一卷', '第二卷'])
+    expect(mocks.getVolumeCovers).not.toHaveBeenCalled()
     expect(mocks.downloadEpub.mock.calls).toEqual([
-      ['3057', '测试作品', 'https://example.com/volume-1.jpg', '第一卷'],
-      ['3057', '测试作品', 'https://example.com/volume-2.jpg', '第二卷'],
+      ['3057', '测试作品', 'https://example.com/book.jpg', '第一卷'],
+      ['3057', '测试作品', 'https://example.com/book.jpg', '第二卷'],
     ])
     expect(container.textContent).toContain('下载页')
   })

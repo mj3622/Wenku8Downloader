@@ -38,6 +38,14 @@ describe('bookStore', () => {
     expect(useToastStore.getState().items[0]?.title).toBe('登录状态已失效')
   })
 
+  it('forwards an explicit revalidation request', async () => {
+    mocks.getBook.mockResolvedValue({ book_id: '3057', basic_info: {}, volumes: {} })
+
+    await useBookStore.getState().fetchBook('3057', { revalidate: true })
+
+    expect(mocks.getBook).toHaveBeenCalledWith('3057', { revalidate: true })
+  })
+
   it('keeps the newest work when an older request finishes later', async () => {
     let resolveFirst!: (value: { book_id: string; basic_info: Record<string, string>; volumes: Record<string, never[]> }) => void
     let resolveSecond!: (value: { book_id: string; basic_info: Record<string, string>; volumes: Record<string, never[]> }) => void

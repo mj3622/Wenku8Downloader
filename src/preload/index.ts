@@ -7,6 +7,8 @@ import type {
 } from '../shared/config-types'
 import type {
   CookieProgress,
+  BookLoadOptions,
+  CacheApi,
   DownloadApi,
   DownloadHistoryScope,
   DownloadStateEvent,
@@ -49,15 +51,23 @@ const downloadApi: DownloadApi = {
   },
 }
 
+const cacheApi: CacheApi = {
+  clearCache: () => ipcRenderer.invoke('cache:clear'),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
   ...configApi,
   ...downloadApi,
+  ...cacheApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
-  getBook: (bookId: string) => ipcRenderer.invoke('book:get', { bookId }),
+  getBook: (bookId: string, options?: BookLoadOptions) => ipcRenderer.invoke('book:get', {
+    bookId,
+    ...(options?.revalidate === undefined ? {} : { revalidate: options.revalidate }),
+  }),
   getBookImages: (bookId: string) => ipcRenderer.invoke('book:images', { bookId }),
   getVolumeCovers: (bookId: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
     ipcRenderer.invoke('book:volume-covers', { bookId, volumes }),

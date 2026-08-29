@@ -2,12 +2,13 @@ import { create } from 'zustand'
 import { api, type BookInfo } from '../api/client'
 import { toast } from './toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
+import type { BookLoadOptions } from '../../../shared/ipc-types'
 
 type BookState = {
   book: BookInfo | null
   loading: boolean
   error: string | null
-  fetchBook: (id: string) => Promise<void>
+  fetchBook: (id: string, options?: BookLoadOptions) => Promise<void>
   clear: () => void
 }
 
@@ -18,7 +19,7 @@ export const useBookStore = create<BookState>((set) => {
     book: null,
     loading: false,
     error: null,
-    fetchBook: async (id: string) => {
+    fetchBook: async (id: string, options?: BookLoadOptions) => {
       if (!/^\d{1,12}$/.test(id)) {
         requestGeneration++
         const feedback = {
@@ -34,7 +35,7 @@ export const useBookStore = create<BookState>((set) => {
       const currentGeneration = ++requestGeneration
       set({ loading: true, error: null })
       try {
-        const book = await api.getBook(id)
+        const book = await api.getBook(id, options)
         if (currentGeneration !== requestGeneration) return
         set({ book, loading: false })
       } catch (e) {

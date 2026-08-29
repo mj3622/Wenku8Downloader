@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   openLogFolder: vi.fn(),
   getLogStats: vi.fn(),
   selectFolder: vi.fn(),
+  clearCache: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -184,6 +185,7 @@ beforeEach(() => {
   mocks.openLogFolder.mockResolvedValue(undefined)
   mocks.getLogStats.mockResolvedValue({ totalSizeBytes: 1.5 * 1024 * 1024 })
   mocks.selectFolder.mockResolvedValue(null)
+  mocks.clearCache.mockResolvedValue({ deferred: false })
   useConfigStore.setState({
     snapshot: null,
     loadState: 'idle',
@@ -745,6 +747,55 @@ describe('ConfigPage', () => {
     await click(button('打开目录'))
 
     expect(mocks.openFolder).toHaveBeenCalledWith('root')
+  })
+
+  it('confirms cache clearing, disables the button in flight and reports success', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveClear!: (value: { deferred: boolean }) => void
+    mocks.clearCache.mockReturnValue(new Promise(resolve => {
+      resolveClear = resolve
+    }))
+    await renderPage(true)
+    await click(button('下载设置'))
+
+    await click(button('清除缓存'))
+
+    expect(button('正在清除…').disabled).toBe(true)
+    expect(mocks.clearCache).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolveClear({ deferred: false })
+      await flush()
+    })
+    expect(useToastStore.getState().items.at(-1)).toMatchObject({
+      tone: 'success',
+      title: '缓存已清除',
+    })
+    expect(button('清除缓存').disabled).toBe(false)
+  })
+
+  it('reports deferred active-download cleanup without exposing cache settings', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mocks.clearCache.mockResolvedValue({ deferred: true })
+    await renderPage()
+    await click(button('下载设置'))
+
+    await click(button('清除缓存'))
+
+    expect(useToastStore.getState().items.at(-1)?.message).toBe(
+      '缓存已清除，正在下载的任务所使用的数据将在任务结束后自动处理',
+    )
+    expect(container.textContent).not.toContain('缓存上限')
+    expect(container.textContent).not.toContain('缓存占用')
+  })
+
+  it('does not clear cache when confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await renderPage()
+    await click(button('下载设置'))
+
+    await click(button('清除缓存'))
+
+    expect(mocks.clearCache).not.toHaveBeenCalled()
   })
 
   it('saves validated logging settings', async () => {

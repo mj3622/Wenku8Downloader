@@ -118,3 +118,15 @@ export interface LogStats {
 export interface VolumeCoverSnapshot {
   covers: Record<string, string>
 }
+
+export interface BookLoadOptions {
+  revalidate?: boolean
+}
+
+export interface CacheClearResult {
+  deferred: boolean
+}
+
+export interface CacheApi {
+  clearCache(): Promise<CacheClearResult>
+}

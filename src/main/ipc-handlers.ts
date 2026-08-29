@@ -31,6 +31,8 @@ import {
   logger,
 } from './logging/logger'
 import { RendererErrorReporter } from './logging/renderer-error-reporter'
+import type { BookGetOptions } from './book-service'
+import type { CacheClearResult } from '../shared/ipc-types'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -59,9 +61,10 @@ export interface IpcServices {
     'syncCookies' | 'search' | 'getCookie' | 'fetch' | 'getImageContent'
   >
   books: {
-    get(bookId: string): Promise<IpcBook>
-    clear(): void
+    get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
   }
+  clearCache(): Promise<CacheClearResult>
+  invalidateBookCache(): Promise<void>
   resolveVolumeCovers(bookId: string, volumes: string[]): Promise<Record<string, string>>
   downloads: Pick<
     DownloadManager,
@@ -74,6 +77,21 @@ export interface IpcServices {
     | 'importLegacyHistory'
     | 'subscribe'
   >
+}
+
+function validateBookGetPayload(value: unknown): { bookId: string; revalidate: boolean } {
+  const payload = requirePayload(value)
+  const keys = Object.keys(payload)
+  if (keys.some(key => key !== 'bookId' && key !== 'revalidate')) {
+    throw new Error('请求参数格式无效')
+  }
+  if (payload.revalidate !== undefined && typeof payload.revalidate !== 'boolean') {
+    throw new Error('请求参数格式无效')
+  }
+  return {
+    bookId: validateBookId(payload.bookId),
+    revalidate: payload.revalidate === true,
+  }
 }
 
 async function runLoggedOperation<T>(
@@ -168,7 +186,7 @@ export function registerIpcHandlers(services: IpcServices): void {
       services.config.updateCredentials(credentials)
       try {
         await services.crawler.syncCookies()
-        services.books.clear()
+        await services.invalidateBookCache()
       } catch (error) {
         const message = clearRequested
           ? '登录信息已清除，但旧登录状态清理未完成，请重启应用'
@@ -188,7 +206,7 @@ export function registerIpcHandlers(services: IpcServices): void {
       services.config.resetCorruptConfig()
       try {
         await services.crawler.syncCookies()
-        services.books.clear()
+        await services.invalidateBookCache()
       } catch (error) {
         throw new Error('配置已重置，但登录状态同步失败，请重启应用', { cause: error })
       }
@@ -210,7 +228,7 @@ export function registerIpcHandlers(services: IpcServices): void {
         } catch (error) {
           throw new Error('登录失败或登录状态无法保存，请检查账号后重试', { cause: error })
         }
-        services.books.clear()
+        await services.invalidateBookCache()
         return { status: 'ok', message: '登录成功，登录状态已更新' }
       },
       { operationId },
@@ -221,7 +239,6 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.author', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      context.query = query
       const results = await services.crawler.search(query, 'author')
       context.resultCount = results.length
       return { results }
@@ -232,7 +249,6 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.title', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      context.query = query
       const results = await services.crawler.search(query, 'title')
       context.resultCount = results.length
       return { results }
@@ -242,9 +258,10 @@ export function registerIpcHandlers(services: IpcServices): void {
   ipcMain.handle('book:get', (_event, rawPayload: unknown) => {
     const context: LogContext = {}
     return runLoggedOperation('book.get', context, async () => {
-      const bookId = validateBookId(requirePayload(rawPayload).bookId)
+      const { bookId, revalidate } = validateBookGetPayload(rawPayload)
       context.bookId = bookId
-      const book = await services.books.get(bookId)
+      context.revalidate = revalidate
+      const book = await services.books.get(bookId, { revalidate })
       context.title = book.basicInfo['标题']
       context.volumeCount = Object.keys(book.volumes).length
       return {
@@ -253,6 +270,11 @@ export function registerIpcHandlers(services: IpcServices): void {
         volumes: book.volumes,
       }
     })
+  })
+
+  ipcMain.handle('cache:clear', (_event, rawPayload: unknown) => {
+    if (rawPayload !== undefined) throw new Error('请求参数格式无效')
+    return runLoggedOperation('cache.clear', {}, () => services.clearCache())
   })
 
   ipcMain.handle('book:images', (_event, rawPayload: unknown) => {
