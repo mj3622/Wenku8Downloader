@@ -15,8 +15,10 @@
 </p>
 
 <p align="center">
-  <img src="resources/ShowPage.png" alt="应用截图" width="820" />
+  <img src="resources/screenshots/discover.png" alt="发现页：热门榜单与新书推荐" width="920" />
 </p>
+
+<p align="center"><sub>发现页会集中展示热门榜单、新书推荐与站内排行。</sub></p>
 
 ## ✨ 这是什么？
 
@@ -39,6 +41,16 @@
 | 🔁 下载管理 | 下载历史、任务进度、取消与中断后重试都集中管理 |
 | 📁 自定义路径 | EPUB 与插图保存到哪里，由你决定 |
 | 💻 桌面体验 | 基于 Electron 重写，macOS / Windows 打开即用 |
+
+## 🖼️ 更多界面
+
+### 项目介绍
+
+应用内的项目介绍页集中说明核心能力、使用边界与本地优先原则。
+
+<p align="center">
+  <img src="resources/screenshots/about.png" alt="项目介绍页" width="920" />
+</p>
 
 ## 📦 下载安装
 
@@ -103,3 +115,7 @@ npm run test:integration
 ```
 
 公开分发 macOS 安装包时，需要在构建环境提供 Developer ID 签名证书及 Apple 公证凭证；`npm run dist:mac` 会在检测到 electron-builder 支持的 `CSC_*` 与 `APPLE_*` 环境变量后完成签名、公证和票据装订。凭证不得写入仓库。
+
+## 📄 开源许可
+
+本项目基于 MIT License 开源，详情请查看 [LICENSE](LICENSE) 文件。
