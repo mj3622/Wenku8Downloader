@@ -7,12 +7,12 @@ import { FileLogger } from '../file-logger'
 describe('FileLogger', () => {
   let root: string
   let now: { value: Date }
-  let fallback: ReturnType<typeof vi.fn>
+  let fallback: ReturnType<typeof vi.fn<(message: string, error?: unknown) => void>>
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'wenku8-logs-'))
     now = { value: new Date(2026, 7, 23, 14, 30, 12, 123) }
-    fallback = vi.fn()
+    fallback = vi.fn<(message: string, error?: unknown) => void>()
   })
 
   afterEach(async () => {

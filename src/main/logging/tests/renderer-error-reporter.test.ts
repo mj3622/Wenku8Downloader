@@ -5,14 +5,19 @@ import { RendererErrorReporter } from '../renderer-error-reporter'
 describe('RendererErrorReporter', () => {
   let clock: number
   let logger: LoggerLike
-  let error: ReturnType<typeof vi.fn>
-  let warn: ReturnType<typeof vi.fn>
+  let error: ReturnType<typeof vi.fn<LoggerLike['error']>>
+  let warn: ReturnType<typeof vi.fn<LoggerLike['warn']>>
 
   beforeEach(() => {
     clock = 1_000
-    error = vi.fn()
-    warn = vi.fn()
-    logger = { debug: vi.fn(), info: vi.fn(), warn, error }
+    error = vi.fn<LoggerLike['error']>()
+    warn = vi.fn<LoggerLike['warn']>()
+    logger = {
+      debug: vi.fn<LoggerLike['debug']>(),
+      info: vi.fn<LoggerLike['info']>(),
+      warn,
+      error,
+    }
   })
 
   it('logs first occurrences and summarizes duplicates after the window', () => {

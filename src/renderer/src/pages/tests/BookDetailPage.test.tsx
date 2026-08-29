@@ -81,7 +81,6 @@ describe('BookDetailPage', () => {
     await act(async () => root.render(
       <MemoryRouter
         initialEntries={['/book/3057']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/book/:id" element={<BookDetailPage />} />
@@ -105,7 +104,6 @@ describe('BookDetailPage', () => {
     await act(async () => root.render(
       <MemoryRouter
         initialEntries={['/book/3057']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/book/:id" element={<BookDetailPage />} />
@@ -145,7 +143,6 @@ describe('BookDetailPage', () => {
     await act(async () => root.render(
       <MemoryRouter
         initialEntries={['/book/3057']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/book/:id" element={<BookDetailPage />} />

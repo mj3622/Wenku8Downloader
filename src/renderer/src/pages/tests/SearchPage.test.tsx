@@ -57,7 +57,6 @@ async function renderPage(entry = '/search'): Promise<void> {
     root.render(
       <MemoryRouter
         initialEntries={[entry]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/search" element={<SearchPage />} />

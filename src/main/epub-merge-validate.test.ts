@@ -121,7 +121,7 @@ describe('WebCrawler to EPUB production integration', () => {
         downloadPath: root,
         rootPath: root,
       },
-      new DownloadRateLimiter(vi.fn()),
+      new DownloadRateLimiter(() => undefined),
     )
 
     await downloader.downloadNovel(book)

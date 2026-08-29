@@ -5,7 +5,7 @@
   "author": "Zhiwei Li",
   "main": "./out/main/index.js",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "electron-vite dev --config tooling/electron-vite.config.ts",
@@ -41,6 +41,9 @@
     "icon": "resources/icon.png",
     "mac": {
       "category": "public.app-category.utilities",
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "notarize": true,
       "target": [
         {
           "target": "dmg",
@@ -71,7 +74,7 @@
     "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
+    "react-router-dom": "^7.18.3",
     "smol-toml": "^1.6.1",
     "zustand": "^4.5.4"
   },
@@ -80,20 +83,20 @@
     "@types/cheerio": "^0.22.35",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.19",
-    "electron": "^31.3.1",
-    "electron-builder": "^24.13.3",
-    "electron-vite": "^2.3.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.7",
+    "electron-vite": "^5.0.0",
     "eslint": "9.39.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.11.0",
     "jsdom": "26.1.0",
-    "postcss": "^8.4.40",
+    "postcss": "^8.5.26",
     "tailwindcss": "^3.4.7",
     "typescript": "^5.5.4",
     "typescript-eslint": "8.46.4",
-    "vite": "^5.3.5",
-    "vitest": "2.1.9"
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   }
 }

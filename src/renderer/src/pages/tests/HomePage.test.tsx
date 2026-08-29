@@ -32,7 +32,7 @@ beforeEach(async () => {
   document.body.appendChild(container)
   root = createRoot(container)
   await act(async () => root.render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter>
       <HomePage />
     </MemoryRouter>,
   ))

@@ -673,7 +673,7 @@ describe('Downloader.downloadPictures', () => {
   it('routes image attempts through adaptive control and reports a throttle wait', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-pictures-'))
     const phases: string[] = []
-    const rateLimiter = new DownloadRateLimiter(vi.fn())
+    const rateLimiter = new DownloadRateLimiter(() => undefined)
     const getImageContent = vi.fn(async (
       _url: string,
       _maxRetries: number,
@@ -816,7 +816,7 @@ describe('Downloader.downloadNovel', () => {
   it('routes chapter attempts through adaptive control and reports a throttle wait', async () => {
     const root = await mkdtemp(join(tmpdir(), 'wenku8-chapters-'))
     const phases: string[] = []
-    const rateLimiter = new DownloadRateLimiter(vi.fn())
+    const rateLimiter = new DownloadRateLimiter(() => undefined)
     const fetch = vi.fn(async (
       _url: string,
       _parse?: boolean,
@@ -875,7 +875,7 @@ describe('Downloader.downloadNovel', () => {
     const downloader = new Downloader(
       createCrawlerFixture({ fetch, getImageContent }),
       runtimeConfig(root),
-      new DownloadRateLimiter(vi.fn()),
+      new DownloadRateLimiter(() => undefined),
     )
     const book = createBookFixture({
       volumes: {
@@ -910,7 +910,7 @@ describe('Downloader.downloadNovel', () => {
     const downloader = new Downloader(
       createCrawlerFixture({ fetch, getImageContent }),
       runtimeConfig(root),
-      new DownloadRateLimiter(vi.fn()),
+      new DownloadRateLimiter(() => undefined),
     )
     const progressValues: number[] = []
     downloader.setOnProgress(({ current }) => progressValues.push(current))

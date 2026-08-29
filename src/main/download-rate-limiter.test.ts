@@ -14,7 +14,7 @@ describe('DownloadRateLimiter', () => {
   })
 
   it('drops directly to the conservative tier after HTTP 429', () => {
-    const schedule = vi.fn()
+    const schedule = vi.fn<(callback: () => void, delayMs: number) => unknown>()
     const limiter = new DownloadRateLimiter(schedule)
 
     limiter.record(429)
@@ -29,7 +29,7 @@ describe('DownloadRateLimiter', () => {
   })
 
   it('keeps degraded state for later consumers', () => {
-    const limiter = new DownloadRateLimiter(vi.fn())
+    const limiter = new DownloadRateLimiter(() => undefined)
     limiter.record(429)
 
     const laterTaskSpeed = limiter.speed
@@ -160,7 +160,7 @@ describe('DownloadRateLimiter', () => {
   })
 
   it('does not shorten a server Retry-After longer than the local backoff cap', () => {
-    const limiter = new DownloadRateLimiter(vi.fn())
+    const limiter = new DownloadRateLimiter(() => undefined)
     const url = 'https://www.wenku8.net/novel/1/2/3.htm'
 
     const state = limiter.recordResponse('document', url, {
@@ -272,7 +272,7 @@ describe('DownloadRateLimiter', () => {
   })
 
   it('adapts delay gradually and never speeds up from an error response', () => {
-    const limiter = new DownloadRateLimiter(vi.fn())
+    const limiter = new DownloadRateLimiter(() => undefined)
     const url = 'https://www.wenku8.net/novel/1/2/3.htm'
 
     limiter.recordResponse('document', url, { status: 200, latencyMs: 300 })
