@@ -1,17 +1,29 @@
-export interface ElectronAPI {
+import type { ConfigApi } from '../../../shared/config-types'
+import type {
+  CookieProgress,
+  BookLoadOptions,
+  CacheApi,
+  DiscoveryApi,
+  DownloadApi,
+  LogStats,
+  OpenFolderTarget,
+  RendererErrorReport,
+  VolumeCoverSnapshot,
+} from '../../../shared/ipc-types'
+
+export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, DiscoveryApi {
   platform: NodeJS.Platform
-  getConfig: () => Promise<Record<string, unknown>>
-  setConfig: (section: string, key: string, value: string) => Promise<{ status: string }>
-  autoGetCookie: () => Promise<{ status: string; message: string }>
+  autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
   searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
   searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
-  getBook: (bookId: string) => Promise<BookInfo>
+  getBook: (bookId: string, options?: BookLoadOptions) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) => Promise<{ status: string; message: string }>
-  onCookieProgress: (callback: (data: { step: string; message: string }) => void) => void
-  onDownloadProgress: (callback: (data: { taskId: string; current: number; total: number; phase: string }) => void) => void
-  openFolder: (subdir: string) => Promise<void>
+  getVolumeCovers: (bookId: string, volumes: string[]) => Promise<VolumeCoverSnapshot>
+  onCookieProgress: (callback: (data: CookieProgress) => void) => () => void
+  openFolder: (target: OpenFolderTarget) => Promise<void>
+  openLogFolder: () => Promise<void>
+  getLogStats: () => Promise<LogStats>
+  reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
 }
@@ -22,6 +34,9 @@ interface SearchResult {
   id: string
   author?: string
   status?: string
+  updateTime?: string
+  wordCount?: string
+  isAnimated?: boolean
   tags?: string
   desc?: string
 }

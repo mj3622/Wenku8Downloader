@@ -5,6 +5,8 @@ export interface SearchResult {
   author: string
   status: string
   updateTime: string
+  wordCount: string
+  isAnimated: boolean
   tags: string
   desc: string
 }
@@ -30,22 +32,4 @@ export interface BookInfo {
   book_id: string
   basic_info: BasicInfo
   volumes: Record<string, Chapter[]>
-}
-
-export interface Wenku8Config {
-  cookie: {
-    PHPSESSID: string
-    jieqiUserInfo: string
-    jieqiVisitInfo: string
-    cf_clearance: string
-  }
-  login: {
-    username: string
-    password: string
-  }
-  download: {
-    full_title: string
-    default_cover_index: number
-    download_path: string
-  }
 }

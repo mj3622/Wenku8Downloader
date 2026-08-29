@@ -1,8 +1,79 @@
-import type { WebCrawler } from './crawler'
+import type {
+  CrawlerRequestControlFactory,
+  CrawlerRequestKind,
+  WebCrawler,
+} from './crawler'
+import type { TitleFormat } from '../shared/config-types'
+import { formatBookTitle } from '../shared/title-format'
 import type { BasicInfo, Chapter } from './types'
+import {
+  createBookVersion,
+  type BookSnapshot,
+  type BookVersion,
+  type BookVersionFields,
+} from './book-cache-model'
+import type { BookResourceCache } from './book-cache-repository'
+import {
+  DownloadCancelledError,
+  throwIfDownloadCancelled,
+} from './download-cancellation'
+
+export interface ParsedBookPage {
+  basicInfo: BasicInfo
+  chapterIndexUrl: string
+  versionFields: BookVersionFields
+}
+
+interface ChapterImageLoad {
+  controller: AbortController
+  promise: Promise<string[] | null>
+  waiters: Set<symbol>
+}
+
+function waitForChapterImages(
+  entry: ChapterImageLoad,
+  signal?: AbortSignal,
+): Promise<string[] | null> {
+  throwIfDownloadCancelled(signal)
+  const waiter = Symbol('chapter-image-waiter')
+  entry.waiters.add(waiter)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = (): void => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      entry.waiters.delete(waiter)
+      if (entry.waiters.size === 0 && !entry.controller.signal.aborted) {
+        entry.controller.abort()
+      }
+    }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new DownloadCancelledError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    entry.promise.then(
+      (urls) => {
+        cleanup()
+        resolve(urls)
+      },
+      (error: unknown) => {
+        cleanup()
+        reject(error)
+      },
+    )
+  })
+}
 
 export class Book {
   readonly bookId: string
+  readonly version: BookVersion
+  readonly legacyImportGenerationKey: string
   baseChapterUrl: string = ''
   volumes: Record<string, Chapter[]> = {}
   pictureUrls: Record<string, string> = {}
@@ -18,179 +89,342 @@ export class Book {
     'cover': null,
   }
 
-  private crawler: WebCrawler
+  private readonly crawler: WebCrawler
+  private readonly requestControlFactory?: CrawlerRequestControlFactory
+  private readonly resources?: BookResourceCache
+  private readonly chapterImageUrlCache = new Map<string, string[] | null>()
+  private readonly chapterImageUrlLoads = new Map<string, ChapterImageLoad>()
 
-  private constructor(bookId: string, crawler: WebCrawler) {
+  private constructor(
+    bookId: string,
+    crawler: WebCrawler,
+    version: BookVersion,
+    legacyImportGenerationKey: string,
+    requestControlFactory?: CrawlerRequestControlFactory,
+    resources?: BookResourceCache,
+  ) {
     this.bookId = bookId
     this.crawler = crawler
+    this.version = version
+    this.legacyImportGenerationKey = legacyImportGenerationKey
+    this.requestControlFactory = requestControlFactory
+    this.resources = resources
   }
 
-  static async create(bookId: string, crawler: WebCrawler): Promise<Book> {
-    const book = new Book(bookId, crawler)
-
-    // 顺序与 Python 一致：章节 → 图片映射 → 基本信息
-    const [baseUrl, volumes] = await book.fetchChapters()
-    book.baseChapterUrl = baseUrl
-    book.volumes = volumes
-    book.pictureUrls = book.buildPictureUrlMap()
-    book.basicInfo = await book.fetchBasicInfo()
-
-    return book
+  get generationKey(): string {
+    return this.version.generationKey
   }
 
-  private async fetchChapters(): Promise<[string, Record<string, Chapter[]>]> {
-    const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl)
+  static async create(
+    bookId: string,
+    crawler: WebCrawler,
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+    resources?: BookResourceCache,
+  ): Promise<Book> {
+    const page = await Book.fetchPage(bookId, crawler, signal, requestControlFactory)
+    const version = createBookVersion(page.versionFields, Date.now())
+    return Book.createFromPage(
+      bookId,
+      crawler,
+      page,
+      version,
+      version.generationKey,
+      signal,
+      requestControlFactory,
+      resources,
+    )
+  }
 
-    // 找到 "小说目录" 链接
-    let chapterIndexUrl = ''
-    $('#content div a').each((_i, el) => {
-      const link = $(el)
+  static async fetchPage(
+    bookId: string,
+    crawler: WebCrawler,
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ): Promise<ParsedBookPage> {
+    const version = createBookVersion({ updatedAt: '', latestChapter: '', status: '' }, 0)
+    const parser = new Book(bookId, crawler, version, version.generationKey, requestControlFactory)
+    const bookUrl = `https://www.wenku8.net/book/${bookId}.htm`
+    const control = parser.requestControl('document', bookUrl)
+    const $ = control
+      ? await crawler.fetch(bookUrl, true, signal, control)
+      : await crawler.fetch(bookUrl, true, signal)
+
+    let rawChapterIndexUrl = ''
+    $('#content div a').each((_i, element) => {
+      const link = $(element)
       if (link.text().includes('小说目录') && link.attr('href')) {
-        chapterIndexUrl = link.attr('href')!
+        rawChapterIndexUrl = link.attr('href')!
         return false
       }
     })
-
-    if (!chapterIndexUrl) {
-      throw new Error('未找到小说目录链接')
-    }
-
-    const index$ = await this.crawler.fetch(chapterIndexUrl)
-    const baseUrl = chapterIndexUrl.replace(/index\.htm$/, '')
-
-    const volumes: Record<string, Chapter[]> = {}
-    let currentVolume = ''
-
-    index$('table.css tr').each((_i, tr) => {
-      const vcss = index$(tr).find('td.vcss')
-      if (vcss.length > 0) {
-        currentVolume = vcss.text().trim()
-        volumes[currentVolume] = []
-      } else {
-        const links = index$(tr).find('a')
-        links.each((_j, a) => {
-          const name = index$(a).text().trim()
-          const link = index$(a).attr('href')
-          if (currentVolume && name && link) {
-            volumes[currentVolume].push({ name, link })
-          }
-        })
-      }
-    })
-
-    return [baseUrl, volumes]
-  }
-
-  private buildPictureUrlMap(): Record<string, string> {
-    const map: Record<string, string> = {}
-    for (const [volName, chapters] of Object.entries(this.volumes)) {
-      for (const ch of chapters) {
-        if (ch.name === '插图') {
-          map[volName] = ch.link
-          break
-        }
-      }
-    }
-    return map
-  }
-
-  private async fetchBasicInfo(): Promise<BasicInfo> {
-    const bookUrl = `https://www.wenku8.net/book/${this.bookId}.htm`
-    const $ = await this.crawler.fetch(bookUrl)
+    if (!rawChapterIndexUrl) throw new Error('未找到小说目录链接')
 
     const contentDiv = $('#content')
     const table = contentDiv.find('table').first()
     const title = table.find('b').first().text().trim()
-
     const cells: string[] = []
-    table.find('tr').eq(2).find('td').each((_i, td) => {
-      cells.push($(td).text().trim())
-    })
+    table.find('tr').eq(2).find('td').each((_i, td) => cells.push($(td).text().trim()))
 
-    const category = cells[0]?.split('：')[1] || ''
-    const author = cells[1]?.split('：')[1] || ''
-    const status = cells[2]?.split('：')[1] || ''
-    const updateTime = cells[3]?.split('：')[1] || null
-    const length = cells[4]?.split('：')[1] || null
-
-    // 最新章节
     let latestChapter: string | null = null
-    $('#content span.hottext').each((_i, el) => {
-      const t = $(el).text()
-      if (t.includes('最新章节') || t.includes('最近章节')) {
-        const chapterSpan = $(el).nextAll('span').first()
-        const link = chapterSpan.find('a')
-        if (link.length > 0) {
-          latestChapter = link.text().trim()
-        }
-        return false
-      }
-    })
-
-    // 简介
     let description = ''
-    $('#content span.hottext').each((_i, el) => {
-      const t = $(el).text()
-      if (t.includes('内容简介')) {
-        const descSpan = $(el).nextAll('span').first()
-        if (descSpan.length > 0) {
-          description = descSpan.text().trim()
-        }
-        return false
+    $('#content span.hottext').each((_i, element) => {
+      const text = $(element).text()
+      if (text.includes('最新章节') || text.includes('最近章节')) {
+        const link = $(element).nextAll('span').first().find('a')
+        if (link.length > 0) latestChapter = link.text().trim()
+      }
+      if (text.includes('内容简介')) {
+        description = $(element).nextAll('span').first().text().trim()
       }
     })
 
-    // 封面
-    const imgs = contentDiv.find('img')
-    const cover = imgs.length > 0 ? imgs.eq(0).attr('src') || null : null
-
-    return {
+    const basicInfo: BasicInfo = {
       '标题': title,
-      '作者': author,
-      '出版社': category,
+      '作者': cells[1]?.split('：')[1] || '',
+      '出版社': cells[0]?.split('：')[1] || '',
       '最新章节': latestChapter,
-      '连载状态': status,
-      '更新时间': updateTime,
-      '全文长度': length,
+      '连载状态': cells[2]?.split('：')[1] || '',
+      '更新时间': cells[3]?.split('：')[1] || null,
+      '全文长度': cells[4]?.split('：')[1] || null,
       '简介': description,
-      'cover': cover,
+      'cover': contentDiv.find('img').first().attr('src') || null,
+    }
+    return {
+      basicInfo,
+      chapterIndexUrl: new URL(rawChapterIndexUrl, bookUrl).toString(),
+      versionFields: {
+        updatedAt: basicInfo['更新时间'] ?? '',
+        latestChapter: basicInfo['最新章节'] ?? '',
+        status: basicInfo['连载状态'],
+      },
     }
   }
 
-  async getChapterImageUrls(volumeName?: string): Promise<string[] | null> {
-    if (!volumeName) return null
-    const pictureUrl = this.pictureUrls[volumeName]
-    if (!pictureUrl) return null
-
-    const url = `${this.baseChapterUrl}${pictureUrl}`
-    const $ = await this.crawler.fetch(url)
-    const urls: string[] = []
-
-    $('img').each((_i, img) => {
-      const src = $(img).attr('src')
-      if (src) urls.push(src)
+  static async createFromPage(
+    bookId: string,
+    crawler: WebCrawler,
+    page: ParsedBookPage,
+    version: BookVersion,
+    legacyImportGenerationKey: string,
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+    resources?: BookResourceCache,
+  ): Promise<Book> {
+    const book = new Book(
+      bookId,
+      crawler,
+      version,
+      legacyImportGenerationKey,
+      requestControlFactory,
+      resources,
+    )
+    const control = book.requestControl('document', page.chapterIndexUrl)
+    const $ = control
+      ? await crawler.fetch(page.chapterIndexUrl, true, signal, control)
+      : await crawler.fetch(page.chapterIndexUrl, true, signal)
+    const volumes: Record<string, Chapter[]> = {}
+    let currentVolume = ''
+    $('table.css tr').each((_i, tr) => {
+      const volumeCell = $(tr).find('td.vcss')
+      if (volumeCell.length > 0) {
+        currentVolume = volumeCell.text().trim()
+        volumes[currentVolume] = []
+        return
+      }
+      $(tr).find('a').each((_j, anchor) => {
+        const name = $(anchor).text().trim()
+        const link = $(anchor).attr('href')
+        if (currentVolume && name && link) volumes[currentVolume].push({ name, link })
+      })
     })
-
-    return urls.length > 0 ? urls : null
+    book.baseChapterUrl = new URL('.', page.chapterIndexUrl).toString()
+    book.volumes = volumes
+    book.pictureUrls = book.buildPictureUrlMap()
+    book.basicInfo = { ...page.basicInfo }
+    return book
   }
 
-  async getCoverContent(): Promise<Buffer> {
-    const coverUrl = this.basicInfo['cover']
-    if (!coverUrl) throw new Error('无封面图片')
-    const content = await this.crawler.getImageContent(coverUrl)
-    if (!content) throw new Error('封面下载失败')
+  static fromSnapshot(
+    snapshot: BookSnapshot,
+    crawler: WebCrawler,
+    requestControlFactory?: CrawlerRequestControlFactory,
+    resources?: BookResourceCache,
+  ): Book {
+    const book = new Book(
+      snapshot.bookId,
+      crawler,
+      snapshot.version,
+      snapshot.legacyImportGenerationKey,
+      requestControlFactory,
+      resources,
+    )
+    book.baseChapterUrl = snapshot.baseChapterUrl
+    book.volumes = Object.fromEntries(
+      Object.entries(snapshot.volumes).map(([name, chapters]) => [
+        name,
+        chapters.map(chapter => ({ ...chapter })),
+      ]),
+    )
+    book.pictureUrls = book.buildPictureUrlMap()
+    book.basicInfo = { ...snapshot.basicInfo }
+    return book
+  }
+
+  toSnapshot(checkedAt: number): BookSnapshot {
+    return {
+      schemaVersion: 1,
+      bookId: this.bookId,
+      checkedAt,
+      version: {
+        fields: { ...this.version.fields },
+        generationKey: this.version.generationKey,
+        stable: this.version.stable,
+      },
+      legacyImportGenerationKey: this.legacyImportGenerationKey,
+      baseChapterUrl: this.baseChapterUrl,
+      volumes: Object.fromEntries(
+        Object.entries(this.volumes).map(([name, chapters]) => [
+          name,
+          chapters.map(chapter => ({ ...chapter })),
+        ]),
+      ),
+      basicInfo: { ...this.basicInfo },
+    }
+  }
+
+  private requestControl(
+    kind: CrawlerRequestKind,
+    url: string,
+    requestControlFactory = this.requestControlFactory,
+  ) {
+    if (!requestControlFactory) return undefined
+    let absoluteUrl = url
+    try {
+      absoluteUrl = new URL(url, 'https://www.wenku8.net/').toString()
+    } catch {
+      // WebCrawler surfaces malformed URLs; the scheduler still receives a bounded key.
+    }
+    return requestControlFactory(kind, absoluteUrl)
+  }
+
+  private buildPictureUrlMap(): Record<string, string> {
+    const map: Record<string, string> = {}
+    for (const [volumeName, chapters] of Object.entries(this.volumes)) {
+      const illustration = chapters.find(chapter => chapter.name === '插图')
+      if (illustration) map[volumeName] = illustration.link
+    }
+    return map
+  }
+
+  async getChapterImageUrls(
+    volumeName?: string,
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ): Promise<string[] | null> {
+    if (!volumeName) return null
+    throwIfDownloadCancelled(signal)
+    if (this.chapterImageUrlCache.has(volumeName)) {
+      return this.cloneUrls(this.chapterImageUrlCache.get(volumeName) ?? null)
+    }
+    const pictureUrl = this.pictureUrls[volumeName]
+    if (!pictureUrl) return null
+    const url = new URL(pictureUrl, this.baseChapterUrl).toString()
+    let entry = this.chapterImageUrlLoads.get(volumeName)
+    if (entry?.controller.signal.aborted) {
+      this.chapterImageUrlLoads.delete(volumeName)
+      entry = undefined
+    }
+    if (!entry) {
+      const controller = new AbortController()
+      const promise = this.loadChapterImageUrls(url, controller.signal, requestControlFactory)
+      const created: ChapterImageLoad = { controller, promise, waiters: new Set() }
+      entry = created
+      this.chapterImageUrlLoads.set(volumeName, created)
+      promise.then(
+        (urls) => {
+          if (this.chapterImageUrlLoads.get(volumeName) !== created) return
+          this.chapterImageUrlLoads.delete(volumeName)
+          if (created.controller.signal.aborted) return
+          this.chapterImageUrlCache.set(volumeName, this.cloneUrls(urls))
+        },
+        () => {
+          if (this.chapterImageUrlLoads.get(volumeName) === created) {
+            this.chapterImageUrlLoads.delete(volumeName)
+          }
+        },
+      )
+    }
+    return this.cloneUrls(await waitForChapterImages(entry, signal))
+  }
+
+  private async loadChapterImageUrls(
+    url: string,
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ): Promise<string[] | null> {
+    const guard = this.resources?.captureResourceWriteGuard(this.bookId, this.generationKey)
+    const cached = await this.resources?.loadIllustration(this.bookId, this.generationKey, url)
+    if (cached !== undefined) return cached
+    const control = this.requestControl('document', url, requestControlFactory)
+    const $ = control
+      ? await this.crawler.fetch(url, true, signal, control)
+      : await this.crawler.fetch(url, true, signal)
+    const urls: string[] = []
+    $('img').each((_i, image) => {
+      const source = $(image).attr('src')
+      if (!source) return
+      try {
+        urls.push(new URL(source, url).toString())
+      } catch {
+        // Ignore malformed illustration sources.
+      }
+    })
+    const result = urls.length > 0 ? urls : null
+    if (guard) {
+      await this.resources?.saveIllustration(
+        this.bookId,
+        this.generationKey,
+        url,
+        result,
+        guard,
+      )
+    }
+    return result
+  }
+
+  async getCoverContent(
+    signal?: AbortSignal,
+    requestControlFactory?: CrawlerRequestControlFactory,
+  ): Promise<Buffer> {
+    const rawCoverUrl = this.basicInfo['cover']
+    if (!rawCoverUrl) throw new Error('无封面图片')
+    const coverUrl = new URL(rawCoverUrl, `https://www.wenku8.net/book/${this.bookId}.htm`).toString()
+    const guard = this.resources?.captureResourceWriteGuard(this.bookId, this.generationKey)
+    const cached = await this.resources?.loadCover(this.bookId, this.generationKey, coverUrl)
+    if (cached) return Buffer.from(cached)
+    const control = this.requestControl('image', coverUrl, requestControlFactory)
+    const content = control
+      ? await this.crawler.getImageContent(coverUrl, 3, undefined, signal, control)
+      : await this.crawler.getImageContent(coverUrl, 3, undefined, signal)
+    if (!content || content.byteLength === 0) throw new Error('封面下载失败')
+    if (guard) {
+      await this.resources?.saveCover(
+        this.bookId,
+        this.generationKey,
+        coverUrl,
+        content,
+        guard,
+      )
+    }
     return content
   }
 
-  getFormattedTitle(format: 'FULL' | 'OUT' | 'IN'): string {
-    const title = this.basicInfo['标题']
-    if (format === 'FULL') return title
+  private cloneUrls(urls: string[] | null): string[] | null {
+    return urls ? [...urls] : null
+  }
 
-    const match = title.match(/^(.*?)\((.*?)\)$/)
-    if (!match) return title
-
-    if (format === 'OUT') return match[1].trim()
-    return match[2].trim()
+  getFormattedTitle(format: TitleFormat): string {
+    return formatBookTitle(this.basicInfo['标题'], format)
   }
 }

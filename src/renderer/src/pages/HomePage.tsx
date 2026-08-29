@@ -1,154 +1,172 @@
 import { Link } from 'react-router-dom'
+import {
+  IconArrowRight,
+  IconBook2,
+  IconBrandGithub,
+  IconCode,
+  IconCompass,
+  IconDownload,
+  IconGauge,
+  IconSearch,
+  IconShieldLock,
+  type Icon,
+} from '@tabler/icons-react'
+import logoUrl from '../../../../resources/icon.png'
+import { api } from '../api/client'
+import { toast } from '../stores/toastStore'
+import { getUserFeedback } from '../utils/userFeedback'
+
+const GITHUB_URL = 'https://github.com/mj3622/Wenku8Downloader'
+
+const capabilities: Array<{ icon: Icon; title: string; description: string }> = [
+  {
+    icon: IconCompass,
+    title: '发现与排行榜',
+    description: '以封面浏览首页推荐、热门内容和完整榜单。',
+  },
+  {
+    icon: IconSearch,
+    title: '精准检索',
+    description: '按书名、作者或作品编号快速定位目标作品。',
+  },
+  {
+    icon: IconBook2,
+    title: 'EPUB 导出',
+    description: '支持整本合并或按分卷导出，保留目录、封面与插图。',
+  },
+  {
+    icon: IconDownload,
+    title: '下载管理',
+    description: '集中查看进度、历史与失败任务，支持取消和重试。',
+  },
+]
+
+const principles: Array<{ icon: Icon; title: string; description: string }> = [
+  {
+    icon: IconShieldLock,
+    title: '本地优先',
+    description: '配置、任务和缓存留在本机，不接入项目自建云端服务。',
+  },
+  {
+    icon: IconGauge,
+    title: '节制访问',
+    description: '统一管理请求间隔、重试和限流，尽量降低对数据源的额外压力。',
+  },
+  {
+    icon: IconCode,
+    title: '开源透明',
+    description: '项目以 MIT 许可证开源，实现、问题与发布记录均可在 GitHub 查看。',
+  },
+]
 
 export default function HomePage() {
+  const openExternal = async (url: string): Promise<void> => {
+    try {
+      await api.openExternal(url)
+    } catch (error) {
+      toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
   return (
-    <div className="max-w-2xl">
-      {/* 版本号 + GitHub */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="inline-block px-2.5 py-0.5 rounded-full bg-apple-accent-light text-apple-accent text-[11px] font-medium">
-          v2.0.0
-        </span>
-        <a
-          onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://github.com/mj3622/Wenku8Downloader') }}
-          href="https://github.com/mj3622/Wenku8Downloader"
-          className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border border-apple-border-subtle text-[11px] text-apple-heading font-medium hover:text-apple-accent hover:border-apple-accent/30 transition-colors cursor-pointer"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
-          GitHub 仓库
-        </a>
-      </div>
-
-      {/* Hero */}
-      <div className="mb-6">
-        <h1 className="text-[30px] font-bold text-apple-heading tracking-tight mb-4">
-          轻小说文库下载器
-        </h1>
-        <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-        <p className="text-[14px] text-apple-body whitespace-nowrap">
-          一款桌面端轻小说下载工具，支持按编号、作者、书名检索作品，并导出为 EPUB 格式，同时支持插图下载。
-        </p>
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex gap-3 mb-10">
-        <Link
-          to="/search"
-          className="flex-1 px-4 py-2.5 rounded-lg bg-apple-accent text-white text-[13px] font-semibold text-center hover:opacity-90 transition-opacity"
-        >
-          检索作品
-        </Link>
-        <Link
-          to="/download"
-          className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
-        >
-          下载历史
-        </Link>
-        <Link
-          to="/config"
-          className="flex-1 px-4 py-2.5 rounded-lg border border-apple-border-subtle text-apple-heading text-[13px] font-semibold text-center hover:border-apple-accent/30 hover:text-apple-accent transition-colors"
-        >
-          配置
-        </Link>
-      </div>
-
-      {/* 快速入门 */}
-      <section className="mb-10">
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">快速入门</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="space-y-3">
-          <Step index={1} title="配置账号与 Cookie" to="/config">
-            首次使用请先在「配置」页面填写文库账号密码，保存后自动登录获取 Cookie。可在「下载设置」中自定义文件保存路径。
-          </Step>
-          <Step index={2} title="检索作品" to="/search">
-            进入「检索」页面，可以通过编号直接查询指定书籍，或输入作者名 / 书名模糊搜索，找到目标作品后点击「查看详情」。
-          </Step>
-          <Step index={3} title="下载小说" to="/download">
-            在书籍详情页选择「整本下载」导出完整 EPUB，或按卷勾选「分卷下载」；也可以单独下载插图。下载完成后可在「下载历史」中点击文件夹图标打开文件所在目录。
-          </Step>
+    <div className="max-w-5xl pb-8">
+      <section className="rounded-2xl border border-apple-border-subtle bg-white px-6 py-6 lg:px-8 lg:py-7">
+        <div className="flex items-start gap-5">
+          <img src={logoUrl} alt="" aria-hidden="true" className="h-16 w-16 flex-none" />
+          <div className="min-w-0 flex-1">
+            <div className="mb-3 flex flex-wrap items-center gap-2.5">
+              <span className="rounded-full bg-apple-accent-light px-2.5 py-1 text-xs font-medium text-apple-accent">
+                v2.1.0
+              </span>
+              <span className="text-[13px] font-medium text-apple-secondary">
+                面向 Wenku8 的桌面端开源工具
+              </span>
+            </div>
+            <h1 className="text-[30px] font-bold tracking-tight text-apple-heading">
+              轻小说文库下载器
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-apple-body">
+              从轻小说文库发现、检索并整理喜欢的作品，将章节、封面和插图导出为适合阅读器的 EPUB 文件。
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <Link
+                to="/discover"
+                className="motion-pressable inline-flex items-center gap-1.5 rounded-lg bg-apple-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/30"
+              >
+                进入发现
+                <IconArrowRight aria-hidden="true" size={17} stroke={1.8} />
+              </Link>
+              <a
+                href={GITHUB_URL}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void openExternal(GITHUB_URL)
+                }}
+                className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-white px-4 py-2.5 text-sm font-medium text-apple-secondary hover:bg-apple-bg hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+              >
+                <IconBrandGithub aria-hidden="true" size={17} stroke={1.8} />
+                GitHub 仓库
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* 功能概览 */}
-      <section className="mb-10">
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">功能概览</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="grid grid-cols-2 gap-3">
-          <FeatureCard
-            title="EPUB 整本下载"
-            desc="将所有卷合并导出为一个 EPUB 文件，包含封面、插图与目录"
-          />
-          <FeatureCard
-            title="分卷下载"
-            desc="按卷分别下载，每卷生成独立的 EPUB 文件，方便分册阅读"
-          />
-          <FeatureCard
-            title="插图下载"
-            desc="单独提取并下载指定卷的插图图片，适合收藏高清原图"
-          />
-          <FeatureCard
-            title="自动获取 Cookie"
-            desc="内置 Chrome 浏览器自动化，一键绕过 Cloudflare 防护获取有效 Cookie"
-          />
+      <section aria-labelledby="about-project-title" className="mt-8 max-w-3xl">
+        <SectionTitle id="about-project-title">项目定位</SectionTitle>
+        <div className="space-y-3 text-sm leading-6 text-apple-body">
+          <p>
+            这是一款面向个人阅读整理的桌面工具，把找书、作品详情、下载任务和 EPUB 导出收拢到同一个简洁界面中。
+          </p>
+          <p className="text-apple-secondary">
+            本项目不提供内容或独立账号服务，使用时仍需遵守数据源站点规则及相关版权要求。
+          </p>
         </div>
       </section>
 
-      {/* 提示 */}
-      <section>
-        <h3 className="text-[17px] font-semibold text-apple-heading tracking-tight mb-3">提示</h3>
-        <div className="w-8 h-0.5 bg-apple-accent/30 rounded-full mb-4" />
-        <div className="rounded-xl border border-apple-border-subtle bg-apple-card p-4">
-          <ul className="text-[12px] text-apple-secondary space-y-1.5 leading-relaxed">
-            <li>
-              · 本工具仅支持{' '}
-              <strong className="text-apple-heading">
-                轻小说文库 (<a onClick={(e) => { e.preventDefault(); window.electronAPI.openExternal('https://www.wenku8.net') }} href="https://www.wenku8.net" className="text-apple-accent hover:underline cursor-pointer">wenku8.net</a>)
-              </strong>{' '}
-              的内容下载
-            </li>
-            <li>· Cookie 有效期为数小时至数天不等，下载失败时可重新获取 Cookie 后再试</li>
-            <li>
-              · EPUB 文件默认保存在系统下载目录，可在「配置」页面自定义存储路径
-            </li>
-          </ul>
+      <section aria-labelledby="capabilities-title" className="mt-8">
+        <SectionTitle id="capabilities-title">核心能力</SectionTitle>
+        <div className="grid gap-x-10 gap-y-6 rounded-xl border border-apple-border-subtle bg-white px-5 py-5 sm:grid-cols-2 lg:px-6">
+          {capabilities.map(item => <InfoItem key={item.title} {...item} />)}
+        </div>
+      </section>
+
+      <section aria-labelledby="principles-title" className="mt-8">
+        <SectionTitle id="principles-title">项目原则</SectionTitle>
+        <div className="grid gap-5 rounded-xl border border-apple-border-subtle bg-white px-5 py-5 md:grid-cols-3 lg:px-6">
+          {principles.map(item => <InfoItem key={item.title} {...item} />)}
         </div>
       </section>
     </div>
   )
 }
 
-function Step({ index, title, to, children }: {
-  index: number
-  title: string
-  to: string
-  children: string
-}) {
+function SectionTitle({ id, children }: { id: string; children: string }) {
   return (
-    <Link
-      to={to}
-      className="block p-4 rounded-xl border border-apple-border-subtle bg-apple-card
-                 hover:border-apple-accent/20 transition-all"
-    >
-      <div className="flex items-start gap-4">
-        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-apple-accent-light text-apple-accent
-                         text-[13px] font-semibold flex items-center justify-center mt-0.5">
-          {index}
-        </span>
-        <div>
-          <h4 className="text-[14px] font-semibold text-apple-heading mb-1">{title}</h4>
-          <p className="text-[12px] text-apple-secondary leading-relaxed">{children}</p>
-        </div>
-      </div>
-    </Link>
+    <h2 id={id} className="mb-3 text-lg font-semibold tracking-tight text-apple-heading">
+      {children}
+    </h2>
   )
 }
 
-function FeatureCard({ title, desc }: { title: string; desc: string }) {
+function InfoItem({
+  icon: Glyph,
+  title,
+  description,
+}: {
+  icon: Icon
+  title: string
+  description: string
+}) {
   return (
-    <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card">
-      <h4 className="text-[13px] font-semibold text-apple-heading mb-1">{title}</h4>
-      <p className="text-[12px] text-apple-secondary leading-relaxed">{desc}</p>
+    <div className="flex gap-3">
+      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-apple-bg text-apple-secondary">
+        <Glyph aria-hidden="true" size={20} stroke={1.7} />
+      </span>
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold text-apple-heading">{title}</h3>
+        <p className="mt-1 text-sm leading-5 text-apple-secondary">{description}</p>
+      </div>
     </div>
   )
 }

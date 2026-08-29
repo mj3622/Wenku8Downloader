@@ -1,48 +1,111 @@
-export type CookieProgress = {
-  step: string
-  message: string
-}
+import type {
+  DownloadConfig,
+  LogConfig,
+  UpdateCredentialsInput,
+} from '../../../shared/config-types'
+import type {
+  CookieProgress,
+  BookLoadOptions,
+  CacheClearResult,
+  DiscoveryHome,
+  DownloadHistoryScope,
+  DownloadStateEvent,
+  EnqueueDownloadInput,
+  LogStats,
+  OpenFolderTarget,
+  RankingPage,
+  RankingType,
+  VolumeCoverSnapshot,
+} from '../../../shared/ipc-types'
+import {
+  toUserFacingError,
+  type FeedbackContext,
+} from '../utils/userFeedback'
 
-export type DownloadProgress = {
-  taskId: string
-  current: number
-  total: number
-  phase: string
+async function invoke<T>(
+  context: FeedbackContext,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    throw toUserFacingError(error, context)
+  }
 }
 
 export const api = {
   // 配置
-  getConfig: () => window.electronAPI.getConfig(),
+  getConfig: (context: FeedbackContext = 'config-load') =>
+    invoke(context, () => window.electronAPI.getConfig()),
+  updateDownloadConfig: (input: DownloadConfig) =>
+    invoke('config-save', () => window.electronAPI.updateDownloadConfig(input)),
+  updateLogConfig: (input: LogConfig) =>
+    invoke('log-save', () => window.electronAPI.updateLogConfig(input)),
+  updateCredentials: (input: UpdateCredentialsInput) =>
+    invoke('account-save', () => window.electronAPI.updateCredentials(input)),
+  resetCorruptConfig: () =>
+    invoke('config-reset', () => window.electronAPI.resetCorruptConfig()),
 
-  setConfig: (section: string, key: string, value: string) =>
-    window.electronAPI.setConfig(section, key, value),
-
-  // Cookie
-  autoGetCookie: () => window.electronAPI.autoGetCookie(),
+  // 登录状态
+  autoGetCookie: (operationId: string) =>
+    invoke('login', () => window.electronAPI.autoGetCookie(operationId)),
   getCookieProgress: (callback: (data: CookieProgress) => void) => {
-    window.electronAPI.onCookieProgress(callback)
+    return window.electronAPI.onCookieProgress(callback)
   },
 
   // 搜索
-  searchAuthor: (q: string) => window.electronAPI.searchAuthor(q),
-  searchTitle: (q: string) => window.electronAPI.searchTitle(q),
+  searchAuthor: (q: string) => invoke('search', () => window.electronAPI.searchAuthor(q)),
+  searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
+
+  // 发现
+  getDiscoveryHome: (refresh = false): Promise<DiscoveryHome> => (
+    invoke('discovery', () => window.electronAPI.getDiscoveryHome(refresh))
+  ),
+  getRanking: (type: RankingType, page: number, refresh = false): Promise<RankingPage> => (
+    invoke('discovery', () => window.electronAPI.getRanking(type, page, refresh))
+  ),
 
   // 书籍
-  getBook: (id: string) => window.electronAPI.getBook(id),
-  getBookImages: (id: string) => window.electronAPI.getBookImages(id),
+  getBook: (id: string, options?: BookLoadOptions) => (
+    invoke('book', () => window.electronAPI.getBook(id, options))
+  ),
+  getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
+  getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
+    invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
 
   // 下载
-  downloadEpub: (bookId: string, volumeName?: string, taskId?: string) =>
-    window.electronAPI.downloadEpub(bookId, volumeName, taskId),
-  downloadImages: (bookId: string, volumeName?: string, taskId?: string) =>
-    window.electronAPI.downloadImages(bookId, volumeName, taskId),
-  getDownloadProgress: (callback: (data: DownloadProgress) => void) => {
-    window.electronAPI.onDownloadProgress(callback)
-  },
+  getDownloadSnapshot: () =>
+    invoke('download', () => window.electronAPI.getDownloadSnapshot()),
+  enqueueDownload: (input: EnqueueDownloadInput) =>
+    invoke('download', () => window.electronAPI.enqueueDownload(input)),
+  cancelDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.cancelDownload(taskId)),
+  retryDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.retryDownload(taskId)),
+  removeDownload: (taskId: string) =>
+    invoke('download', () => window.electronAPI.removeDownload(taskId)),
+  clearDownloadHistory: (scope: DownloadHistoryScope) =>
+    invoke('download', () => window.electronAPI.clearDownloadHistory(scope)),
+  importLegacyDownloadHistory: (tasks: unknown[]) =>
+    invoke('download', () => window.electronAPI.importLegacyDownloadHistory(tasks)),
+  onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) =>
+    window.electronAPI.onDownloadStateChanged(callback),
+
+  // 缓存
+  clearCache: (): Promise<CacheClearResult> =>
+    invoke('cache-clear', () => window.electronAPI.clearCache()),
 
   // 文件
-  openFolder: (subdir: string) => window.electronAPI.openFolder(subdir),
-  selectFolder: () => window.electronAPI.selectFolder(),
+  openFolder: (target: OpenFolderTarget) =>
+    invoke('open-folder', () => window.electronAPI.openFolder(target)),
+  openLogFolder: () =>
+    invoke('open-log-folder', () => window.electronAPI.openLogFolder()),
+  getLogStats: (): Promise<LogStats> =>
+    invoke('log-stats', () => window.electronAPI.getLogStats()),
+  selectFolder: () =>
+    invoke('select-folder', () => window.electronAPI.selectFolder()),
+  openExternal: (url: string) =>
+    invoke('open-external', () => window.electronAPI.openExternal(url)),
 }
 
 export type SearchResult = {
@@ -52,6 +115,8 @@ export type SearchResult = {
   author?: string
   status?: string
   updateTime?: string
+  wordCount?: string
+  isAnimated?: boolean
   tags?: string
   desc?: string
 }

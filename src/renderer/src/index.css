@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
@@ -14,4 +19,112 @@ body {
 
 * {
   -webkit-font-smoothing: antialiased;
+}
+
+.toast-card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 180ms var(--motion-ease-out),
+    transform 180ms var(--motion-ease-out);
+}
+
+.toast-card--closing {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+}
+
+@starting-style {
+  .toast-card {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+.motion-pressable {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 160ms;
+  transition-timing-function: var(--motion-ease-out);
+}
+
+.motion-popover {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transform-origin: top right;
+  transition:
+    opacity 140ms var(--motion-ease-out),
+    transform 180ms var(--motion-ease-out);
+}
+
+@starting-style {
+  .motion-popover {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+.download-progress {
+  transition: transform 240ms var(--motion-ease-out);
+}
+
+.discovery-cover-grid {
+  --discovery-columns-compact: 4;
+  --discovery-columns-wide: 8;
+}
+
+.discovery-cover-grid > * {
+  flex: 1 1 calc(100% / var(--discovery-columns-compact) - 0.75rem);
+}
+
+@media (min-width: 1080px) {
+  .discovery-cover-grid > * {
+    flex-basis: calc(100% / var(--discovery-columns-wide) - 0.75rem);
+  }
+}
+
+.motion-spinner {
+  animation-duration: 700ms;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion-pressable:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-card {
+    transform: none;
+    transition: opacity 120ms ease;
+  }
+
+  .toast-card--closing {
+    opacity: 0;
+    transform: none;
+  }
+
+  .motion-pressable {
+    transition-property: color, background-color, border-color, opacity;
+  }
+
+  .motion-popover {
+    transform: none;
+    transition: opacity 120ms ease;
+  }
+
+  .download-progress {
+    transition: none;
+  }
+
+  .motion-spinner {
+    animation: none;
+  }
+
+  @starting-style {
+    .toast-card,
+    .motion-popover {
+      opacity: 0;
+      transform: none;
+    }
+  }
 }

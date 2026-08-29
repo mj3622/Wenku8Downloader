@@ -1,5 +1,5 @@
-import { config } from './config-manager'
-import type { WebCrawler } from './crawler'
+import type { CrawlerConfig, WebCrawler } from './crawler'
+import { hasAuthenticatedCookies, type CookieSnapshot } from './config/secret-types'
 
 export type CookieProgress = {
   step: 'login' | 'done'
@@ -11,40 +11,46 @@ export type CookieResult = {
 }
 
 export class CookieService {
-  private crawler: WebCrawler
-
-  constructor(crawler: WebCrawler) {
-    this.crawler = crawler
-  }
+  constructor(
+    private readonly crawler: Pick<WebCrawler, 'getCookie'>,
+    private readonly config: Pick<CrawlerConfig, 'getCredentials' | 'getCookies'>,
+  ) {}
 
   /**
-   * 通过 net.fetch POST 登录轻小说文库
-   * 已验证该接口不会被 Cloudflare 拦截
+   * 使用共享 Wenku8 会话登录；遇到 Cloudflare 验证时由 crawler 打开验证窗口。
    */
   async acquire(onProgress?: (p: CookieProgress) => void): Promise<CookieResult> {
     onProgress?.({ step: 'login', message: '正在登录...' })
-    const loginCookies = await this.login()
+    const loginCookies = await this.login(() => {
+      onProgress?.({
+        step: 'login',
+        message: 'Cloudflare 可能连续显示多轮验证，请按页面提示逐步完成；全部完成后会自动登录',
+      })
+    })
+    if (!hasAuthenticatedCookies(loginCookies)) {
+      throw new Error('登录后未检测到有效登录状态')
+    }
     onProgress?.({ step: 'login', message: '登录成功' })
-    onProgress?.({ step: 'done', message: '登录成功，已获取 Cookie' })
+    onProgress?.({ step: 'done', message: '登录成功，登录状态已更新' })
     return { loginCookies }
   }
 
-  private async login(): Promise<Record<string, string>> {
-    const loginCfg = config.getAll().login
-    const username = loginCfg?.username
-    const password = loginCfg?.password
+  private async login(
+    onCloudflareChallenge?: () => void,
+  ): Promise<Omit<CookieSnapshot, 'cf_clearance'>> {
+    const { username, password } = this.config.getCredentials()
 
     if (!username || !password) {
       throw new Error('请先配置登录账号和密码')
     }
 
-    await this.crawler.getCookie()
+    await this.crawler.getCookie(onCloudflareChallenge)
 
-    const cfg = config.getAll()
+    const cookies = this.config.getCookies()
     return {
-      PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
-      jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
-      jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
+      PHPSESSID: cookies.PHPSESSID,
+      jieqiUserInfo: cookies.jieqiUserInfo,
+      jieqiVisitInfo: cookies.jieqiVisitInfo,
     }
   }
 }

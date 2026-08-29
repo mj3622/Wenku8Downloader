@@ -1,23 +1,141 @@
-import { net, session } from 'electron'
+import { net, session, type Session } from 'electron'
 import * as cheerio from 'cheerio'
 import iconv from 'iconv-lite'
-import { config } from './config-manager'
+import {
+  COOKIE_NAMES,
+  hasAuthenticatedCookies,
+  type CookieSnapshot,
+  type Credentials,
+} from './config/secret-types'
 import type { SearchResult } from './types'
 import { sleep } from './utils'
+import {
+  sleepWithSignal,
+  throwIfDownloadCancelled,
+  withRequestTimeout,
+} from './download-cancellation'
+import { logger } from './logging/logger'
+import { sanitizeLogText } from './logging/redaction'
+import type { CloudflareChallengeSolver } from './cloudflare-challenge'
+import {
+  WENKU_BASE_URL,
+  wenkuRequestCredentials,
+} from './wenku-network'
+
+type CheerioDocument = ReturnType<typeof cheerio.load>
 
 const COMMON_HEADERS: Record<string, string> = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Upgrade-Insecure-Requests': '1',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
 
-const BASE_URL = 'https://www.wenku8.net'
+const BASE_URL = WENKU_BASE_URL
+const REQUEST_TIMEOUT_MS = 30_000
+const LOGIN_COOKIE_NAMES = ['PHPSESSID', 'jieqiUserInfo', 'jieqiVisitInfo'] as const
+export interface CrawlerConfig {
+  getCredentialRevision(): number
+  getCredentials(): Readonly<Credentials>
+  getCookies(): Readonly<CookieSnapshot>
+  replaceCookies(input: CookieSnapshot): void
+}
+
+export type CrawlerNetworkSession = Pick<Session, 'cookies' | 'fetch'>
+
+export function isCloudflareChallengeResponse(
+  response: { headers?: { get(name: string): string | null } },
+): boolean {
+  return response.headers?.get('cf-mitigated')?.trim().toLowerCase() === 'challenge'
+}
+
+export interface CrawlerResponseInfo {
+  status: number
+  latencyMs: number
+  retryAfterMs?: number
+}
+
+export interface CrawlerRetryInfo {
+  attempt: number
+  status?: number
+  retryAfterMs?: number
+  error: Error
+}
+
+export interface CrawlerRequestControl {
+  beforeAttempt?: (signal?: AbortSignal) => Promise<void>
+  afterAttempt?: () => void
+  onResponse?: (info: CrawlerResponseInfo) => void
+  getRetryDelay?: (info: CrawlerRetryInfo) => number
+  onRetry?: (info: CrawlerRetryInfo & { delayMs: number }) => void
+}
+
+export type CrawlerRequestKind = 'document' | 'image'
+
+export type CrawlerRequestControlFactory = (
+  kind: CrawlerRequestKind,
+  url: string,
+) => CrawlerRequestControl
+
+class CredentialsChangedDuringLoginError extends Error {
+  constructor() {
+    super('登录期间账号已变更，请重新登录')
+    this.name = 'CredentialsChangedDuringLoginError'
+  }
+}
 
 function formatHttpError(status: number): string {
-  if (status === 429) return '访问过于频繁（HTTP 429），服务器限制了请求频率，请稍后重试'
-  if (status === 403) return '访问被拒绝（HTTP 403），Cookie 可能已过期，请尝试刷新 Cookie'
-  return `HTTP ${status}`
+  if (status === 429) return '操作过于频繁，请稍后重试'
+  if (status === 403) return '登录状态已失效，请重新登录后重试'
+  return '服务暂时不可用，请稍后重试'
+}
+
+export class HttpStatusError extends Error {
+  readonly status: number
+  readonly retryAfterMs?: number
+
+  constructor(status: number, retryAfterMs?: number) {
+    super(formatHttpError(status))
+    this.name = 'HttpStatusError'
+    this.status = status
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
+export class CloudflareChallengeResponseError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super('网站要求完成安全验证，请前往配置页手动刷新登录状态')
+    this.name = 'CloudflareChallengeResponseError'
+    this.status = status
+  }
+}
+
+export function parseRetryAfter(value: string | null | undefined, nowMs = Date.now()): number | undefined {
+  const normalized = value?.trim()
+  if (!normalized) return undefined
+  if (/^\d+$/.test(normalized)) return Number(normalized) * 1_000
+  const dateMs = Date.parse(normalized)
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - nowMs) : undefined
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  try {
+    return String(error)
+  } catch {
+    return 'Unknown error'
+  }
+}
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(errorMessage(error))
+}
+
+async function discardResponseBody(
+  response: { body?: { cancel(): Promise<void> } | null },
+): Promise<void> {
+  await response.body?.cancel().catch(() => undefined)
 }
 
 function encodeKey(key: string): string {
@@ -30,109 +148,368 @@ function encodeKey(key: string): string {
   return result
 }
 
+function parseSearchStatus(statusText: string) {
+  const metadata = {
+    status: '',
+    updateTime: '',
+    wordCount: '',
+    isAnimated: false,
+  }
+
+  for (const part of statusText.split('/').map((value) => value.trim()).filter(Boolean)) {
+    const updateMatch = part.match(/^更新[:：]\s*(.+)$/)
+    if (updateMatch) {
+      metadata.updateTime = updateMatch[1].trim()
+      continue
+    }
+
+    const wordCountMatch = part.match(/^字数[:：]\s*(.+)$/)
+    if (wordCountMatch) {
+      metadata.wordCount = wordCountMatch[1].trim()
+      continue
+    }
+
+    if (part === '已动画化') {
+      metadata.isAnimated = true
+      continue
+    }
+
+    if (!metadata.status) metadata.status = part
+  }
+
+  return metadata
+}
+
 export class WebCrawler {
   private cookies: Record<string, string>
-  constructor(cookie?: Record<string, string>) {
+  private readonly networkSession: CrawlerNetworkSession
+
+  constructor(
+    private readonly config: CrawlerConfig,
+    cookie?: Record<string, string>,
+    private readonly cloudflareChallenge?: CloudflareChallengeSolver,
+    networkSession?: CrawlerNetworkSession,
+  ) {
     this.cookies = cookie ?? this.getCookieDefaults()
-
-    void this.injectCookies()
-  }
-
-  syncCookies(): void {
-    this.cookies = this.getCookieDefaults()
-    this.injectCookies()
-  }
-
-  private getCookieDefaults(): Record<string, string> {
-    const cfg = config.getAll()
-    return {
-      PHPSESSID: cfg.cookie?.PHPSESSID ?? '',
-      jieqiUserInfo: cfg.cookie?.jieqiUserInfo ?? '',
-      jieqiVisitInfo: cfg.cookie?.jieqiVisitInfo ?? '',
-      cf_clearance: cfg.cookie?.cf_clearance ?? '',
+    this.networkSession = networkSession ?? {
+      cookies: session.defaultSession.cookies,
+      fetch: (input, init) => net.fetch(input, init),
     }
   }
 
-  private async injectCookies(): Promise<void> {
-    const ses = session.defaultSession
+  async syncCookies(): Promise<void> {
+    this.cookies = this.getCookieDefaults()
+    await this.injectCookies(true)
+  }
+
+  private getCookieDefaults(): Record<string, string> {
+    const cookies = this.config.getCookies()
+    return {
+      PHPSESSID: cookies.PHPSESSID,
+      jieqiUserInfo: cookies.jieqiUserInfo,
+      jieqiVisitInfo: cookies.jieqiVisitInfo,
+      cf_clearance: cookies.cf_clearance,
+    }
+  }
+
+  private async rejectIfCredentialsChanged(expectedRevision: number): Promise<void> {
+    if (this.config.getCredentialRevision() === expectedRevision) return
+    await this.syncCookies()
+    throw new CredentialsChangedDuringLoginError()
+  }
+
+  private async injectCookies(clearExisting = false): Promise<void> {
+    if (clearExisting) {
+      for (const name of COOKIE_NAMES) {
+        await this.networkSession.cookies.remove(BASE_URL, name)
+      }
+    }
     for (const [name, value] of Object.entries(this.cookies)) {
       if (value) {
-        await ses.cookies.set({
+        await this.networkSession.cookies.set({
           url: BASE_URL,
           name,
           value,
           domain: '.wenku8.net',
           path: '/',
+          ...(name === 'cf_clearance'
+            ? { secure: true, sameSite: 'no_restriction' as const }
+            : {}),
         })
       }
     }
   }
 
-  async fetch(url: string): Promise<cheerio.CheerioAPI>
-  async fetch(url: string, parse: false): Promise<Buffer>
-  async fetch(url: string, parse: boolean = true): Promise<cheerio.CheerioAPI | Buffer> {
+  private async persistClearanceFromSession(): Promise<void> {
+    try {
+      const sessionCookies = await this.networkSession.cookies.get({
+        url: BASE_URL,
+        name: 'cf_clearance',
+      })
+      const clearance = sessionCookies.find((cookie) => cookie.name === 'cf_clearance')?.value
+      if (!clearance) return
+      this.cookies.cf_clearance = clearance
+      const current = this.config.getCookies()
+      if (current.cf_clearance !== clearance) {
+        try {
+          this.config.replaceCookies({ ...current, cf_clearance: clearance })
+        } catch (error) {
+          logger.warn('network.cloudflare-cookie.persist-failed', '安全验证状态暂时无法持久化', {
+            error: sanitizeLogText(errorMessage(error)),
+          })
+        }
+      }
+      // Cloudflare may issue a partitioned cookie in the verification window.
+      // Mirror the value as a first-party session cookie for main-process requests.
+      await this.injectCookies()
+    } catch (error) {
+      logger.warn('network.cloudflare-cookie.read-failed', '安全验证状态暂时无法读取', {
+        error: sanitizeLogText(errorMessage(error)),
+      })
+    }
+  }
+
+  private async solveCloudflareChallenge(onChallenge?: () => void): Promise<void> {
+    if (!this.cloudflareChallenge) throw new CloudflareChallengeResponseError(403)
+    onChallenge?.()
+    logger.info('network.cloudflare-challenge.started', '开始 Wenku8 安全验证')
+    try {
+      await this.cloudflareChallenge.solve()
+      await this.persistClearanceFromSession()
+      logger.info('network.cloudflare-challenge.completed', 'Wenku8 安全验证完成')
+    } catch (error) {
+      logger.error('network.cloudflare-challenge.failed', 'Wenku8 安全验证失败', error)
+      throw error
+    }
+  }
+
+  private async preflightCloudflareChallenge(onChallenge?: () => void): Promise<boolean> {
+    if (!this.cloudflareChallenge) return false
+    let response: Response
+    try {
+      response = await this.networkSession.fetch(`${BASE_URL}/index.php`, {
+        method: 'GET',
+        headers: COMMON_HEADERS,
+        credentials: 'include',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+    } catch (error) {
+      logger.debug('network.cloudflare-preflight.skipped', '安全验证预检未完成，继续尝试登录', {
+        error: sanitizeLogText(errorMessage(error)),
+      })
+      return false
+    }
+    const isChallenge = isCloudflareChallengeResponse(response)
+    await discardResponseBody(response)
+    if (!isChallenge) return false
+    await this.solveCloudflareChallenge(onChallenge)
+    return true
+  }
+
+  async fetch(
+    url: string,
+    parse?: true,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<CheerioDocument>
+  async fetch(
+    url: string,
+    parse: false,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<Buffer>
+  async fetch(
+    url: string,
+    parse: boolean = true,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<CheerioDocument | Buffer> {
     // Resolve relative URLs against base
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
     }
     const maxRetries = 3
     let lastError: Error | null = null
+    let lastStatus: number | undefined
+    const startedAt = performance.now()
+    if (parse) {
+      logger.debug('network.request.started', '开始网页请求', {
+        method: 'GET',
+        url: sanitizeLogText(url),
+        maxAttempts: maxRetries,
+      })
+    }
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
+      throwIfDownloadCancelled(signal)
+      let attemptAcquired = false
+      const releaseAttempt = (): void => {
+        if (!attemptAcquired) return
+        attemptAcquired = false
+        control?.afterAttempt?.()
+      }
       try {
+        if (control?.beforeAttempt) {
+          await control.beforeAttempt(signal)
+          attemptAcquired = true
+          throwIfDownloadCancelled(signal)
+        }
+        const attemptStartedAt = performance.now()
         const headers: Record<string, string> = {
           ...COMMON_HEADERS,
           'Referer': `${BASE_URL}/`,
         }
 
-        const resp = await net.fetch(url, {
+        const resp = await this.networkSession.fetch(url, {
           method: 'GET',
           headers,
+          credentials: wenkuRequestCredentials(url),
           redirect: 'follow',
+          signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
-
+        lastStatus = resp.status
+        const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
+        if (
+          wenkuRequestCredentials(url) === 'include'
+          && isCloudflareChallengeResponse(resp)
+        ) {
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
+        }
         if (!resp.ok) {
-          throw new Error(formatHttpError(resp.status))
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          throw new HttpStatusError(resp.status, retryAfterMs)
         }
 
         if (parse) {
           const buf = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
           // wenku8 uses GBK encoding
           const html = iconv.decode(buf, 'gbk')
           const $ = cheerio.load(html)
           // Attach final URL for redirect detection (like Python's soup.my_url)
           ;($ as unknown as Record<string, unknown>).myUrl = resp.url
+          logger.debug('network.request.completed', '网页请求完成', {
+            method: 'GET',
+            url: sanitizeLogText(resp.url || url),
+            status: resp.status,
+            attempt: attempt + 1,
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          })
+          releaseAttempt()
           return $
         } else {
-          return Buffer.from(await resp.arrayBuffer())
+          const buf = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          releaseAttempt()
+          return buf
         }
       } catch (err) {
-        lastError = err as Error
-        if (attempt < maxRetries - 1) {
-          await sleep(8000)
+        releaseAttempt()
+        throwIfDownloadCancelled(signal)
+        lastError = normalizeError(err)
+        if (lastError instanceof CloudflareChallengeResponseError) {
+          throw lastError
+        }
+        attempt++
+        if (attempt < maxRetries) {
+          const status = lastError instanceof HttpStatusError ? lastError.status : undefined
+          const retryAfterMs = lastError instanceof HttpStatusError
+            ? lastError.retryAfterMs
+            : undefined
+          const retryInfo: CrawlerRetryInfo = {
+            attempt,
+            ...(status === undefined ? {} : { status }),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+            error: lastError,
+          }
+          const requestedDelay = control?.getRetryDelay?.(retryInfo)
+          const backoffMs = requestedDelay !== undefined && Number.isFinite(requestedDelay)
+            ? Math.max(0, Math.round(requestedDelay))
+            : 8000
+          control?.onRetry?.({ ...retryInfo, delayMs: backoffMs })
+          logger.warn('network.request.retry', '网页请求失败，准备重试', {
+            method: 'GET',
+            url: sanitizeLogText(url),
+            status: lastStatus,
+            attempt,
+            maxAttempts: maxRetries,
+            backoffMs,
+            error: sanitizeLogText(lastError.message),
+          })
+          await sleepWithSignal(backoffMs, signal)
           // Re-inject cookies on retry
           await this.injectCookies()
         }
       }
     }
 
-    throw new Error(`请求失败（已重试 3 次）: ${lastError?.message}`)
+    const finalError = new Error(
+      `请求失败（已重试 ${maxRetries} 次）: ${lastError?.message}`,
+      { cause: lastError ?? undefined },
+    )
+    logger.error('network.request.failed', '网页请求在重试后仍然失败', finalError, {
+      method: 'GET',
+      url: sanitizeLogText(url),
+      status: lastStatus,
+      maxAttempts: maxRetries,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    })
+    throw finalError
   }
 
-  async getCookie(): Promise<void> {
-    const loginCfg = config.getAll().login
-    const username = loginCfg?.username
-    const password = loginCfg?.password
+  async getCookie(onCloudflareChallenge?: () => void): Promise<void> {
+    const credentialRevision = this.config.getCredentialRevision()
+    const { username, password } = this.config.getCredentials()
+    const startedAt = performance.now()
+    const maxRetries = 3
+    let lastStatus: number | undefined
+    let lastError: Error | null = null
+    let challengeAttempted = false
+    logger.info('login.started', '开始刷新登录 Cookie', { maxAttempts: maxRetries })
 
     if (!username || !password) {
-      throw new Error('请先配置登录账号和密码')
+      const error = new Error('请先配置登录账号和密码')
+      logger.error('login.failed', '登录 Cookie 刷新失败', error, {
+        maxAttempts: maxRetries,
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      })
+      throw error
     }
 
     const loginUrl = `${BASE_URL}/login.php?do=submit&jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php`
-    const maxRetries = 3
+    challengeAttempted = await this.preflightCloudflareChallenge(onCloudflareChallenge)
+    await this.rejectIfCredentialsChanged(credentialRevision)
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
+      if (this.config.getCredentialRevision() !== credentialRevision) {
+        await this.rejectIfCredentialsChanged(credentialRevision)
+      }
       try {
+        for (const name of LOGIN_COOKIE_NAMES) {
+          await this.networkSession.cookies.remove(BASE_URL, name)
+        }
+
         const body = new URLSearchParams({
           username,
           password,
@@ -141,7 +518,7 @@ export class WebCrawler {
           submit: '',
         })
 
-        const resp = await net.fetch(loginUrl, {
+        const resp = await this.networkSession.fetch(loginUrl, {
           method: 'POST',
           headers: {
             ...COMMON_HEADERS,
@@ -149,73 +526,208 @@ export class WebCrawler {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: body.toString(),
+          credentials: 'include',
           redirect: 'follow',
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
+        lastStatus = resp.status
 
-        if (!resp.ok) {
-          throw new Error(formatHttpError(resp.status))
+        await this.rejectIfCredentialsChanged(credentialRevision)
+
+        if (isCloudflareChallengeResponse(resp)) {
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
         }
+        if (!resp.ok) throw new HttpStatusError(resp.status)
 
         // Extract cookies from response
-        const ses = session.defaultSession
-        const cookies = await ses.cookies.get({ url: BASE_URL })
+        const cookies = await this.networkSession.cookies.get({ url: BASE_URL })
+        await this.rejectIfCredentialsChanged(credentialRevision)
         const cookieMap: Record<string, string> = {}
         for (const c of cookies) {
           cookieMap[c.name] = c.value
         }
 
-        const cfg = config.getAll()
-        config.set('cookie', 'PHPSESSID', cookieMap['PHPSESSID'] ?? cfg.cookie?.PHPSESSID ?? '')
-        config.set('cookie', 'jieqiUserInfo', cookieMap['jieqiUserInfo'] ?? cfg.cookie?.jieqiUserInfo ?? '')
-        config.set('cookie', 'jieqiVisitInfo', cookieMap['jieqiVisitInfo'] ?? cfg.cookie?.jieqiVisitInfo ?? '')
-        config.set('cookie', 'cf_clearance', cookieMap['cf_clearance'] ?? cfg.cookie?.cf_clearance ?? '')
-        this.syncCookies()
+        const loginCookies: CookieSnapshot = {
+          PHPSESSID: cookieMap.PHPSESSID ?? '',
+          jieqiUserInfo: cookieMap.jieqiUserInfo ?? '',
+          jieqiVisitInfo: cookieMap.jieqiVisitInfo ?? '',
+          cf_clearance: cookieMap.cf_clearance ?? this.config.getCookies().cf_clearance,
+        }
+        if (!hasAuthenticatedCookies(loginCookies)) {
+          throw new Error('登录后未检测到有效登录状态，请检查账号和密码')
+        }
+
+        this.config.replaceCookies(loginCookies)
+        await this.syncCookies()
+        await this.rejectIfCredentialsChanged(credentialRevision)
+        logger.info('login.completed', '登录 Cookie 刷新完成', {
+          attempt: attempt + 1,
+          durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        })
         return
       } catch (err) {
-        if (attempt >= maxRetries - 1) {
-          throw new Error(`登录失败: ${(err as Error).message}`)
+        if (err instanceof CredentialsChangedDuringLoginError) {
+          logger.error('login.failed', '登录期间账号配置发生变化', err, {
+            attempt: attempt + 1,
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+          })
+          throw err
         }
-        await sleep(5000)
+        await this.rejectIfCredentialsChanged(credentialRevision)
+        const cause = normalizeError(err)
+        lastError = cause
+        const message = cause.message
+        if (cause instanceof CloudflareChallengeResponseError) {
+          if (challengeAttempted || !this.cloudflareChallenge) throw cause
+          challengeAttempted = true
+          await this.solveCloudflareChallenge(onCloudflareChallenge)
+          await this.rejectIfCredentialsChanged(credentialRevision)
+          continue
+        }
+        attempt++
+        if (attempt < maxRetries) {
+          logger.warn('login.retry', '登录请求失败，准备重试', {
+            status: lastStatus,
+            attempt,
+            maxAttempts: maxRetries,
+            backoffMs: 5000,
+            error: sanitizeLogText(message),
+          })
+          await sleep(5000)
+        }
       }
     }
+
+    const finalError = new Error(`登录失败: ${lastError?.message ?? '未知错误'}`, {
+      cause: lastError ?? undefined,
+    })
+    logger.error('login.failed', '登录 Cookie 刷新失败', finalError, {
+      status: lastStatus,
+      attempt: maxRetries,
+      maxAttempts: maxRetries,
+      durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    })
+    throw finalError
   }
 
-  async getImageContent(url: string): Promise<Buffer | null> {
+  async getImageContent(
+    url: string,
+    maxRetries = 3,
+    onResponseStatus?: (status: number) => void,
+    signal?: AbortSignal,
+    control?: CrawlerRequestControl,
+  ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
-    const maxRetries = 3
     let lastError: string | null = null
+    let lastCause: Error | null = null
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    let attempt = 0
+    while (attempt < maxRetries) {
+      throwIfDownloadCancelled(signal)
+      let attemptAcquired = false
+      const releaseAttempt = (): void => {
+        if (!attemptAcquired) return
+        attemptAcquired = false
+        control?.afterAttempt?.()
+      }
       try {
-        const resp = await net.fetch(url, {
+        if (control?.beforeAttempt) {
+          await control.beforeAttempt(signal)
+          attemptAcquired = true
+          throwIfDownloadCancelled(signal)
+        }
+        const attemptStartedAt = performance.now()
+        const resp = await this.networkSession.fetch(url, {
           method: 'GET',
           headers: {
             ...COMMON_HEADERS,
             'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           },
+          credentials: wenkuRequestCredentials(url),
+          signal: withRequestTimeout(signal, REQUEST_TIMEOUT_MS),
         })
-
+        const retryAfterMs = parseRetryAfter(resp.headers?.get?.('retry-after'))
+        if (
+          wenkuRequestCredentials(url) === 'include'
+          && isCloudflareChallengeResponse(resp)
+        ) {
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          onResponseStatus?.(resp.status)
+          await discardResponseBody(resp)
+          throw new CloudflareChallengeResponseError(resp.status)
+        }
         if (resp.ok) {
-          return Buffer.from(await resp.arrayBuffer())
+          const content = Buffer.from(await resp.arrayBuffer())
+          control?.onResponse?.({
+            status: resp.status,
+            latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          })
+          onResponseStatus?.(resp.status)
+          releaseAttempt()
+          return content
         }
 
-        lastError = formatHttpError(resp.status)
-        const backoffMs = resp.status === 429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
-        if (attempt < maxRetries - 1) {
-          await sleep(backoffMs)
-        }
+        control?.onResponse?.({
+          status: resp.status,
+          latencyMs: Math.max(0, Math.round(performance.now() - attemptStartedAt)),
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+        })
+        onResponseStatus?.(resp.status)
+        throw new HttpStatusError(resp.status, retryAfterMs)
       } catch (err) {
-        lastError = (err as Error).message
-        const is429 = lastError.includes('429')
-        const backoffMs = is429 ? 15000 * (attempt + 1) : 2000 * (attempt + 1)
-        if (attempt < maxRetries - 1) {
-          await sleep(backoffMs)
+        releaseAttempt()
+        throwIfDownloadCancelled(signal)
+        lastCause = normalizeError(err)
+        lastError = lastCause.message
+        if (lastCause instanceof CloudflareChallengeResponseError) {
+          throw lastCause
+        }
+        attempt++
+        const status = lastCause instanceof HttpStatusError ? lastCause.status : undefined
+        const retryAfterMs = lastCause instanceof HttpStatusError
+          ? lastCause.retryAfterMs
+          : undefined
+        const retryInfo: CrawlerRetryInfo = {
+          attempt,
+          ...(status === undefined ? {} : { status }),
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+          error: lastCause,
+        }
+        const requestedDelay = control?.getRetryDelay?.(retryInfo)
+        const defaultBackoffMs = status === 429 ? 15000 * attempt : 2000 * attempt
+        const backoffMs = requestedDelay !== undefined && Number.isFinite(requestedDelay)
+          ? Math.max(0, Math.round(requestedDelay))
+          : defaultBackoffMs
+        if (attempt < maxRetries) {
+          control?.onRetry?.({ ...retryInfo, delayMs: backoffMs })
+          logger.warn('network.image.retry', '图片请求异常，准备重试', {
+            method: 'GET',
+            url: sanitizeLogText(url),
+            ...(status === undefined ? {} : { status }),
+            attempt,
+            maxAttempts: maxRetries,
+            backoffMs,
+            error: sanitizeLogText(lastError),
+          })
+          await sleepWithSignal(backoffMs, signal)
         }
       }
     }
 
     if (lastError) {
-      throw new Error(lastError)
+      const error = new Error(lastError, { cause: lastCause ?? undefined })
+      logger.error('network.image.failed', '图片请求在重试后仍然失败', error, {
+        method: 'GET',
+        url: sanitizeLogText(url),
+        maxAttempts: maxRetries,
+      })
+      throw error
     }
     return null
   }
@@ -229,7 +741,9 @@ export class WebCrawler {
 
     const title = $('title').text()
     if (!title) {
-      throw new Error('页面无标题，可能被拦截')
+      throw new Error('网站暂时无法完成搜索，请稍后重试', {
+        cause: new Error('搜索页面缺少标题，可能被拦截'),
+      })
     }
 
     const blockMsg = $('.blockcontent').text()
@@ -237,13 +751,13 @@ export class WebCrawler {
       throw new Error('搜索过于频繁，请等待片刻再试')
     }
 
-    if ($('#content table.grid').length > 0) {
-      return this.searchMultiResult($, keyword)
+    if (title.includes('搜索结果')) {
+      return this.searchMultiResult($)
     }
-    return this.searchSingleResult($, keyword)
+    return this.searchSingleResult($)
   }
 
-  private searchMultiResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+  private searchMultiResult($: CheerioDocument): SearchResult[] {
     const results: SearchResult[] = []
     const td = $('#content table tr td')
     td.children('div').each((_i, div) => {
@@ -257,21 +771,22 @@ export class WebCrawler {
       const ps = $(div).find('p')
       const p1 = ps.eq(0).text()
       const statusText = ps.eq(1).text()
+      const statusMetadata = parseSearchStatus(statusText)
       const tags = ps.eq(2).text().replace('Tags:', '').trim()
       const desc = ps.eq(3).text().replace('简介:', '').trim()
 
       const authorPart = p1.split('/').find((s: string) => s.includes('作者:')) || ''
       const author = authorPart.replace('作者:', '').trim()
-      const updatePart = p1.split('/').find((s: string) => s.includes('更新:')) || ''
-      const updateTime = updatePart.replace('更新:', '').trim()
 
       results.push({
         title: titleText,
         cover,
         id: bookId,
         author,
-        status: statusText.trim(),
-        updateTime,
+        status: statusMetadata.status,
+        updateTime: statusMetadata.updateTime,
+        wordCount: statusMetadata.wordCount,
+        isAnimated: statusMetadata.isAnimated,
         tags,
         desc,
       })
@@ -279,12 +794,17 @@ export class WebCrawler {
     return results
   }
 
-  private searchSingleResult($: cheerio.CheerioAPI, keyword: string): SearchResult[] {
+  private searchSingleResult($: CheerioDocument): SearchResult[] {
     const results: SearchResult[] = []
     const title = $('title').text()
     const pageTitle = title.split('-')[0]?.trim() || ''
     const myUrl = ($ as unknown as Record<string, string>).myUrl || ''
-    const bookId = myUrl.split('/book/')[1]?.split('.')[0] || ''
+    const bookcaseHref = $('#content a[href*="/modules/article/addbookcase.php?bid="]')
+      .first()
+      .attr('href') || ''
+    const bookId = myUrl.split('/book/')[1]?.split('.')[0]
+      || bookcaseHref.match(/[?&]bid=(\d+)/)?.[1]
+      || ''
     const cover = $('#content img').first().attr('src') || ''
     const infoTable = $('#content table')
     let author = ''
@@ -312,6 +832,9 @@ export class WebCrawler {
         id: bookId,
         author,
         status,
+        updateTime: '',
+        wordCount: '',
+        isAnimated: false,
         tags: '',
         desc,
       })
@@ -319,4 +842,3 @@ export class WebCrawler {
     return results
   }
 }
-
