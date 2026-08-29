@@ -19,7 +19,7 @@ function createHarness(timeoutMs = 1_000) {
   const window = {
     webContents: {
       setWindowOpenHandler: vi.fn(),
-      executeJavaScript: vi.fn(async () => true),
+      executeJavaScript: vi.fn(async (_code: string) => true),
       on: webContentsEvents.on.bind(webContentsEvents),
       removeListener: webContentsEvents.removeListener.bind(webContentsEvents),
     },
@@ -64,10 +64,24 @@ describe('ElectronCloudflareChallengeSolver', () => {
     })
     expect(harness.window.loadURL).toHaveBeenCalledTimes(1)
     expect(harness.window.webContents.executeJavaScript).toHaveBeenCalledWith(
-      "Boolean(document.querySelector('.block .blocktitle'))",
+      expect.stringContaining("document.querySelector('.block .blocktitle')"),
     )
     expect(harness.window.close).toHaveBeenCalledTimes(1)
     expect(harness.createWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it('continues automatic login when clearance lands on the Wenku8 login page', async () => {
+    const harness = createHarness(30)
+    harness.window.webContents.executeJavaScript.mockImplementation(async (code: string) => (
+      code.includes('input[type="password"]')
+    ))
+
+    const solving = harness.solver.solve()
+    await vi.waitFor(() => expect(harness.window.loadURL).toHaveBeenCalledTimes(1))
+    harness.webContentsEvents.emit('did-finish-load')
+
+    await expect(solving).resolves.toBeUndefined()
+    expect(harness.window.close).toHaveBeenCalledTimes(1)
   })
 
   it('ignores same-named cookies that are not usable for Wenku8', async () => {

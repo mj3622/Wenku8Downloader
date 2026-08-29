@@ -22,7 +22,10 @@ export class CookieService {
   async acquire(onProgress?: (p: CookieProgress) => void): Promise<CookieResult> {
     onProgress?.({ step: 'login', message: '正在登录...' })
     const loginCookies = await this.login(() => {
-      onProgress?.({ step: 'login', message: '请在弹出窗口完成安全验证' })
+      onProgress?.({
+        step: 'login',
+        message: 'Cloudflare 可能连续显示多轮验证，请按页面提示逐步完成；全部完成后会自动登录',
+      })
     })
     if (!hasAuthenticatedCookies(loginCookies)) {
       throw new Error('登录后未检测到有效登录状态')

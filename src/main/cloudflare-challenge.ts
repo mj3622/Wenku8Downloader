@@ -143,7 +143,7 @@ export class ElectronCloudflareChallengeSolver implements CloudflareChallengeSol
             && (candidateDomain === 'wenku8.net' || candidateDomain === 'www.wenku8.net')
         })
       }
-      const validateHomepage = async (): Promise<void> => {
+      const validateResolvedPage = async (): Promise<void> => {
         if (validating) {
           validationRequested = true
           return
@@ -152,10 +152,10 @@ export class ElectronCloudflareChallengeSolver implements CloudflareChallengeSol
         validationRequested = false
         try {
           if (!await hasUsableClearance()) return
-          const isHomepage = await verificationWindow.webContents.executeJavaScript(
-            "Boolean(document.querySelector('.block .blocktitle'))",
+          const isResolvedPage = await verificationWindow.webContents.executeJavaScript(
+            "Boolean(document.querySelector('.block .blocktitle') || (location.pathname.endsWith('/login.php') && document.querySelector('form input[type=\"password\"]')))",
           )
-          if (isHomepage === true) {
+          if (isResolvedPage === true) {
             finish()
             return
           }
@@ -169,11 +169,11 @@ export class ElectronCloudflareChallengeSolver implements CloudflareChallengeSol
           // Keep the verification window open so Cloudflare can retry the challenge.
         } finally {
           validating = false
-          if (validationRequested && !settled) void validateHomepage()
+          if (validationRequested && !settled) void validateResolvedPage()
         }
       }
       const handleDidFinishLoad = () => {
-        void validateHomepage()
+        void validateResolvedPage()
       }
       const handleCookieChanged: CookieChangedListener = (_event, cookie, _cause, removed) => {
         if (cookie.name !== 'cf_clearance') return
@@ -183,7 +183,7 @@ export class ElectronCloudflareChallengeSolver implements CloudflareChallengeSol
         if (cookieCheckTimer) clearTimeout(cookieCheckTimer)
         cookieCheckTimer = setTimeout(() => {
           cookieCheckTimer = undefined
-          void validateHomepage()
+          void validateResolvedPage()
         }, COOKIE_SETTLE_DELAY_MS)
       }
       const handleClosed = () => finish(new Error('安全验证未完成，请重新刷新登录状态'))

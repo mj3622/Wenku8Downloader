@@ -105,7 +105,7 @@ export class CloudflareChallengeResponseError extends Error {
   readonly status: number
 
   constructor(status: number) {
-    super('网站要求完成安全验证，请在验证窗口中完成操作后重试')
+    super('网站要求完成安全验证，请前往配置页手动刷新登录状态')
     this.name = 'CloudflareChallengeResponseError'
     this.status = status
   }
@@ -232,6 +232,9 @@ export class WebCrawler {
           value,
           domain: '.wenku8.net',
           path: '/',
+          ...(name === 'cf_clearance'
+            ? { secure: true, sameSite: 'no_restriction' as const }
+            : {}),
         })
       }
     }
@@ -247,14 +250,18 @@ export class WebCrawler {
       if (!clearance) return
       this.cookies.cf_clearance = clearance
       const current = this.config.getCookies()
-      if (current.cf_clearance === clearance) return
-      try {
-        this.config.replaceCookies({ ...current, cf_clearance: clearance })
-      } catch (error) {
-        logger.warn('network.cloudflare-cookie.persist-failed', '安全验证状态暂时无法持久化', {
-          error: sanitizeLogText(errorMessage(error)),
-        })
+      if (current.cf_clearance !== clearance) {
+        try {
+          this.config.replaceCookies({ ...current, cf_clearance: clearance })
+        } catch (error) {
+          logger.warn('network.cloudflare-cookie.persist-failed', '安全验证状态暂时无法持久化', {
+            error: sanitizeLogText(errorMessage(error)),
+          })
+        }
       }
+      // Cloudflare may issue a partitioned cookie in the verification window.
+      // Mirror the value as a first-party session cookie for main-process requests.
+      await this.injectCookies()
     } catch (error) {
       logger.warn('network.cloudflare-cookie.read-failed', '安全验证状态暂时无法读取', {
         error: sanitizeLogText(errorMessage(error)),
@@ -325,7 +332,6 @@ export class WebCrawler {
     const maxRetries = 3
     let lastError: Error | null = null
     let lastStatus: number | undefined
-    let challengeAttempted = false
     const startedAt = performance.now()
     if (parse) {
       logger.debug('network.request.started', '开始网页请求', {
@@ -422,10 +428,7 @@ export class WebCrawler {
         throwIfDownloadCancelled(signal)
         lastError = normalizeError(err)
         if (lastError instanceof CloudflareChallengeResponseError) {
-          if (challengeAttempted || !this.cloudflareChallenge) throw lastError
-          challengeAttempted = true
-          await this.solveCloudflareChallenge()
-          continue
+          throw lastError
         }
         attempt++
         if (attempt < maxRetries) {
@@ -618,7 +621,6 @@ export class WebCrawler {
     url = url.replace('http://', 'https://')
     let lastError: string | null = null
     let lastCause: Error | null = null
-    let challengeAttempted = false
 
     let attempt = 0
     while (attempt < maxRetries) {
@@ -684,10 +686,7 @@ export class WebCrawler {
         lastCause = normalizeError(err)
         lastError = lastCause.message
         if (lastCause instanceof CloudflareChallengeResponseError) {
-          if (challengeAttempted || !this.cloudflareChallenge) throw lastCause
-          challengeAttempted = true
-          await this.solveCloudflareChallenge()
-          continue
+          throw lastCause
         }
         attempt++
         const status = lastCause instanceof HttpStatusError ? lastCause.status : undefined

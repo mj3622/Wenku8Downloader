@@ -93,7 +93,7 @@ describe('CookieService', () => {
 
     expect(progress).toEqual([
       '正在登录...',
-      '请在弹出窗口完成安全验证',
+      'Cloudflare 可能连续显示多轮验证，请按页面提示逐步完成；全部完成后会自动登录',
       '登录成功',
       '登录成功，登录状态已更新',
     ])
