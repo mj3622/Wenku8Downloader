@@ -11,6 +11,7 @@ export type FeedbackContext =
   | 'config-reset'
   | 'download'
   | 'download-warning'
+  | 'download-artifact'
   | 'cache-clear'
   | 'open-folder'
   | 'open-log-folder'
@@ -78,6 +79,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   'download-warning': {
     title: '下载完成，但有部分内容缺失',
     message: '部分附加资源未能保存，正文内容仍可正常阅读。',
+  },
+  'download-artifact': {
+    title: '无法打开下载内容',
+    message: '下载文件可能已被移动或删除，请检查下载位置后重试。',
   },
   'cache-clear': {
     title: '缓存清除失败',

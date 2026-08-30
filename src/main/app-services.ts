@@ -166,6 +166,10 @@ export function createAppServices(): AppServices {
       bookCache,
     ),
   }, bookCache)
+  const currentDownloadRoot = (): string => resolveDownloadRoot(
+    config.getDownloadSnapshot(),
+    environment,
+  )
   const executor = createDownloadExecutor({
     config,
     crawler,
@@ -185,14 +189,10 @@ export function createAppServices(): AppServices {
   const downloads = new DownloadManager({
     store: new DownloadTaskStore(taskPath),
     executor,
+    getDownloadRoot: currentDownloadRoot,
   })
   let stopCentralMaintenance: (() => void) | undefined
   let legacyMaintenanceTimer: ReturnType<typeof setInterval> | undefined
-
-  const currentDownloadRoot = (): string => resolveDownloadRoot(
-    config.getDownloadSnapshot(),
-    environment,
-  )
 
   const initializeCache = async (): Promise<void> => {
     try {

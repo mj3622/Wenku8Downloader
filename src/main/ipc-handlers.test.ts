@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     }),
     openExternal: vi.fn(async () => undefined),
     openPath: vi.fn(async () => ''),
+    showItemInFolder: vi.fn(() => undefined),
     showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     mkdir: vi.fn(async () => undefined),
     browserWindows: [] as Array<{
@@ -36,6 +37,10 @@ const mocks = vi.hoisted(() => {
     removeDownload: vi.fn(),
     clearDownloadHistory: vi.fn(),
     importLegacyDownloadHistory: vi.fn(),
+    getArtifactTarget: vi.fn(async () => ({
+      path: resolve(process.cwd(), 'downloads', 'book.epub'),
+      kind: 'file' as 'file' | 'directory',
+    })),
     resolveVolumeCovers: vi.fn(async () => ({
       '第一卷': 'https://example.com/volume-1.jpg',
     })),
@@ -64,7 +69,11 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: { getAllWindows: () => mocks.browserWindows },
   ipcMain: { handle: mocks.handle, on: mocks.on },
-  shell: { openExternal: mocks.openExternal, openPath: mocks.openPath },
+  shell: {
+    openExternal: mocks.openExternal,
+    openPath: mocks.openPath,
+    showItemInFolder: mocks.showItemInFolder,
+  },
   dialog: { showOpenDialog: mocks.showOpenDialog },
 }))
 
@@ -195,6 +204,7 @@ function createServices(
       remove: mocks.removeDownload,
       clearHistory: mocks.clearDownloadHistory,
       importLegacyHistory: mocks.importLegacyDownloadHistory,
+      getArtifactTarget: mocks.getArtifactTarget,
       subscribe: mocks.subscribeDownloads,
     },
   } satisfies IpcServices
@@ -615,8 +625,40 @@ describe('registerIpcHandlers application operations', () => {
     ['download:retry', null],
     ['download:clear-history', { scope: 'active' }],
     ['download:import-legacy-history', { tasks: 'invalid' }],
+    ['download:artifact-open', { taskId: 'dl-1720000000000-3', artifactId: '../file' }],
   ] as const)('rejects malformed manager payloads for %s', async (channel, payload) => {
     await expect(invoke(channel, {}, payload)).rejects.toThrow()
+  })
+
+  it('opens and reveals only manager-resolved artifacts', async () => {
+    const taskId = 'dl-1720000000000-3'
+    const artifactId = 'primary'
+    const path = resolve(process.cwd(), 'downloads', 'book.epub')
+    mocks.getArtifactTarget.mockResolvedValue({ path, kind: 'file' })
+
+    await invoke('download:artifact-open', {}, { taskId, artifactId })
+    await invoke('download:artifact-reveal', {}, { taskId, artifactId })
+
+    expect(mocks.getArtifactTarget).toHaveBeenNthCalledWith(1, taskId, artifactId)
+    expect(mocks.getArtifactTarget).toHaveBeenNthCalledWith(2, taskId, artifactId)
+    expect(mocks.openPath).toHaveBeenCalledWith(path)
+    expect(mocks.showItemInFolder).toHaveBeenCalledWith(path)
+  })
+
+  it('opens a directory when revealing it and reports shell failures safely', async () => {
+    const taskId = 'dl-1720000000000-3'
+    const path = resolve(process.cwd(), 'downloads', 'pics', 'book')
+    mocks.getArtifactTarget.mockResolvedValue({ path, kind: 'directory' })
+
+    await invoke('download:artifact-reveal', {}, { taskId, artifactId: 'primary' })
+    expect(mocks.openPath).toHaveBeenCalledWith(path)
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled()
+
+    mocks.openPath.mockResolvedValueOnce('native shell detail')
+    await expect(invoke('download:artifact-open', {}, {
+      taskId,
+      artifactId: 'primary',
+    })).rejects.toThrow('无法打开下载文件，请确认文件仍然存在')
   })
 
   it('broadcasts state changes only to live renderer windows', () => {

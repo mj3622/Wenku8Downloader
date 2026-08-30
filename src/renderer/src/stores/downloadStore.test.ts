@@ -36,6 +36,7 @@ function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
     progress: 0,
     createdAt: 1000,
     updatedAt: 1000,
+    artifacts: [],
     ...overrides,
   }
 }
@@ -119,7 +120,7 @@ describe('downloadStore projection', () => {
     })
 
     expect(useToastStore.getState().items[0]).toMatchObject({
-      tone: 'info',
+      tone: 'success',
       title: '已加入下载队列',
     })
   })
@@ -169,7 +170,11 @@ describe('downloadStore projection', () => {
 
 describe('downloadStore commands', () => {
   it('enqueues EPUB and image tasks with the correct type', async () => {
-    mocks.enqueueDownload.mockResolvedValue(snapshot(1))
+    mocks.enqueueDownload.mockResolvedValue({
+      status: 'enqueued',
+      taskId: '123e4567-e89b-42d3-a456-426614174000',
+      snapshot: snapshot(1),
+    })
 
     useDownloadStore.getState().downloadEpub('100', '测试作品', undefined, '第一卷')
     useDownloadStore.getState().downloadImages('100', '测试作品')
@@ -186,6 +191,24 @@ describe('downloadStore commands', () => {
       title: '测试作品',
       type: 'images',
     })
+  })
+
+  it('shows a normal reminder when an active download is duplicated', async () => {
+    const active = task({ status: 'downloading' })
+    mocks.enqueueDownload.mockResolvedValue({
+      status: 'duplicate',
+      taskId: active.id,
+      snapshot: snapshot(2, [active]),
+    })
+
+    useDownloadStore.getState().downloadEpub('100', '测试作品')
+
+    await vi.waitFor(() => expect(useToastStore.getState().items).toHaveLength(1))
+    expect(useToastStore.getState().items[0]).toMatchObject({
+      tone: 'info',
+      title: '任务已在下载中',
+    })
+    expect(useDownloadStore.getState().tasks).toEqual([active])
   })
 
   it('forwards task and history commands', async () => {

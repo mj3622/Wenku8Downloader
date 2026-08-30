@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
   validateCatalogPayload,
+  validateDownloadArtifactPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateDiscoveryRankingPayload,
@@ -57,6 +58,25 @@ describe('IPC validation', () => {
   it('rejects arbitrary download task IDs', () => {
     expect(() => validateDownloadTaskId('../task')).toThrow('下载任务')
     expect(() => validateDownloadTaskId('legacy-1')).toThrow('下载任务')
+  })
+
+  it('accepts only task and artifact identifiers for artifact actions', () => {
+    expect(validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+    })).toEqual({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+    })
+    expect(() => validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: '../secret',
+    })).toThrow('下载产物请求')
+    expect(() => validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+      path: '/tmp/private',
+    })).toThrow('下载产物请求')
   })
 
   it('validates and normalizes download enqueue input', () => {

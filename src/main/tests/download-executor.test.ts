@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DownloadTask } from '../../shared/ipc-types'
 import { DownloadCancelledError } from '../download-cancellation'
 import type { CrawlerRequestControlFactory } from '../crawler'
 import type { DownloadAssetCache, DownloadCacheContext } from '../cache/download-asset-cache'
@@ -9,12 +8,13 @@ import {
   toSafeDownloadErrorMessage,
   toSafeDownloadWarningMessage,
   type DownloadExecutorBook,
+  type DownloadExecutionTask,
   type DownloadRunner,
 } from '../download-executor'
 
 const CACHE_KEY = 'a'.repeat(64)
 
-function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
+function task(overrides: Partial<DownloadExecutionTask> = {}): DownloadExecutionTask {
   return {
     id: '123e4567-e89b-42d3-a456-426614174000',
     bookId: '100',
@@ -62,6 +62,7 @@ function setup(
   const downloadNovel = vi.fn(async () => undefined)
   const downloadPictures = vi.fn(async () => undefined)
   const getWarnings = vi.fn(() => [] as string[])
+  const createArtifactRecord = vi.fn(async record => record)
   const runner: DownloadRunner = {
     setOnProgress,
     downloadNovel,
@@ -94,6 +95,7 @@ function setup(
       devRoot: '/repo',
     },
     createDownloader,
+    createArtifactRecord,
     ...(assetCache ? { assetCache } : {}),
   })
   return {
@@ -104,6 +106,7 @@ function setup(
     downloadPictures,
     setOnProgress,
     getWarnings,
+    createArtifactRecord,
     loadBook,
   }
 }
@@ -119,7 +122,16 @@ describe('createDownloadExecutor', () => {
       signal: controller.signal,
       onProgress,
       onVolumeCover,
-    })).resolves.toEqual({ warnings: [] })
+    })).resolves.toEqual({
+      warnings: [],
+      artifacts: [{
+        id: 'primary',
+        name: '100_测试作品.epub',
+        kind: 'file',
+        path: '/downloads/Wenku8Downloader/novels/100_测试作品.epub',
+        rootPath: '/downloads/Wenku8Downloader',
+      }],
+    })
 
     expect(createDownloader).toHaveBeenCalledWith(
       expect.anything(),
@@ -141,6 +153,25 @@ describe('createDownloadExecutor', () => {
     )
     expect(setOnProgress).toHaveBeenCalledWith(expect.any(Function))
     expect(downloadNovel).toHaveBeenCalledWith(expect.anything(), undefined)
+  })
+
+  it('keeps the download root captured when the task was created', async () => {
+    const { executor, createDownloader, createArtifactRecord } = setup()
+
+    await executor.execute(task({ downloadRoot: '/created/download-root' }), {
+      signal: new AbortController().signal,
+      onProgress: vi.fn(),
+    })
+
+    expect(createDownloader).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rootPath: '/created/download-root' }),
+      expect.anything(),
+    )
+    expect(createArtifactRecord).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/created/download-root/novels/100_测试作品.epub',
+      rootPath: '/created/download-root',
+    }))
   })
 
   it('holds one generation lease for the complete image task', async () => {
@@ -228,7 +259,7 @@ describe('createDownloadExecutor', () => {
     const controller = new AbortController()
     const onVolumeCover = vi.fn()
 
-    await executor.execute(task({ type: 'images', volume: '第一卷' }), {
+    const result = await executor.execute(task({ type: 'images', volume: '第一卷' }), {
       signal: controller.signal,
       onProgress: vi.fn<(progress: DownloadProgress) => void>(),
       onVolumeCover,
@@ -245,6 +276,13 @@ describe('createDownloadExecutor', () => {
       0,
     )
     expect(onVolumeCover).toHaveBeenCalledWith('https://example.com/1.jpg')
+    expect(result.artifacts).toEqual([{
+      id: 'primary',
+      name: '1_第一卷',
+      kind: 'directory',
+      path: '/downloads/Wenku8Downloader/pics/100_测试作品/1_第一卷',
+      rootPath: '/downloads/Wenku8Downloader',
+    }])
   })
 
   it('keeps partial warnings while downloading images for all volumes', async () => {
@@ -269,6 +307,13 @@ describe('createDownloadExecutor', () => {
         '封面未能下载，正文内容仍已保存。',
         '“第二卷”没有可保存的插图。',
       ],
+      artifacts: [{
+        id: 'primary',
+        name: '100_测试作品',
+        kind: 'directory',
+        path: '/downloads/Wenku8Downloader/pics/100_测试作品',
+        rootPath: '/downloads/Wenku8Downloader',
+      }],
     })
     expect(downloadPictures).toHaveBeenCalledTimes(1)
   })

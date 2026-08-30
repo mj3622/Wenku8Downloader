@@ -15,6 +15,7 @@ import { resolveWithin } from './path-safety'
 import {
   validateBookId,
   validateCatalogPayload,
+  validateDownloadArtifactPayload,
   validateDiscoveryHomePayload,
   validateDiscoveryRankingPayload,
   validateDownloadHistoryScope,
@@ -84,6 +85,7 @@ export interface IpcServices {
     | 'remove'
     | 'clearHistory'
     | 'importLegacyHistory'
+    | 'getArtifactTarget'
     | 'subscribe'
   >
 }
@@ -401,6 +403,28 @@ export function registerIpcHandlers(services: IpcServices): void {
       return services.downloads.importLegacyHistory(tasks)
     })
   })
+
+  for (const [channel, eventName, action] of [
+    ['download:artifact-open', 'download.artifact-open', 'open'],
+    ['download:artifact-reveal', 'download.artifact-reveal', 'reveal'],
+  ] as const) {
+    ipcMain.handle(channel, (_event, rawPayload: unknown) => {
+      const context: LogContext = {}
+      return runLoggedOperation(eventName, context, async () => {
+        const { taskId, artifactId } = validateDownloadArtifactPayload(rawPayload)
+        Object.assign(context, { taskId, artifactId })
+        const target = await services.downloads.getArtifactTarget(taskId, artifactId)
+        context.artifactKind = target.kind
+
+        if (action === 'reveal' && target.kind === 'file') {
+          shell.showItemInFolder(target.path)
+          return
+        }
+        const error = await shell.openPath(target.path)
+        if (error) throw new Error('无法打开下载文件，请确认文件仍然存在')
+      })
+    })
+  }
 
   ipcMain.handle('shell:openExternal', (_event, rawUrl: unknown) => {
     const context: LogContext = {}

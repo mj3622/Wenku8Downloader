@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   IconDownload,
+  IconExternalLink,
   IconFolderOpen,
   IconRefresh,
   IconTrash,
@@ -10,6 +11,7 @@ import type { TitleFormat } from '../../../shared/config-types'
 import {
   ACTIVE_DOWNLOAD_STATUSES,
   RETRYABLE_DOWNLOAD_STATUSES,
+  type DownloadArtifact,
   type DownloadFolder,
   type DownloadTask,
 } from '../../../shared/ipc-types'
@@ -71,6 +73,19 @@ export default function DownloadHistoryPage() {
       await api.openFolder(subdir)
     } catch (error) {
       toast.error(getUserFeedback(error, 'open-folder'))
+    }
+  }
+
+  const handleArtifactAction = async (
+    taskId: string,
+    artifact: DownloadArtifact,
+    action: 'open' | 'reveal',
+  ) => {
+    try {
+      if (action === 'open') await api.openDownloadArtifact(taskId, artifact.id)
+      else await api.revealDownloadArtifact(taskId, artifact.id)
+    } catch (error) {
+      toast.error(getUserFeedback(error, 'download-artifact'))
     }
   }
 
@@ -273,8 +288,11 @@ export default function DownloadHistoryPage() {
             </span>
           </h2>
           <div className="bg-apple-card rounded-xl border border-apple-border-subtle divide-y divide-apple-border-subtle">
-            {visibleCompleted.map((task) => (
-              <div key={task.id} className="flex items-center gap-3 px-4 py-3">
+            {visibleCompleted.map((task) => {
+              const artifacts = task.artifacts ?? []
+              const availableArtifacts = artifacts.filter(artifact => artifact.available)
+              return (
+                <div key={task.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 {task.cover && (
                   <BookCover
@@ -301,25 +319,61 @@ export default function DownloadHistoryPage() {
                       {getUserFeedback(task.warning, 'download-warning').message}
                     </p>
                   )}
+                  {artifacts.some(artifact => !artifact.available) && (
+                    <p className="mt-1 text-[11px] leading-4 text-apple-tertiary">
+                      文件已移动或删除
+                    </p>
+                  )}
                 </div>
-                <button
-                  onClick={() => void handleOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
-                  aria-label={`打开 ${formatBookTitle(task.title, titleFormat)} 所在文件夹`}
-                  className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
-                  title="打开所在文件夹"
-                >
-                  <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
-                </button>
-                <button
-                  onClick={() => removeTask(task.id)}
-                  aria-label={`删除 ${formatBookTitle(task.title, titleFormat)} 的下载记录`}
-                  className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
-                  title="删除记录"
-                >
-                  <IconTrash aria-hidden="true" size={16} stroke={1.8} />
-                </button>
-              </div>
-            ))}
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
+                  {availableArtifacts.map(artifact => (
+                    <span key={artifact.id} className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void handleArtifactAction(task.id, artifact, 'open')}
+                        aria-label={`打开 ${artifact.name}`}
+                        className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                        title={`打开 ${artifact.name}`}
+                      >
+                        <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
+                      </button>
+                      {artifact.kind === 'file' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleArtifactAction(task.id, artifact, 'reveal')}
+                          aria-label={`在文件夹中显示 ${artifact.name}`}
+                          className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                          title="在文件夹中显示"
+                        >
+                          <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {availableArtifacts.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
+                      aria-label={`打开 ${formatBookTitle(task.title, titleFormat)} 的下载目录`}
+                      className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                      title="打开下载目录"
+                    >
+                      <IconFolderOpen aria-hidden="true" size={17} stroke={1.8} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeTask(task.id)}
+                    aria-label={`删除 ${formatBookTitle(task.title, titleFormat)} 的下载记录`}
+                    className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+                    title="删除记录"
+                  >
+                    <IconTrash aria-hidden="true" size={16} stroke={1.8} />
+                  </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
           {visibleCompleted.length < completed.length && (
             <div className="mt-3 flex items-center justify-center gap-3">

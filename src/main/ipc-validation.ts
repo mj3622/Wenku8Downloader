@@ -234,6 +234,25 @@ export function validateDownloadTaskId(value: unknown): string {
   return value
 }
 
+export function validateDownloadArtifactPayload(value: unknown): {
+  taskId: string
+  artifactId: string
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载产物请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).some(key => key !== 'taskId' && key !== 'artifactId')
+    || typeof record.artifactId !== 'string'
+    || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(record.artifactId)
+  ) throw new Error('下载产物请求格式无效')
+  return {
+    taskId: validateDownloadTaskId(record.taskId),
+    artifactId: record.artifactId,
+  }
+}
+
 function validateBoundedString(
   value: unknown,
   label: string,

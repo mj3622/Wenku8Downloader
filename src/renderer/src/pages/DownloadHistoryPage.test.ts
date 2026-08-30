@@ -10,6 +10,8 @@ import { api } from '../api/client'
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   openFolder: vi.fn(),
+  openDownloadArtifact: vi.fn(),
+  revealDownloadArtifact: vi.fn(),
   useDownloadStore: vi.fn(),
 }))
 
@@ -21,6 +23,8 @@ vi.mock('../api/client', () => ({
   api: {
     getConfig: mocks.getConfig,
     openFolder: mocks.openFolder,
+    openDownloadArtifact: mocks.openDownloadArtifact,
+    revealDownloadArtifact: mocks.revealDownloadArtifact,
   },
 }))
 
@@ -169,6 +173,91 @@ describe('DownloadHistoryPage', () => {
     })
     expect(container.textContent).toContain('败北女角太多了！')
     expect(container.textContent).not.toContain('败犬女主太多了！')
+  })
+
+  it('opens exact artifacts and falls back when a saved target is unavailable', async () => {
+    const actions = {
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    }
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [
+        {
+          id: 'dl-artifact-file',
+          bookId: '3057',
+          title: '测试 EPUB',
+          type: 'epub_full',
+          status: 'completed',
+          progress: 100,
+          createdAt: Date.now(),
+          artifacts: [{
+            id: 'primary',
+            name: '3057_测试作品.epub',
+            kind: 'file',
+            available: true,
+          }, {
+            id: 'illustrations',
+            name: '3057_测试作品插图',
+            kind: 'directory',
+            available: true,
+          }],
+        },
+        {
+          id: 'dl-artifact-missing',
+          bookId: '3058',
+          title: '测试插图',
+          type: 'images',
+          status: 'completed',
+          progress: 100,
+          createdAt: Date.now(),
+          artifacts: [{
+            id: 'primary',
+            name: '3058_测试插图',
+            kind: 'directory',
+            available: false,
+          }],
+        },
+      ],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      ...actions,
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+    const open = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 3057_测试作品.epub"]',
+    )
+    const reveal = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="在文件夹中显示 3057_测试作品.epub"]',
+    )
+    await act(async () => {
+      open?.click()
+      reveal?.click()
+    })
+
+    expect(mocks.openDownloadArtifact).toHaveBeenCalledWith('dl-artifact-file', 'primary')
+    expect(mocks.revealDownloadArtifact).toHaveBeenCalledWith('dl-artifact-file', 'primary')
+    const openSecond = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 3057_测试作品插图"]',
+    )
+    await act(async () => openSecond?.click())
+    expect(mocks.openDownloadArtifact).toHaveBeenCalledWith(
+      'dl-artifact-file',
+      'illustrations',
+    )
+    expect(container.textContent).toContain('文件已移动或删除')
+    const fallback = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 测试插图 的下载目录"]',
+    )
+    await act(async () => fallback?.click())
+    expect(mocks.openFolder).toHaveBeenCalledWith('pics')
   })
 
   it('places history clearing actions in the page header', async () => {
@@ -384,7 +473,7 @@ describe('DownloadHistoryPage', () => {
       mountedRoot?.render(createElement(DownloadHistoryPage))
     })
     const openButton = container.querySelector<HTMLButtonElement>(
-      'button[title="打开所在文件夹"]',
+      'button[title="打开下载目录"]',
     )
     expect(openButton).not.toBeNull()
 

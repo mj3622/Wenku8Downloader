@@ -96,6 +96,10 @@ export const api = {
     invoke('download', () => window.electronAPI.clearDownloadHistory(scope)),
   importLegacyDownloadHistory: (tasks: unknown[]) =>
     invoke('download', () => window.electronAPI.importLegacyDownloadHistory(tasks)),
+  openDownloadArtifact: (taskId: string, artifactId: string) =>
+    invoke('download-artifact', () => window.electronAPI.openDownloadArtifact(taskId, artifactId)),
+  revealDownloadArtifact: (taskId: string, artifactId: string) =>
+    invoke('download-artifact', () => window.electronAPI.revealDownloadArtifact(taskId, artifactId)),
   onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) =>
     window.electronAPI.onDownloadStateChanged(callback),
 

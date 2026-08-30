@@ -168,7 +168,17 @@ export const TERMINAL_DOWNLOAD_STATUSES: readonly DownloadTaskStatus[] = [
   'interrupted',
 ]
 
-export interface DownloadTask {
+export const DOWNLOAD_ARTIFACT_KINDS = ['file', 'directory'] as const
+export type DownloadArtifactKind = typeof DOWNLOAD_ARTIFACT_KINDS[number]
+
+export interface DownloadArtifact {
+  id: string
+  name: string
+  kind: DownloadArtifactKind
+  available: boolean
+}
+
+export interface DownloadTaskCore {
   id: string
   bookId: string
   title: string
@@ -182,6 +192,10 @@ export interface DownloadTask {
   warning?: string
   createdAt: number
   updatedAt: number
+}
+
+export interface DownloadTask extends DownloadTaskCore {
+  artifacts: DownloadArtifact[]
 }
 
 export interface DownloadSnapshot {
@@ -210,16 +224,24 @@ export interface EnqueueDownloadInput {
   volume?: string
 }
 
+export interface EnqueueDownloadResult {
+  status: 'enqueued' | 'duplicate'
+  taskId: string
+  snapshot: DownloadSnapshot
+}
+
 export type DownloadHistoryScope = 'completed' | 'terminal'
 
 export interface DownloadApi {
   getDownloadSnapshot(): Promise<DownloadSnapshot>
-  enqueueDownload(input: EnqueueDownloadInput): Promise<DownloadSnapshot>
+  enqueueDownload(input: EnqueueDownloadInput): Promise<EnqueueDownloadResult>
   cancelDownload(taskId: string): Promise<DownloadSnapshot>
   retryDownload(taskId: string): Promise<DownloadSnapshot>
   removeDownload(taskId: string): Promise<DownloadSnapshot>
   clearDownloadHistory(scope: DownloadHistoryScope): Promise<DownloadSnapshot>
   importLegacyDownloadHistory(tasks: unknown[]): Promise<DownloadSnapshot>
+  openDownloadArtifact(taskId: string, artifactId: string): Promise<void>
+  revealDownloadArtifact(taskId: string, artifactId: string): Promise<void>
   onDownloadStateChanged(callback: (event: DownloadStateEvent) => void): () => void
 }
 

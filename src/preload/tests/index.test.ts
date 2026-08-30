@@ -142,6 +142,8 @@ describe('preload download boundary', () => {
     await exposedApi.removeDownload(taskId)
     await exposedApi.clearDownloadHistory('terminal')
     await exposedApi.importLegacyDownloadHistory([{ id: taskId }])
+    await exposedApi.openDownloadArtifact(taskId, 'primary')
+    await exposedApi.revealDownloadArtifact(taskId, 'primary')
 
     expect(mocks.invoke.mock.calls).toEqual([
       ['download:cancel', { taskId }],
@@ -149,6 +151,8 @@ describe('preload download boundary', () => {
       ['download:remove', { taskId }],
       ['download:clear-history', { scope: 'terminal' }],
       ['download:import-legacy-history', { tasks: [{ id: taskId }] }],
+      ['download:artifact-open', { taskId, artifactId: 'primary' }],
+      ['download:artifact-reveal', { taskId, artifactId: 'primary' }],
     ])
   })
 

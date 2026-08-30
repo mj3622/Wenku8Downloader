@@ -49,6 +49,10 @@ const downloadApi: DownloadApi = {
     ipcRenderer.invoke('download:clear-history', { scope }),
   importLegacyDownloadHistory: (tasks: unknown[]) =>
     ipcRenderer.invoke('download:import-legacy-history', { tasks }),
+  openDownloadArtifact: (taskId: string, artifactId: string) =>
+    ipcRenderer.invoke('download:artifact-open', { taskId, artifactId }),
+  revealDownloadArtifact: (taskId: string, artifactId: string) =>
+    ipcRenderer.invoke('download:artifact-reveal', { taskId, artifactId }),
   onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, event: DownloadStateEvent) => callback(event)
     ipcRenderer.on('download:state-changed', listener)
