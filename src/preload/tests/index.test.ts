@@ -152,12 +152,16 @@ describe('preload download boundary', () => {
     ])
   })
 
-  it('uses the fixed readonly bookshelf channel', async () => {
+  it('uses fixed bookshelf channels and bounded payloads', async () => {
     mocks.invoke.mockResolvedValue({ entries: [], fetchedAt: 1, stale: false })
 
     await exposedApi.getBookshelf(true)
+    await exposedApi.addBookToBookshelf('3057')
 
-    expect(mocks.invoke).toHaveBeenCalledWith('bookshelf:get', { refresh: true })
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['bookshelf:get', { refresh: true }],
+      ['bookshelf:add', { bookId: '3057' }],
+    ])
   })
 
   it('uses the fixed catalog channel and a typed query payload', async () => {

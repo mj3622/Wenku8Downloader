@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   downloadImages: vi.fn(),
   downloadBatch: vi.fn(),
   getVolumeCovers: vi.fn(),
+  addBookToBookshelf: vi.fn(),
   openExternal: vi.fn(),
 }))
 
@@ -46,11 +47,13 @@ vi.mock('../../stores/downloadStore', () => ({
 vi.mock('../../api/client', () => ({
   api: {
     getVolumeCovers: mocks.getVolumeCovers,
+    addBookToBookshelf: mocks.addBookToBookshelf,
     openExternal: mocks.openExternal,
   },
 }))
 
 import BookDetailPage from '../BookDetailPage'
+import { useBookshelfUpdateStore } from '../../stores/bookshelfUpdateStore'
 import { useToastStore } from '../../stores/toastStore'
 
 function LocationProbe() {
@@ -80,7 +83,13 @@ beforeEach(() => {
   mocks.book.basic_info.动画化 = true
   mocks.book.basic_info.热度 = 'S级'
   mocks.getVolumeCovers.mockResolvedValue({ covers: {} })
+  mocks.addBookToBookshelf.mockResolvedValue({
+    entries: [{ bookId: '3057' }],
+    fetchedAt: 1,
+    stale: false,
+  })
   mocks.openExternal.mockResolvedValue(undefined)
+  useBookshelfUpdateStore.getState().clear()
   useToastStore.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -203,6 +212,62 @@ describe('BookDetailPage', () => {
     })
 
     expect(mocks.openExternal).toHaveBeenCalledWith('https://www.wenku8.net/book/3057.htm')
+  })
+
+  it('adds the work to the remote bookshelf and keeps the completed state visible', async () => {
+    mocks.book.volumes = { '第一卷': [] }
+    let resolveAdd!: (value: { entries: { bookId: string }[]; fetchedAt: number; stale: boolean }) => void
+    mocks.addBookToBookshelf.mockReturnValue(new Promise(resolve => { resolveAdd = resolve }))
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const addButton = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '加入书架')
+    await act(async () => addButton?.click())
+    expect(mocks.addBookToBookshelf).toHaveBeenCalledWith('3057')
+    expect(addButton?.disabled).toBe(true)
+    expect(addButton?.textContent).toContain('正在加入')
+
+    await act(async () => resolveAdd({
+      entries: [{ bookId: '3057' }],
+      fetchedAt: 1,
+      stale: false,
+    }))
+    expect(addButton?.disabled).toBe(true)
+    expect(addButton?.textContent).toContain('已在书架')
+    expect(useToastStore.getState().items).toEqual([
+      expect.objectContaining({ tone: 'success', title: '已加入书架' }),
+    ])
+  })
+
+  it('restores the bookshelf action after a failed request', async () => {
+    mocks.book.volumes = { '第一卷': [] }
+    mocks.addBookToBookshelf.mockRejectedValue(new Error('请先刷新登录状态'))
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const addButton = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '加入书架')
+    await act(async () => {
+      addButton?.click()
+      await Promise.resolve()
+    })
+
+    expect(addButton?.disabled).toBe(false)
+    expect(addButton?.textContent).toContain('加入书架')
+    expect(useToastStore.getState().items).toEqual([
+      expect.objectContaining({ tone: 'error', title: '加入书架失败' }),
+    ])
   })
 
   it('shows one warning and offers deterministic retry and search actions', async () => {

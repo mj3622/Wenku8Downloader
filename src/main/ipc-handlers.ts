@@ -75,7 +75,7 @@ export interface IpcServices {
   search: Pick<SearchService, 'search'>
   catalog: Pick<CatalogService, 'getPage'>
   discovery: Pick<DiscoveryService, 'getHome' | 'getRanking' | 'getAnnualRanking'>
-  bookshelf: Pick<BookshelfService, 'getPage'>
+  bookshelf: Pick<BookshelfService, 'getPage' | 'addBook'>
   updates: Pick<UpdateCheckService, 'check'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
@@ -122,6 +122,14 @@ function validateBookshelfPayload(value: unknown): { refresh: boolean } {
     throw new Error('请求参数格式无效')
   }
   return { refresh: payload.refresh === true }
+}
+
+function validateBookshelfAddPayload(value: unknown): { bookId: string } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'bookId')) {
+    throw new Error('请求参数格式无效')
+  }
+  return { bookId: validateBookId(payload.bookId) }
 }
 
 function validateUpdateCheckPayload(value: unknown): { refresh: boolean } {
@@ -365,6 +373,13 @@ export function registerIpcHandlers(services: IpcServices): void {
       context.stale = result.stale
       return result
     })
+  })
+
+  ipcMain.handle('bookshelf:add', (_event, rawPayload: unknown) => {
+    const { bookId } = validateBookshelfAddPayload(rawPayload)
+    return runLoggedOperation('bookshelf.add', { bookId }, () => (
+      services.bookshelf.addBook(bookId)
+    ))
   })
 
   ipcMain.handle('book:get', (_event, rawPayload: unknown) => {

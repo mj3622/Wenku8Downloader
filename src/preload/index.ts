@@ -102,6 +102,7 @@ const searchApi: SearchApi = {
 
 const bookshelfApi: BookshelfApi = {
   getBookshelf: (refresh = false) => ipcRenderer.invoke('bookshelf:get', { refresh }),
+  addBookToBookshelf: (bookId: string) => ipcRenderer.invoke('bookshelf:add', { bookId }),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {

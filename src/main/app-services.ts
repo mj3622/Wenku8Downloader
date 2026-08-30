@@ -202,6 +202,7 @@ export function createAppServices(): AppServices {
   const bookshelf = new BookshelfService({
     source: new WenkuBookshelfSource(crawler, createControlFactory('background')),
     refreshSource: new WenkuBookshelfSource(crawler, createControlFactory('interactive')),
+    mutationSource: new WenkuBookshelfSource(crawler, createControlFactory('interactive')),
     cache: new BookshelfCacheRepository(cacheStore),
     getCredentialRevision: () => config.getCredentialRevision(),
     getDownloadSnapshot: () => downloads.getSnapshot(),

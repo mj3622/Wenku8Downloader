@@ -207,6 +207,7 @@ function createServices(
     },
     bookshelf: {
       getPage: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
+      addBook: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
     },
     updates: {
       check: vi.fn(async () => ({
@@ -563,12 +564,24 @@ describe('registerIpcHandlers application operations', () => {
       .rejects.toThrow('版本检查请求格式无效')
   })
 
-  it('accepts only the fixed readonly bookshelf refresh option', async () => {
+  it('accepts only the fixed bookshelf refresh option', async () => {
     await invoke('bookshelf:get', {}, { refresh: true })
 
     expect(services.bookshelf.getPage).toHaveBeenCalledWith({ refresh: true })
     await expect(invoke('bookshelf:get', {}, {
       refresh: false,
+      url: 'https://example.com/',
+    })).rejects.toThrow('请求参数格式无效')
+  })
+
+  it('validates and forwards only a book ID when adding to the bookshelf', async () => {
+    await invoke('bookshelf:add', {}, { bookId: '3057' })
+
+    expect(services.bookshelf.addBook).toHaveBeenCalledWith('3057')
+    await expect(invoke('bookshelf:add', {}, { bookId: '../3057' }))
+      .rejects.toThrow('作品编号')
+    await expect(invoke('bookshelf:add', {}, {
+      bookId: '3057',
       url: 'https://example.com/',
     })).rejects.toThrow('请求参数格式无效')
   })

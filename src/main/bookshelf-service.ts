@@ -16,6 +16,10 @@ export interface BookshelfSource {
   fetchEntries(): Promise<RemoteBookshelfEntry[]>
 }
 
+export interface BookshelfMutationSource {
+  addBook(bookId: string): Promise<RemoteBookshelfEntry[]>
+}
+
 export interface BookshelfCache {
   captureWriteGuard(): CacheWriteGuard
   load(credentialRevision: number): Promise<CachedBookshelf | null>
@@ -25,6 +29,7 @@ export interface BookshelfCache {
 interface BookshelfServiceOptions {
   source: BookshelfSource
   refreshSource?: BookshelfSource
+  mutationSource?: BookshelfMutationSource
   cache: BookshelfCache
   getCredentialRevision: () => number
   getDownloadSnapshot: () => DownloadSnapshot
@@ -81,6 +86,7 @@ function mergeEntry(entry: RemoteBookshelfEntry, downloads: DownloadSnapshot): B
 export class BookshelfService {
   private readonly source: BookshelfSource
   private readonly refreshSource: BookshelfSource
+  private readonly mutationSource?: BookshelfMutationSource
   private readonly cache: BookshelfCache
   private readonly getCredentialRevision: () => number
   private readonly getDownloadSnapshot: () => DownloadSnapshot
@@ -92,6 +98,7 @@ export class BookshelfService {
   constructor(options: BookshelfServiceOptions) {
     this.source = options.source
     this.refreshSource = options.refreshSource ?? options.source
+    this.mutationSource = options.mutationSource
     this.cache = options.cache
     this.getCredentialRevision = options.getCredentialRevision
     this.getDownloadSnapshot = options.getDownloadSnapshot
@@ -120,6 +127,31 @@ export class BookshelfService {
     this.inflight.set(revision, request)
     const result = await request
     return this.toPage(result.value, result.stale)
+  }
+
+  async addBook(bookId: string): Promise<BookshelfPage> {
+    if (!this.mutationSource) throw new Error('当前书架不支持添加作品')
+    const revision = this.getCredentialRevision()
+    const epoch = this.epoch
+    const guard = this.cache.captureWriteGuard()
+    const entries = await this.mutationSource.addBook(bookId)
+    this.assertRevision(revision)
+    if (!entries.some(entry => entry.bookId === bookId)) {
+      throw new Error('作品未出现在原站书架中，请确认登录状态后重试')
+    }
+
+    const value: CachedBookshelf = {
+      credentialRevision: revision,
+      fetchedAt: this.now(),
+      entries: entries.map(entry => ({ ...entry })),
+    }
+    if (epoch === this.epoch) {
+      this.epoch++
+      this.inflight.clear()
+      this.memory.set(revision, value)
+      await this.cache.save(value, guard)
+    }
+    return this.toPage(value, false)
   }
 
   clearMemory(): void {

@@ -175,6 +175,7 @@ export interface BookshelfPage {
 
 export interface BookshelfApi {
   getBookshelf(refresh?: boolean): Promise<BookshelfPage>
+  addBookToBookshelf(bookId: string): Promise<BookshelfPage>
 }
 
 export const DOWNLOAD_TASK_TYPES = ['epub_full', 'epub_volume', 'images'] as const

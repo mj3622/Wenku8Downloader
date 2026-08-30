@@ -4,6 +4,7 @@ import type { CachedBookshelf } from '../bookshelf-cache-repository'
 import {
   BookshelfService,
   type BookshelfCache,
+  type BookshelfMutationSource,
   type BookshelfSource,
 } from '../bookshelf-service'
 
@@ -26,6 +27,7 @@ function setup(options: {
   cached?: CachedBookshelf | null
   source?: BookshelfSource
   refreshSource?: BookshelfSource
+  mutationSource?: BookshelfMutationSource
   snapshot?: DownloadSnapshot
 } = {}) {
   let now = options.now ?? 1_000_000
@@ -43,6 +45,7 @@ function setup(options: {
   const service = new BookshelfService({
     source,
     refreshSource: options.refreshSource,
+    mutationSource: options.mutationSource,
     cache,
     getCredentialRevision: () => revision,
     getDownloadSnapshot: () => options.snapshot ?? downloads(),
@@ -185,5 +188,34 @@ describe('BookshelfService', () => {
     await expect(service.getPage()).resolves.toMatchObject({
       entries: [expect.objectContaining({ localState: 'unknown', updateAvailable: false })],
     })
+  })
+
+  it('adds a book, verifies the remote result and replaces the cached bookshelf', async () => {
+    const mutationSource = { addBook: vi.fn(async () => [ENTRY]) }
+    const { service, source, cache } = setup({ mutationSource })
+
+    const page = await service.addBook('101')
+
+    expect(page).toMatchObject({
+      stale: false,
+      entries: [expect.objectContaining({ bookId: '101', localState: 'none' })],
+    })
+    expect(mutationSource.addBook).toHaveBeenCalledWith('101')
+    expect(cache.save).toHaveBeenCalledWith(expect.objectContaining({
+      credentialRevision: 1,
+      entries: [ENTRY],
+    }), { epoch: 0 })
+    await expect(service.getPage()).resolves.toMatchObject({
+      entries: [expect.objectContaining({ bookId: '101' })],
+    })
+    expect(source.fetchEntries).not.toHaveBeenCalled()
+  })
+
+  it('does not update the local bookshelf when the added book is absent remotely', async () => {
+    const mutationSource = { addBook: vi.fn(async () => []) }
+    const { service, cache } = setup({ mutationSource })
+
+    await expect(service.addBook('101')).rejects.toThrow('作品未出现在原站书架中')
+    expect(cache.save).not.toHaveBeenCalled()
   })
 })

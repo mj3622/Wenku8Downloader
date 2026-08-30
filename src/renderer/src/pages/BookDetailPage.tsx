@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   IconArrowLeft,
+  IconBookmarkPlus,
   IconBolt,
+  IconCheck,
   IconDownload,
   IconExternalLink,
+  IconLoader2,
   IconRefresh,
 } from '@tabler/icons-react'
 import {
@@ -13,6 +16,7 @@ import {
   type EnqueueDownloadInput,
 } from '../../../shared/ipc-types'
 import { useBookStore } from '../stores/bookStore'
+import { useBookshelfUpdateStore } from '../stores/bookshelfUpdateStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusAlert from '../components/StatusAlert'
@@ -22,6 +26,7 @@ import { api } from '../api/client'
 import { getUserFeedback } from '../utils/userFeedback'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
+type BookshelfActionStatus = 'idle' | 'adding' | 'added'
 
 const tabs: { key: DownloadTab; label: string }[] = [
   { key: 'full', label: '整本下载' },
@@ -54,7 +59,15 @@ export default function BookDetailPage() {
   const { book, loading, error, fetchBook, clear } = useBookStore()
   const { downloadEpub, downloadImages, downloadBatch } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
+  const [bookshelfAction, setBookshelfAction] = useState<{
+    bookId: string
+    status: BookshelfActionStatus
+  }>({ bookId: '', status: 'idle' })
   const warnedEmptyBooks = useRef(new Set<string>())
+  const bookshelfStatus: BookshelfActionStatus = book
+    && bookshelfAction.bookId === book.book_id
+    ? bookshelfAction.status
+    : 'idle'
 
   useEffect(() => {
     fetchBook(id ?? '')
@@ -119,6 +132,26 @@ export default function BookDetailPage() {
       await api.openExternal(sourceUrl)
     } catch (error) {
       toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
+  const handleAddToBookshelf = async (): Promise<void> => {
+    if (!book) return
+    const bookId = book.book_id
+    setBookshelfAction({ bookId, status: 'adding' })
+    try {
+      const page = await api.addBookToBookshelf(bookId)
+      useBookshelfUpdateStore.getState().syncPage(page)
+      setBookshelfAction({ bookId, status: 'added' })
+      toast.success({
+        title: '已加入书架',
+        message: `《${book.basic_info['标题']}》已同步到原站书架`,
+      })
+    } catch (error) {
+      setBookshelfAction(current => (
+        current.bookId === bookId ? { bookId, status: 'idle' } : current
+      ))
+      toast.error(getUserFeedback(error, 'bookshelf-add'))
     }
   }
 
@@ -210,17 +243,40 @@ export default function BookDetailPage() {
                   </>
                 )}
               </div>
-              <a
-                href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
-                onClick={(event) => {
-                  event.preventDefault()
-                  void handleOpenSource()
-                }}
-                className="motion-pressable mt-4 inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-[13px] font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
-              >
-                <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
-                在原网站查看
-              </a>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={bookshelfStatus !== 'idle'}
+                  onClick={() => void handleAddToBookshelf()}
+                  className={`motion-pressable inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed ${
+                    bookshelfStatus === 'added'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-apple-accent/25 bg-apple-accent-light text-apple-accent hover:border-apple-accent/40'
+                  }`}
+                >
+                  {bookshelfStatus === 'adding' ? (
+                    <IconLoader2 aria-hidden="true" className="motion-spinner animate-spin" size={16} stroke={1.8} />
+                  ) : bookshelfStatus === 'added' ? (
+                    <IconCheck aria-hidden="true" size={16} stroke={1.9} />
+                  ) : (
+                    <IconBookmarkPlus aria-hidden="true" size={16} stroke={1.8} />
+                  )}
+                  {bookshelfStatus === 'adding'
+                    ? '正在加入'
+                    : bookshelfStatus === 'added' ? '已在书架' : '加入书架'}
+                </button>
+                <a
+                  href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void handleOpenSource()
+                  }}
+                  className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-[13px] font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                >
+                  <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
+                  在原网站查看
+                </a>
+              </div>
             </div>
           </div>
 

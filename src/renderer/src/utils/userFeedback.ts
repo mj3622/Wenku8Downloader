@@ -3,6 +3,7 @@ export type FeedbackContext =
   | 'catalog'
   | 'discovery'
   | 'bookshelf'
+  | 'bookshelf-add'
   | 'book'
   | 'config-load'
   | 'config-save'
@@ -50,6 +51,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   bookshelf: {
     title: '书架加载失败',
     message: '暂时无法读取原站书架，请检查登录状态和网络后重试',
+  },
+  'bookshelf-add': {
+    title: '加入书架失败',
+    message: '暂时无法将作品加入原站书架，请检查登录状态和网络后重试',
   },
   book: {
     title: '作品信息加载失败',

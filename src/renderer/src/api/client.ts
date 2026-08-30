@@ -99,6 +99,9 @@ export const api = {
   getBookshelf: (refresh = false): Promise<BookshelfPage> => (
     invoke('bookshelf', () => window.electronAPI.getBookshelf(refresh))
   ),
+  addBookToBookshelf: (bookId: string): Promise<BookshelfPage> => (
+    invoke('bookshelf-add', () => window.electronAPI.addBookToBookshelf(bookId))
+  ),
 
   // 下载
   getDownloadSnapshot: () =>
