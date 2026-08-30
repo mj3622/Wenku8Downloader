@@ -34,7 +34,7 @@ function parseChapter(value: unknown) {
 function snapshot(generationKey = OLD_KEY): BookSnapshot {
   const version = generationKey === NEW_KEY ? NEW_VERSION : OLD_VERSION
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     bookId: '123',
     checkedAt: 1_000,
     version,
@@ -48,6 +48,7 @@ function snapshot(generationKey = OLD_KEY): BookSnapshot {
       '更新时间': version.fields.updatedAt,
       '全文长度': '1',
       '简介': '简介', 'cover': null,
+      '标签': [], '动画化': false, '热度': null,
     },
   }
 }

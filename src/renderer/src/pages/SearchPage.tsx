@@ -47,12 +47,17 @@ const tabs: Array<{ key: Tab; label: string }> = [
 
 const PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
 const ROUTE_KEYS = new Set([
-  'tab', 'publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page',
+  'mode', 'tab', 'q', 'publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page',
 ])
 
-function buildSearchParams(tab: Tab, query: CatalogQuery): URLSearchParams {
+function buildSearchParams(
+  tab: Tab,
+  query: CatalogQuery,
+  searchTerm?: string,
+): URLSearchParams {
   const params = new URLSearchParams()
   if (tab !== 'browse') params.set('tab', tab)
+  if ((tab === 'title' || tab === 'author') && searchTerm) params.set('q', searchTerm)
   if (query.publisher) params.set('publisher', query.publisher)
   if (query.initial) params.set('initial', query.initial)
   if (query.tag) params.set('tag', query.tag)
@@ -66,12 +71,24 @@ function buildSearchParams(tab: Tab, query: CatalogQuery): URLSearchParams {
 function parseRoute(params: URLSearchParams): {
   tab: Tab
   query: CatalogQuery
+  searchTerm: string | null
   invalid: boolean
 } {
   let invalid = Array.from(params.keys()).some(key => !ROUTE_KEYS.has(key))
+  const mode = params.get('mode')
+  if (mode !== null && mode !== 'browse') invalid = true
   const rawTab = params.get('tab') ?? 'browse'
   const tab = tabs.some(item => item.key === rawTab) ? rawTab as Tab : 'browse'
   if (tab !== rawTab) invalid = true
+  const rawSearchTerm = params.get('q')
+  const normalizedSearchTerm = rawSearchTerm?.trim() ?? ''
+  const searchTerm = normalizedSearchTerm && normalizedSearchTerm.length <= 100
+    ? normalizedSearchTerm
+    : null
+  if (rawSearchTerm !== null
+    && ((tab !== 'title' && tab !== 'author') || searchTerm === null || rawSearchTerm !== searchTerm)) {
+    invalid = true
+  }
 
   const query: CatalogQuery = { ...DEFAULT_CATALOG_QUERY }
   const publisher = params.get('publisher')
@@ -125,7 +142,7 @@ function parseRoute(params: URLSearchParams): {
     query.sort = 'lastupdate'
     invalid = true
   }
-  return { tab, query, invalid }
+  return { tab, query, searchTerm, invalid }
 }
 
 function searchHref(query: CatalogQuery): string {
@@ -151,12 +168,18 @@ export default function SearchPage() {
         title: '找书条件已调整',
         message: '无效或冲突的条件已恢复为可用设置',
       })
-      setSearchParams(buildSearchParams(route.tab, route.query), { replace: true })
+      setSearchParams(buildSearchParams(route.tab, route.query, route.searchTerm ?? undefined), { replace: true })
     }
     const current = useCatalogStore.getState()
+    const currentSearch = useSearchStore.getState()
     if (route.tab !== 'browse') {
       if (catalogQueryKey(current.query) !== catalogQueryKey(route.query)) {
         current.setQuery(route.query)
+      }
+      if ((route.tab === 'title' || route.tab === 'author')
+        && route.searchTerm
+        && (currentSearch.lastType !== route.tab || currentSearch.lastQuery !== route.searchTerm)) {
+        void currentSearch.search(route.tab, route.searchTerm)
       }
       return
     }
@@ -164,7 +187,7 @@ export default function SearchPage() {
     const hasCurrentResult = current.hasLoaded
       && catalogQueryKey(current.query) === catalogQueryKey(route.query)
     if (!hasCurrentResult) void current.load(route.query)
-  }, [paramsKey, route, setSearchParams])
+  }, [paramsKey, route, searchState.lastQuery, searchState.lastType, setSearchParams])
 
   const selectTab = (nextTab: Tab) => {
     setTab(nextTab)
@@ -442,6 +465,10 @@ function SearchTab({
     ? 0
     : Math.max(0, Math.ceil((retryAt - now) / 1_000))
   const coolingDown = cooldownSeconds > 0
+
+  useEffect(() => {
+    if (lastQuery !== null) setValue(lastQuery)
+  }, [lastQuery])
 
   useEffect(() => {
     if (retryAt === null || retryAt <= Date.now()) return

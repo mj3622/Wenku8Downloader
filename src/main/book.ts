@@ -4,13 +4,16 @@ import type {
   WebCrawler,
 } from './crawler'
 import type { TitleFormat } from '../shared/config-types'
+import type {
+  BasicInfo,
+  BookVersionFields,
+  Chapter,
+} from '../shared/book-types'
 import { formatBookTitle } from '../shared/title-format'
-import type { BasicInfo, Chapter } from './types'
 import {
   createBookVersion,
   type BookSnapshot,
   type BookVersion,
-  type BookVersionFields,
 } from './book-cache-model'
 import type { BookResourceCache } from './book-cache-repository'
 import {
@@ -86,6 +89,9 @@ export class Book {
     '更新时间': null,
     '全文长度': null,
     '简介': '',
+    '标签': [],
+    '动画化': false,
+    '热度': null,
     'cover': null,
   }
 
@@ -168,8 +174,28 @@ export class Book {
 
     let latestChapter: string | null = null
     let description = ''
+    let tags: string[] = []
+    let animated = false
+    let heat: string | null = null
     $('#content span.hottext').each((_i, element) => {
-      const text = $(element).text()
+      const text = $(element).text().replace(/\s+/g, ' ').trim()
+      if (/\bTags\s*[:：]/i.test(text)) {
+        const values = text.split(/\bTags\s*[:：]/i).slice(1).join(':')
+        const seen = new Set<string>()
+        tags = values
+          .split(/[\s,，、]+/)
+          .map(value => value.trim())
+          .filter(value => {
+            if (!value || value.length > 50 || seen.has(value)) return false
+            seen.add(value)
+            return true
+          })
+          .slice(0, 30)
+      }
+      if (/已(?:动画|動畫)化/.test(text)) animated = true
+      if (text.includes('作品热度') || text.includes('作品熱度')) {
+        heat = text.split(/(?:作品热度|作品熱度)\s*[:：]/).slice(1).join(':').trim() || null
+      }
       if (text.includes('最新章节') || text.includes('最近章节')) {
         const link = $(element).nextAll('span').first().find('a')
         if (link.length > 0) latestChapter = link.text().trim()
@@ -188,6 +214,9 @@ export class Book {
       '更新时间': cells[3]?.split('：')[1] || null,
       '全文长度': cells[4]?.split('：')[1] || null,
       '简介': description,
+      '标签': tags,
+      '动画化': animated,
+      '热度': heat,
       'cover': contentDiv.find('img').first().attr('src') || null,
     }
     return {
@@ -241,7 +270,7 @@ export class Book {
     book.baseChapterUrl = new URL('.', page.chapterIndexUrl).toString()
     book.volumes = volumes
     book.pictureUrls = book.buildPictureUrlMap()
-    book.basicInfo = { ...page.basicInfo }
+    book.basicInfo = { ...page.basicInfo, '标签': [...page.basicInfo['标签']] }
     return book
   }
 
@@ -267,13 +296,13 @@ export class Book {
       ]),
     )
     book.pictureUrls = book.buildPictureUrlMap()
-    book.basicInfo = { ...snapshot.basicInfo }
+    book.basicInfo = { ...snapshot.basicInfo, '标签': [...snapshot.basicInfo['标签']] }
     return book
   }
 
   toSnapshot(checkedAt: number): BookSnapshot {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       bookId: this.bookId,
       checkedAt,
       version: {
@@ -289,7 +318,7 @@ export class Book {
           chapters.map(chapter => ({ ...chapter })),
         ]),
       ),
-      basicInfo: { ...this.basicInfo },
+      basicInfo: { ...this.basicInfo, '标签': [...this.basicInfo['标签']] },
     }
   }
 

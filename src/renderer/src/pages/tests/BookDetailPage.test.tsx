@@ -2,13 +2,17 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   book: {
     book_id: '3057',
-    basic_info: { 标题: '测试作品', 作者: '测试作者', cover: 'https://example.com/book.jpg' },
+    basic_info: {
+      标题: '测试作品', 作者: '测试作者', 出版社: '小学馆', 最新章节: '第十章',
+      连载状态: '连载中', 更新时间: '2026-08-29', 全文长度: '10000字', 简介: '',
+      标签: ['校园', '青春'], 动画化: true, 热度: 'S级', cover: 'https://example.com/book.jpg',
+    },
     volumes: {} as Record<string, unknown[]>,
   },
   fetchBook: vi.fn(),
@@ -46,6 +50,11 @@ vi.mock('../../api/client', () => ({
 import BookDetailPage from '../BookDetailPage'
 import { useToastStore } from '../../stores/toastStore'
 
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+}
+
 let container: HTMLDivElement
 let root: Root
 const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -63,6 +72,9 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.book.volumes = {}
+  mocks.book.basic_info.标签 = ['校园', '青春']
+  mocks.book.basic_info.动画化 = true
+  mocks.book.basic_info.热度 = 'S级'
   mocks.getVolumeCovers.mockResolvedValue({ covers: {} })
   mocks.openExternal.mockResolvedValue(undefined)
   useToastStore.getState().clear()
@@ -77,6 +89,60 @@ afterEach(async () => {
 })
 
 describe('BookDetailPage', () => {
+  it('shows related metadata and routes author, publisher and tags back to find-book filters', async () => {
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    expect(container.textContent).toContain('已动画化')
+    expect(container.textContent).toContain('S级')
+
+    const author = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '测试作者')
+    await act(async () => author?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?tab=author&q=%E6%B5%8B%E8%AF%95%E4%BD%9C%E8%80%85')
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+    const publisher = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '小学馆')
+    await act(async () => publisher?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?mode=browse&publisher=10')
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+    const tag = container.querySelector<HTMLButtonElement>('[aria-label="按标签“校园”找书"]')
+    await act(async () => tag?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?mode=browse&tag=%E6%A0%A1%E5%9B%AD')
+  })
+
   it('opens the corresponding original detail page through the external-link boundary', async () => {
     await act(async () => root.render(
       <MemoryRouter

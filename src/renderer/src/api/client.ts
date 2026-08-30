@@ -19,6 +19,7 @@ import type {
   RankingType,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
+export type { BookInfo } from '../../../shared/book-types'
 export type { SearchResult } from '../../../shared/ipc-types'
 import {
   toUserFacingError,
@@ -118,12 +119,6 @@ export const api = {
     invoke('select-folder', () => window.electronAPI.selectFolder()),
   openExternal: (url: string) =>
     invoke('open-external', () => window.electronAPI.openExternal(url)),
-}
-
-export type BookInfo = {
-  book_id: string
-  basic_info: Record<string, string>
-  volumes: Record<string, { name: string; link: string }[]>
 }
 
 export default api

@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   IconArrowLeft,
+  IconBolt,
   IconDownload,
   IconExternalLink,
   IconRefresh,
 } from '@tabler/icons-react'
+import {
+  CATALOG_PUBLISHER_OPTIONS,
+  CATALOG_TAGS,
+} from '../../../shared/ipc-types'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -22,6 +27,25 @@ const tabs: { key: DownloadTab; label: string }[] = [
   { key: 'divided', label: '分卷下载' },
   { key: 'pictures', label: '插图下载' },
 ]
+
+const publisherByLabel = new Map<string, string>(
+  CATALOG_PUBLISHER_OPTIONS.map(option => [option.label, option.value]),
+)
+
+function authorSearchHref(author: string): string {
+  const params = new URLSearchParams({ tab: 'author', q: author })
+  return `/search?${params.toString()}`
+}
+
+function publisherBrowseHref(publisher: string): string | null {
+  const value = publisherByLabel.get(publisher)
+  if (!value) return null
+  return `/search?${new URLSearchParams({ mode: 'browse', publisher: value }).toString()}`
+}
+
+function tagBrowseHref(tag: string): string {
+  return `/search?${new URLSearchParams({ mode: 'browse', tag }).toString()}`
+}
 
 export default function BookDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -56,9 +80,9 @@ export default function BookDetailPage() {
       return
     }
     if (type === 'pictures') {
-      downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
+      downloadImages(book.book_id, book.basic_info['标题'], book.basic_info['cover'] ?? undefined)
     } else {
-      downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
+      downloadEpub(book.book_id, book.basic_info['标题'], book.basic_info['cover'] ?? undefined)
     }
     navigate('/download')
   }
@@ -76,7 +100,7 @@ export default function BookDetailPage() {
       return
     }
     volumes.forEach((volumeName) => {
-      const cover = book.basic_info['cover']
+      const cover = book.basic_info['cover'] ?? undefined
       if (type === 'pictures') {
         downloadImages(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
       } else {
@@ -134,22 +158,56 @@ export default function BookDetailPage() {
 
       {book && (
         <>
-          {/* 信息区 */}
-          <div className="flex items-start gap-6 mb-6">
+          <div className="mb-6 flex items-start gap-6">
             <BookCover
               src={book.basic_info['cover']}
               title={book.basic_info['标题'] ?? '作品'}
               className="w-[130px] h-[184px] rounded-[14px] shadow-md"
             />
             <div className="min-w-0 flex-1">
-              <h1 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {book.basic_info['连载状态'] && (
+                  <span className="rounded-md bg-apple-bg px-2 py-1 text-[11px] font-medium text-apple-secondary">
+                    {book.basic_info['连载状态']}
+                  </span>
+                )}
+                {book.basic_info['动画化'] && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+                    <IconBolt aria-hidden="true" size={13} stroke={1.8} />
+                    已动画化
+                  </span>
+                )}
+              </div>
+              <h1 className="mb-2 break-words text-[20px] font-bold tracking-tight text-apple-heading">
                 {book.basic_info['标题']}
               </h1>
-              <p className="text-[12px] text-apple-secondary">
-                {book.basic_info['作者']}
-                {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
-                {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-apple-secondary">
+                {book.basic_info['作者'] && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(authorSearchHref(book.basic_info['作者']))}
+                    className="motion-pressable max-w-full break-all rounded px-1 py-0.5 text-left text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                  >
+                    {book.basic_info['作者']}
+                  </button>
+                )}
+                {book.basic_info['出版社'] && (
+                  <>
+                    <span aria-hidden="true" className="text-apple-tertiary">·</span>
+                    {publisherBrowseHref(book.basic_info['出版社']) ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(publisherBrowseHref(book.basic_info['出版社'])!)}
+                        className="motion-pressable rounded px-1 py-0.5 text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                      >
+                        {book.basic_info['出版社']}
+                      </button>
+                    ) : (
+                      <span>{book.basic_info['出版社']}</span>
+                    )}
+                  </>
+                )}
+              </div>
               <a
                 href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
                 onClick={(event) => {
@@ -164,9 +222,8 @@ export default function BookDetailPage() {
             </div>
           </div>
 
-          {/* 统计区 */}
-          <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
-            <div className="grid grid-cols-3 gap-4">
+          <div className="mb-6 rounded-xl border border-apple-border-subtle bg-apple-card p-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-4">
               {book.basic_info['最新章节'] && (
                 <div>
                   <h4 className="text-[12px] font-semibold text-apple-heading mb-1">最新</h4>
@@ -185,10 +242,45 @@ export default function BookDetailPage() {
                   <p className="text-[13px] text-apple-body">{book.basic_info['全文长度']}</p>
                 </div>
               )}
+              {book.basic_info['热度'] && (
+                <div>
+                  <h4 className="mb-1 text-[12px] font-semibold text-apple-heading">热度</h4>
+                  <p className="break-words text-[13px] text-apple-body">{book.basic_info['热度']}</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* 简介 */}
+          {book.basic_info['标签'].length > 0 && (
+            <section aria-labelledby="book-tags-heading" className="mb-6">
+              <h2 id="book-tags-heading" className="mb-2 text-[12px] font-semibold text-apple-heading">
+                标签
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {book.basic_info['标签'].map(tag => (
+                  CATALOG_TAGS.includes(tag as typeof CATALOG_TAGS[number]) ? (
+                    <button
+                      key={tag}
+                      type="button"
+                      aria-label={`按标签“${tag}”找书`}
+                      onClick={() => navigate(tagBrowseHref(tag))}
+                      className="motion-pressable rounded-lg border border-apple-border-input bg-apple-card px-2.5 py-1 text-[12px] text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                    >
+                      {tag}
+                    </button>
+                  ) : (
+                    <span
+                      key={tag}
+                      className="rounded-lg border border-apple-border-subtle bg-apple-bg px-2.5 py-1 text-[12px] text-apple-secondary"
+                    >
+                      {tag}
+                    </span>
+                  )
+                ))}
+              </div>
+            </section>
+          )}
+
           {book.basic_info['简介'] && (
             <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
               <h4 className="text-[12px] font-semibold text-apple-heading mb-2">简介</h4>
@@ -198,7 +290,6 @@ export default function BookDetailPage() {
             </div>
           )}
 
-          {/* 下载区 — 方案 B Tab 切换 */}
           <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-apple-card shadow-card">
             <div role="group" aria-label="下载方式" className="flex border-b border-apple-border-subtle">
               {tabs.map((t) => (

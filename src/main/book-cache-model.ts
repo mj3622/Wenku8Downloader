@@ -1,11 +1,11 @@
 import { createHash } from 'crypto'
-import type { BasicInfo, Chapter } from './types'
+import type {
+  BasicInfo,
+  BookVersionFields,
+  Chapter,
+} from '../shared/book-types'
 
-export interface BookVersionFields {
-  updatedAt: string
-  latestChapter: string
-  status: string
-}
+export type { BookVersionFields } from '../shared/book-types'
 
 export interface BookVersion {
   fields: BookVersionFields
@@ -14,7 +14,7 @@ export interface BookVersion {
 }
 
 export interface BookSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   bookId: string
   checkedAt: number
   version: BookVersion
@@ -58,7 +58,11 @@ function isShortString(value: unknown, max = 2_048): value is string {
   return typeof value === 'string' && value.length <= max
 }
 
-function parseBasicInfo(value: unknown): BasicInfo | null {
+function containsHtml(value: string): boolean {
+  return /<\/?[a-z][^>]*>/i.test(value)
+}
+
+function parseBasicInfo(value: unknown, sourceSchemaVersion: 1 | 2): BasicInfo | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const data = value as Record<string, unknown>
   const stringKeys = ['标题', '作者', '出版社', '连载状态', '简介'] as const
@@ -69,6 +73,25 @@ function parseBasicInfo(value: unknown): BasicInfo | null {
   if (!nullableKeys.every(key => data[key] === null || isShortString(data[key]))) {
     return null
   }
+  let tags: string[] = []
+  let animated = false
+  let heat: string | null = null
+  if (sourceSchemaVersion === 2) {
+    if (!Array.isArray(data['标签']) || data['标签'].length > 30) return null
+    const seen = new Set<string>()
+    tags = []
+    for (const tag of data['标签']) {
+      if (!isShortString(tag, 50) || tag.trim() !== tag || !tag || containsHtml(tag)) return null
+      if (seen.has(tag)) return null
+      seen.add(tag)
+      tags.push(tag)
+    }
+    if (typeof data['动画化'] !== 'boolean') return null
+    animated = data['动画化']
+    if (data['热度'] !== null
+      && (!isShortString(data['热度'], 200) || containsHtml(data['热度']))) return null
+    heat = data['热度'] as string | null
+  }
   return {
     '标题': data['标题'] as string,
     '作者': data['作者'] as string,
@@ -78,6 +101,9 @@ function parseBasicInfo(value: unknown): BasicInfo | null {
     '更新时间': data['更新时间'] as string | null,
     '全文长度': data['全文长度'] as string | null,
     '简介': data['简介'] as string,
+    '标签': tags,
+    '动画化': animated,
+    '热度': heat,
     'cover': data['cover'] as string | null,
   }
 }
@@ -102,7 +128,10 @@ function parseVolumes(value: unknown): Record<string, Chapter[]> | null {
 export function parseBookSnapshot(value: unknown): BookSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const data = value as Record<string, unknown>
-  if (data.schemaVersion !== 1 || !isShortString(data.bookId) || !BOOK_ID.test(data.bookId)) return null
+  if ((data.schemaVersion !== 1 && data.schemaVersion !== 2)
+    || !isShortString(data.bookId)
+    || !BOOK_ID.test(data.bookId)) return null
+  const sourceSchemaVersion = data.schemaVersion
   if (typeof data.checkedAt !== 'number' || !Number.isFinite(data.checkedAt) || data.checkedAt < 0) return null
   if (!isShortString(data.baseChapterUrl)
     || typeof data.legacyImportGenerationKey !== 'string'
@@ -136,10 +165,10 @@ export function parseBookSnapshot(value: unknown): BookSnapshot | null {
   if (expectedVersion.generationKey !== version.generationKey) return null
 
   const volumes = parseVolumes(data.volumes)
-  const basicInfo = parseBasicInfo(data.basicInfo)
+  const basicInfo = parseBasicInfo(data.basicInfo, sourceSchemaVersion)
   if (!volumes || !basicInfo) return null
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     bookId: data.bookId,
     checkedAt: data.checkedAt,
     version: {

@@ -224,6 +224,15 @@ describe('SearchPage', () => {
     })
   })
 
+  it('restores and runs an author search from a detail-page route', async () => {
+    await renderPage('/search?tab=author&q=%E6%B5%8B%E8%AF%95%E4%BD%9C%E8%80%85')
+
+    expect(button('作者').getAttribute('aria-selected')).toBe('true')
+    expect(mocks.searchAuthor).toHaveBeenCalledWith('测试作者')
+    expect((container.querySelector('input[placeholder="例如：三上库太"]') as HTMLInputElement).value)
+      .toBe('测试作者')
+  })
+
   it('does not submit another search from Enter while a request is pending', async () => {
     mocks.searchTitle.mockReturnValue(new Promise(() => undefined))
     await renderPage()
@@ -272,6 +281,17 @@ describe('SearchPage', () => {
     }, false)
     expect((container.querySelector('#catalog-publisher') as HTMLSelectElement).value).toBe('10')
     expect((container.querySelector('#catalog-initial') as HTMLSelectElement).value).toBe('A')
+  })
+
+  it('accepts detail-page browse mode and restores a tag filter', async () => {
+    await renderPage('/search?mode=browse&tag=%E6%A0%A1%E5%9B%AD')
+
+    expect(button('浏览').getAttribute('aria-selected')).toBe('true')
+    expect(mocks.getCatalog).toHaveBeenCalledWith({
+      ...DEFAULT_CATALOG_QUERY,
+      tag: '校园',
+    }, false)
+    expect(useToastStore.getState().items).toHaveLength(0)
   })
 
   it('shows catalog metadata, empty results, and a retry action', async () => {

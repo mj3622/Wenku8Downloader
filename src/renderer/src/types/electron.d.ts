@@ -1,4 +1,5 @@
 import type { ConfigApi } from '../../../shared/config-types'
+import type { BookInfo } from '../../../shared/book-types'
 import type {
   CookieProgress,
   BookLoadOptions,
@@ -26,12 +27,6 @@ export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, CatalogAp
   reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
-}
-
-interface BookInfo {
-  book_id: string
-  basic_info: Record<string, string>
-  volumes: Record<string, { name: string; link: string }[]>
 }
 
 declare global {

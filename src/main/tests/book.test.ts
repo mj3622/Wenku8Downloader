@@ -6,6 +6,40 @@ import { createBookVersion, type BookSnapshot } from '../book-cache-model'
 import type { BookResourceCache } from '../book-cache-repository'
 
 describe('Book.create', () => {
+  it('parses detail tags, animation status and heat with bounded normalized tags', async () => {
+    const rawTags = [
+      ' 校园 ', '青春', '校园',
+      ...Array.from({ length: 30 }, (_, index) => `标签${index + 1}`),
+      'x'.repeat(51),
+    ].join(' ')
+    const bookPage = cheerio.load(`
+      <div id="content">
+        <div><a href="/novel/1/100/index.htm">小说目录</a></div>
+        <table><tr><td><b>测试作品</b></td></tr><tr></tr><tr>
+          <td>文库：测试</td><td>作者：测试作者</td><td>状态：连载</td>
+          <td>更新：2026-08-29</td><td>长度：100</td>
+        </tr></table>
+        <span class="hottext"><b>本作已动画化(含OVA/剧场版)</b></span>
+        <span class="hottext">作品Tags：${rawTags}</span>
+        <span class="hottext">作品热度：S级，当前热度上升指数为：A级</span>
+      </div>
+    `)
+    const chapterPage = cheerio.load(`
+      <table class="css"><tr><td class="vcss">第一卷</td></tr></table>
+    `)
+    const crawler = {
+      fetch: vi.fn().mockResolvedValueOnce(bookPage).mockResolvedValueOnce(chapterPage),
+    } as unknown as WebCrawler
+
+    const book = await Book.create('100', crawler)
+
+    expect(book.basicInfo['动画化']).toBe(true)
+    expect(book.basicInfo['热度']).toBe('S级，当前热度上升指数为：A级')
+    expect(book.basicInfo['标签']).toHaveLength(30)
+    expect(book.basicInfo['标签'].slice(0, 3)).toEqual(['校园', '青春', '标签1'])
+    expect(book.basicInfo['标签']).not.toContain('x'.repeat(51))
+  })
+
   it('passes the task cancellation signal through every metadata request', async () => {
     const bookPage = cheerio.load(`
       <div id="content">
@@ -170,7 +204,7 @@ describe('Book.create', () => {
       updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
     }, 1_000)
     const snapshot: BookSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       bookId: '100',
       checkedAt: 1_000,
       version,
@@ -181,6 +215,7 @@ describe('Book.create', () => {
         '标题': '测试作品', '作者': '作者', '出版社': '文库', '最新章节': '第一章',
         '连载状态': '连载', '更新时间': '2026-08-29', '全文长度': '1',
         '简介': '简介', 'cover': null,
+        '标签': [], '动画化': false, '热度': null,
       },
     }
     const fetch = vi.fn()
@@ -196,7 +231,7 @@ describe('Book.create', () => {
       updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
     }, 1_000)
     const snapshot: BookSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       bookId: '100',
       checkedAt: 1_000,
       version,
@@ -207,6 +242,7 @@ describe('Book.create', () => {
         '标题': '测试作品', '作者': '作者', '出版社': '文库', '最新章节': '第一章',
         '连载状态': '连载', '更新时间': '2026-08-29', '全文长度': '1',
         '简介': '简介', 'cover': 'https://img.example/cover.jpg',
+        '标签': [], '动画化': false, '热度': null,
       },
     }
     let epoch = 0
