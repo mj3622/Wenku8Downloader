@@ -84,6 +84,9 @@ const discoveryApi: DiscoveryApi = {
   getRanking: (type: RankingType, page: number, refresh = false) => (
     ipcRenderer.invoke('discovery:get-ranking', { type, page, refresh })
   ),
+  getAnnualRanking: (year: number, refresh = false) => (
+    ipcRenderer.invoke('discovery:get-annual-ranking', { year, refresh })
+  ),
 }
 
 const searchApi: SearchApi = {

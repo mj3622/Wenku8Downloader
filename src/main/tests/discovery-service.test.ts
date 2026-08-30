@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type {
+  AnnualRankingPage,
   DiscoveryHome,
   DiscoverySection,
   RankingPage,
@@ -28,18 +29,36 @@ function ranking(fetchedAt: number): RankingPage {
   }
 }
 
+function annualRanking(fetchedAt: number): AnnualRankingPage {
+  return {
+    year: 2026,
+    categories: {
+      bunko: [{ rank: 1, title: '测试文库作品', bookId: '3057' }],
+      tankobon: [{ rank: 1, title: '测试单行本作品' }],
+    },
+    fetchedAt,
+    stale: false,
+  }
+}
+
 function createHarness(options: {
   now?: number
   homeCache?: DiscoveryHome | null
   rankingCache?: RankingPage | null
+  annualCache?: AnnualRankingPage | null
 } = {}) {
   let now = options.now ?? 10 * MINUTE
   let homeCache = options.homeCache ?? null
   let rankingCache = options.rankingCache ?? null
+  let annualCache = options.annualCache ?? null
   const source = {
     fetchHome: vi.fn(async () => sections),
     fetchRanking: vi.fn(async (type: RankingType, page: number) => ({
       type, title: '总排行榜', page, totalPages: 2, books: sections[0].books,
+    })),
+    fetchAnnualRanking: vi.fn(async (year: number) => ({
+      year,
+      categories: annualRanking(0).categories,
     })),
   }
   const cache = {
@@ -52,6 +71,11 @@ function createHarness(options: {
     loadRanking: vi.fn(async () => rankingCache),
     saveRanking: vi.fn(async (value: RankingPage) => {
       rankingCache = value
+      return true
+    }),
+    loadAnnualRanking: vi.fn(async () => annualCache),
+    saveAnnualRanking: vi.fn(async (value: AnnualRankingPage) => {
+      annualCache = value
       return true
     }),
   }
@@ -120,6 +144,10 @@ describe('DiscoveryService', () => {
       fetchRanking: vi.fn(async (type: RankingType, page: number) => ({
         type, title: '总排行榜', page, totalPages: 2, books: sections[0].books,
       })),
+      fetchAnnualRanking: vi.fn(async (year: number) => ({
+        year,
+        categories: annualRanking(0).categories,
+      })),
     }
     const service = new DiscoveryService({
       source: harness.source,
@@ -134,6 +162,20 @@ describe('DiscoveryService', () => {
     expect(harness.source.fetchHome).toHaveBeenCalledTimes(1)
     expect(refreshSource.fetchHome).not.toHaveBeenCalled()
     expect(refreshSource.fetchRanking).toHaveBeenCalledWith('allvisit', 1)
+  })
+
+  it('keeps annual rankings fresh for 24 hours and falls back for up to 30 days', async () => {
+    const fresh = createHarness({ now: 24 * 60 * MINUTE, annualCache: annualRanking(0) })
+    await fresh.service.getAnnualRanking(2026)
+    expect(fresh.source.fetchAnnualRanking).not.toHaveBeenCalled()
+
+    const stale = createHarness({ now: 25 * 60 * MINUTE, annualCache: annualRanking(0) })
+    stale.source.fetchAnnualRanking.mockRejectedValueOnce(new Error('offline'))
+    await expect(stale.service.getAnnualRanking(2026)).resolves.toMatchObject({ stale: true })
+
+    const expired = createHarness({ now: 30 * 24 * 60 * MINUTE + 1, annualCache: annualRanking(0) })
+    expired.source.fetchAnnualRanking.mockRejectedValueOnce(new Error('offline'))
+    await expect(expired.service.getAnnualRanking(2026)).rejects.toThrow('offline')
   })
 
   it('clears process memory so a later read consults persistent cache again', async () => {

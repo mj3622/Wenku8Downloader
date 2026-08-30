@@ -1,5 +1,9 @@
 import {
   RANKING_TYPES,
+  ANNUAL_RANKING_MAX_YEAR,
+  ANNUAL_RANKING_MIN_YEAR,
+  type AnnualRankingEntry,
+  type AnnualRankingPage,
   type DiscoveryBook,
   type DiscoveryHome,
   type DiscoverySection,
@@ -133,7 +137,51 @@ function parseRankingEnvelope(value: unknown): RankingPage | null {
   }
 }
 
-function envelope(value: DiscoveryHome | RankingPage): CacheEnvelope {
+function parseAnnualBook(value: unknown): AnnualRankingEntry | null {
+  if (!isRecord(value)
+    || !Number.isSafeInteger(value.rank)
+    || (value.rank as number) < 1
+    || typeof value.title !== 'string'
+    || value.title.length === 0
+    || value.title.length > 500
+    || (value.bookId !== undefined
+      && (typeof value.bookId !== 'string' || !/^\d{1,12}$/.test(value.bookId)))) return null
+  const cover = value.cover === undefined ? undefined : parseHttpUrl(value.cover)
+  if (value.cover !== undefined && !cover) return null
+  return {
+    rank: value.rank as number,
+    title: value.title,
+    ...(value.bookId === undefined ? {} : { bookId: value.bookId as string }),
+    ...(cover ? { cover } : {}),
+  }
+}
+
+function parseAnnualBooks(value: unknown): AnnualRankingEntry[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) return null
+  const books = value.map(parseAnnualBook)
+  return books.some(book => book === null) ? null : books as AnnualRankingEntry[]
+}
+
+function parseAnnualEnvelope(value: unknown): AnnualRankingPage | null {
+  const raw = unwrap(value)
+  if (!isRecord(raw)
+    || !Number.isSafeInteger(raw.year)
+    || (raw.year as number) < ANNUAL_RANKING_MIN_YEAR
+    || (raw.year as number) > ANNUAL_RANKING_MAX_YEAR
+    || !isRecord(raw.categories)) return null
+  const fetchedAt = parseFetchedAt(raw.fetchedAt)
+  const bunko = parseAnnualBooks(raw.categories.bunko)
+  const tankobon = parseAnnualBooks(raw.categories.tankobon)
+  if (fetchedAt === null || !bunko || !tankobon) return null
+  return {
+    year: raw.year as number,
+    categories: { bunko, tankobon },
+    fetchedAt,
+    stale: false,
+  }
+}
+
+function envelope(value: DiscoveryHome | RankingPage | AnnualRankingPage): CacheEnvelope {
   return {
     schemaVersion: SCHEMA_VERSION,
     value: { ...value, stale: false },
@@ -166,6 +214,22 @@ export class DiscoveryCacheRepository {
   saveRanking(value: RankingPage, guard: CacheWriteGuard): Promise<boolean> {
     return this.store.writeSharedJson(
       this.address(`ranking:${value.type}:${value.page}`),
+      envelope(value),
+      guard,
+    )
+  }
+
+  async loadAnnualRanking(year: number): Promise<AnnualRankingPage | null> {
+    const value = await this.store.readSharedJson(
+      this.address(`annual:${year}`),
+      parseAnnualEnvelope,
+    )
+    return value?.year === year ? value : null
+  }
+
+  saveAnnualRanking(value: AnnualRankingPage, guard: CacheWriteGuard): Promise<boolean> {
+    return this.store.writeSharedJson(
+      this.address(`annual:${value.year}`),
       envelope(value),
       guard,
     )

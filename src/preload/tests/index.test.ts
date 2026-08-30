@@ -127,12 +127,17 @@ describe('preload download boundary', () => {
 
     await exposedApi.getDiscoveryHome(true)
     await exposedApi.getRanking('dayvisit', 2, false)
+    await exposedApi.getAnnualRanking(2026, true)
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'discovery:get-home', { refresh: true })
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'discovery:get-ranking', {
       type: 'dayvisit',
       page: 2,
       refresh: false,
+    })
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'discovery:get-annual-ranking', {
+      year: 2026,
+      refresh: true,
     })
   })
 

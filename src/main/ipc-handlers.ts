@@ -14,6 +14,7 @@ import type { DownloadExecutorBook } from './download-executor'
 import { resolveWithin } from './path-safety'
 import {
   validateBookId,
+  validateAnnualRankingPayload,
   validateCatalogPayload,
   validateDownloadArtifactPayload,
   validateDownloadBatchPayload,
@@ -72,7 +73,7 @@ export interface IpcServices {
   >
   search: Pick<SearchService, 'search'>
   catalog: Pick<CatalogService, 'getPage'>
-  discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
+  discovery: Pick<DiscoveryService, 'getHome' | 'getRanking' | 'getAnnualRanking'>
   bookshelf: Pick<BookshelfService, 'getPage'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
@@ -319,6 +320,17 @@ export function registerIpcHandlers(services: IpcServices): void {
     return runLoggedOperation('discovery.ranking', context, async () => {
       const result = await services.discovery.getRanking(type, page, { refresh })
       context.resultCount = result.books.length
+      context.stale = result.stale
+      return result
+    })
+  })
+
+  ipcMain.handle('discovery:get-annual-ranking', (_event, rawPayload: unknown) => {
+    const { year, refresh } = validateAnnualRankingPayload(rawPayload)
+    const context: LogContext = { year, refresh }
+    return runLoggedOperation('discovery.annual-ranking', context, async () => {
+      const result = await services.discovery.getAnnualRanking(year, { refresh })
+      context.resultCount = result.categories.bunko.length + result.categories.tankobon.length
       context.stale = result.stale
       return result
     })

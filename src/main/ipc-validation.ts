@@ -1,4 +1,6 @@
 import {
+  ANNUAL_RANKING_MAX_YEAR,
+  ANNUAL_RANKING_MIN_YEAR,
   CATALOG_ANIMATIONS,
   CATALOG_INITIALS,
   CATALOG_PUBLISHER_OPTIONS,
@@ -61,6 +63,9 @@ export function validateDiscoveryRankingPayload(value: unknown): {
     throw new Error('榜单请求格式无效')
   }
   const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'type' && key !== 'page' && key !== 'refresh')) {
+    throw new Error('榜单请求格式无效')
+  }
   if (
     typeof record.type !== 'string'
     || !RANKING_TYPES.includes(record.type as RankingType)
@@ -88,11 +93,33 @@ export function validateDiscoveryHomePayload(value: unknown): { refresh: boolean
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('发现页请求格式无效')
   }
-  const refresh = (value as Record<string, unknown>).refresh
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'refresh')) {
+    throw new Error('发现页请求格式无效')
+  }
+  const refresh = record.refresh
   if (refresh !== undefined && typeof refresh !== 'boolean') {
     throw new Error('发现页刷新参数无效')
   }
   return { refresh: refresh === true }
+}
+
+export function validateAnnualRankingPayload(value: unknown): {
+  year: number
+  refresh: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('年度榜单请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'year' && key !== 'refresh')
+    || !Number.isSafeInteger(record.year)
+    || (record.year as number) < ANNUAL_RANKING_MIN_YEAR
+    || (record.year as number) > ANNUAL_RANKING_MAX_YEAR
+    || (record.refresh !== undefined && typeof record.refresh !== 'boolean')) {
+    throw new Error('年度榜单请求格式无效')
+  }
+  return { year: record.year as number, refresh: record.refresh === true }
 }
 
 export function validateCatalogPayload(value: unknown): {

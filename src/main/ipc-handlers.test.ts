@@ -196,6 +196,12 @@ function createServices(
       getRanking: vi.fn(async (type, page) => ({
         type, page, title: '排行榜', totalPages: 1, books: [], fetchedAt: 1, stale: false,
       })),
+      getAnnualRanking: vi.fn(async year => ({
+        year,
+        categories: { bunko: [], tankobon: [] },
+        fetchedAt: 1,
+        stale: false,
+      })),
     },
     bookshelf: {
       getPage: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
@@ -518,6 +524,7 @@ describe('registerIpcHandlers application operations', () => {
     await invoke('discovery:get-ranking', {}, {
       type: 'monthvisit', page: 3, refresh: false,
     })
+    await invoke('discovery:get-annual-ranking', {}, { year: 2026, refresh: true })
 
     expect(services.discovery.getHome).toHaveBeenCalledWith({ refresh: true })
     expect(services.discovery.getRanking).toHaveBeenCalledWith(
@@ -525,9 +532,12 @@ describe('registerIpcHandlers application operations', () => {
       3,
       { refresh: false },
     )
+    expect(services.discovery.getAnnualRanking).toHaveBeenCalledWith(2026, { refresh: true })
     await expect(invoke('discovery:get-ranking', {}, {
       type: 'arbitrary', page: 1,
     })).rejects.toThrow('榜单类型')
+    await expect(invoke('discovery:get-annual-ranking', {}, { year: 2027 }))
+      .rejects.toThrow('年度榜单')
   })
 
   it('accepts only the fixed readonly bookshelf refresh option', async () => {

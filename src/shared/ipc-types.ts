@@ -349,7 +349,11 @@ export const RANKING_OPTIONS = [
   { type: 'monthvisit', label: '月排行榜' },
   { type: 'dayvisit', label: '日排行榜' },
   { type: 'weekvote', label: '本周推荐榜' },
+  { type: 'monthvote', label: '本月推荐榜' },
+  { type: 'dayvote', label: '今日推荐榜' },
+  { type: 'allvote', label: '总推荐榜' },
   { type: 'goodnum', label: '收藏榜' },
+  { type: 'size', label: '字数榜' },
   { type: 'lastupdate', label: '最近更新' },
   { type: 'anime', label: '动画化作品' },
   { type: 'postdate', label: '最新入库' },
@@ -405,7 +409,39 @@ export interface RankingPage {
   stale: boolean
 }
 
+export const ANNUAL_RANKING_MIN_YEAR = 2005
+export const ANNUAL_RANKING_MAX_YEAR = 2026
+export const ANNUAL_RANKING_FRESH_MS = 24 * 60 * 60 * 1000
+export const ANNUAL_RANKING_YEARS = Object.freeze(
+  Array.from(
+    { length: ANNUAL_RANKING_MAX_YEAR - ANNUAL_RANKING_MIN_YEAR + 1 },
+    (_value, index) => ANNUAL_RANKING_MAX_YEAR - index,
+  ),
+)
+
+export function isAnnualRankingFresh(fetchedAt: number, now = Date.now()): boolean {
+  return Number.isFinite(fetchedAt)
+    && Math.max(0, now - fetchedAt) <= ANNUAL_RANKING_FRESH_MS
+}
+
+export type AnnualRankingCategory = 'bunko' | 'tankobon'
+
+export interface AnnualRankingEntry {
+  rank: number
+  title: string
+  bookId?: string
+  cover?: string
+}
+
+export interface AnnualRankingPage {
+  year: number
+  categories: Record<AnnualRankingCategory, AnnualRankingEntry[]>
+  fetchedAt: number
+  stale: boolean
+}
+
 export interface DiscoveryApi {
   getDiscoveryHome(refresh?: boolean): Promise<DiscoveryHome>
   getRanking(type: RankingType, page: number, refresh?: boolean): Promise<RankingPage>
+  getAnnualRanking(year: number, refresh?: boolean): Promise<AnnualRankingPage>
 }

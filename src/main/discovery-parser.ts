@@ -1,6 +1,9 @@
 import * as cheerio from 'cheerio'
 import {
   RANKING_TITLES,
+  type AnnualRankingEntry,
+  type AnnualRankingCategory,
+  type AnnualRankingPage,
   type DiscoveryBook,
   type DiscoverySection,
   type RankingPage,
@@ -49,8 +52,12 @@ const HOME_SECTIONS: Array<{
 function parseBookId(href: string | undefined): string | null {
   if (!href || href.length > 2_048) return null
   try {
-    const path = new URL(href, BASE_URL).pathname
-    return path.match(/^\/book\/(\d{1,12})\.htm$/)?.[1] ?? null
+    const url = new URL(href, BASE_URL)
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:')
+      || (url.hostname !== 'www.wenku8.net' && url.hostname !== 'wenku8.net')
+    ) return null
+    return url.pathname.match(/^\/book\/(\d{1,12})\.htm$/)?.[1] ?? null
   } catch {
     return null
   }
@@ -175,5 +182,78 @@ export function parseRankingPage(
     page: pager.page,
     totalPages: pager.totalPages,
     books: extractBooks($, table, true, (pager.page - 1) * RANKING_PAGE_SIZE),
+  }
+}
+
+function findAnnualTable(
+  $: CheerioDocument,
+  year: number,
+  label: '文库部门' | '单行本部门',
+) {
+  return $('table.grid').filter((_index, element) => {
+    const caption = $(element).find('caption').first().text().replace(/\s+/g, ' ').trim()
+    return caption.includes(String(year)) && caption.includes(label)
+  }).first()
+}
+
+function parseAnnualGroup(
+  $: CheerioDocument,
+  year: number,
+  group: AnnualRankingCategory,
+): AnnualRankingEntry[] {
+  const label = group === 'bunko' ? '文库部门' : '单行本部门'
+  const table = findAnnualTable($, year, label)
+  if (table.length === 0) throw new Error('年度榜单结构已变化，请稍后重试')
+
+  const books: AnnualRankingEntry[] = []
+  const duplicateKeys = new Set<string>()
+  table.find('th > div > div, td > div > div').each((_index, element) => {
+    const entry = $(element)
+    const links = entry.find('a[href]')
+    if (links.length === 0) return
+
+    let bookId: string | undefined
+    links.each((_linkIndex, anchor) => {
+      bookId ??= parseBookId($(anchor).attr('href')) ?? undefined
+    })
+    const titleLink = links.last()
+    const title = (
+      titleLink.text()
+      || links.first().attr('tiptitle')
+      || entry.find('img').first().attr('alt')
+      || ''
+    ).replace(/\s+/g, ' ').trim().slice(0, 500)
+    if (!title) return
+
+    const duplicateKey = `${bookId ?? ''}\u0000${title}`
+    if (duplicateKeys.has(duplicateKey)) {
+      throw new Error('年度榜单包含重复作品，请稍后重试')
+    }
+    duplicateKeys.add(duplicateKey)
+    const cover = normalizeCoverUrl(entry.find('img').first().attr('src')) ?? undefined
+    books.push({
+      rank: books.length + 1,
+      title,
+      ...(bookId ? { bookId } : {}),
+      ...(cover ? { cover } : {}),
+    })
+  })
+
+  if (books.length === 0 || books.length > 50) {
+    throw new Error('年度榜单结构已变化，请稍后重试')
+  }
+  return books
+}
+
+export function parseAnnualRankingPage(
+  $: CheerioDocument,
+  year: number,
+): Omit<AnnualRankingPage, 'fetchedAt' | 'stale'> {
+  return {
+    year,
+    categories: {
+      bunko: parseAnnualGroup($, year, 'bunko'),
+      tankobon: parseAnnualGroup($, year, 'tankobon'),
+    },
   }
 }

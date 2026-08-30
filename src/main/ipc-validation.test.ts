@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
+  validateAnnualRankingPayload,
   validateCatalogPayload,
   validateDownloadArtifactPayload,
   validateDownloadHistoryScope,
@@ -154,7 +155,6 @@ describe('IPC validation', () => {
       type: 'monthvisit',
       page: 3,
       refresh: true,
-      ignored: 'value',
     })).toEqual({ type: 'monthvisit', page: 3, refresh: true })
 
     expect(validateDiscoveryRankingPayload({ type: 'allvisit', page: 1 }))
@@ -165,7 +165,18 @@ describe('IPC validation', () => {
     expect(validateDiscoveryHomePayload({})).toEqual({ refresh: false })
     expect(validateDiscoveryHomePayload({ refresh: true })).toEqual({ refresh: true })
     expect(() => validateDiscoveryHomePayload({ refresh: 'yes' })).toThrow('发现页')
+    expect(() => validateDiscoveryHomePayload({ refresh: true, url: 'https://example.com' }))
+      .toThrow('发现页')
     expect(() => validateDiscoveryHomePayload(null)).toThrow('发现页')
+  })
+
+  it('accepts only configured annual ranking years and fields', () => {
+    expect(validateAnnualRankingPayload({ year: 2005 })).toEqual({ year: 2005, refresh: false })
+    expect(validateAnnualRankingPayload({ year: 2026, refresh: true }))
+      .toEqual({ year: 2026, refresh: true })
+    expect(() => validateAnnualRankingPayload({ year: 2004 })).toThrow('年度榜单')
+    expect(() => validateAnnualRankingPayload({ year: 2027 })).toThrow('年度榜单')
+    expect(() => validateAnnualRankingPayload({ year: 2026, next: 2025 })).toThrow('年度榜单')
   })
 
   it('validates catalog queries field by field and rejects unknown input', () => {
@@ -215,6 +226,7 @@ describe('IPC validation', () => {
     { type: 'allvisit', page: 1.5 },
     { type: 'allvisit', page: 10_001 },
     { type: 'allvisit', page: 1, refresh: 'yes' },
+    { type: 'allvisit', page: 1, ignored: true },
     null,
   ])('rejects malformed discovery ranking payloads %#', (input) => {
     expect(() => validateDiscoveryRankingPayload(input)).toThrow('榜单')

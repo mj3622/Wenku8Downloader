@@ -5,6 +5,7 @@ import type {
 } from '../../../shared/config-types'
 import type {
   CookieProgress,
+  AnnualRankingPage,
   BookLoadOptions,
   BookshelfPage,
   CacheClearResult,
@@ -73,6 +74,9 @@ export const api = {
   ),
   getRanking: (type: RankingType, page: number, refresh = false): Promise<RankingPage> => (
     invoke('discovery', () => window.electronAPI.getRanking(type, page, refresh))
+  ),
+  getAnnualRanking: (year: number, refresh = false): Promise<AnnualRankingPage> => (
+    invoke('discovery', () => window.electronAPI.getAnnualRanking(year, refresh))
   ),
 
   // 书籍
