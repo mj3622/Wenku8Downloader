@@ -96,7 +96,7 @@ function SearchResultMetadata({
             <span
               className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 ${
                 status.includes('完结')
-                  ? 'bg-apple-bg text-apple-secondary'
+                  ? 'bg-apple-accent-light text-apple-accent'
                   : 'bg-emerald-50 text-emerald-700'
               }`}
             >

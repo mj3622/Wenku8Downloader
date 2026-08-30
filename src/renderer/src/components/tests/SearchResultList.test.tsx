@@ -102,6 +102,28 @@ describe('SearchResultList', () => {
       .toContain('line-clamp-3')
   })
 
+  it('uses the accent color for a completed work status', async () => {
+    await act(async () => {
+      root.render(
+        <SearchResultList
+          results={[{
+            id: '3057',
+            title: '测试作品',
+            cover: '',
+            status: '已完结',
+          }]}
+          onSelect={vi.fn()}
+        />,
+      )
+    })
+
+    const statusBadge = Array.from(container.querySelectorAll('span'))
+      .find(element => element.textContent === '已完结')
+
+    expect(statusBadge?.className).toContain('bg-apple-accent-light')
+    expect(statusBadge?.className).toContain('text-apple-accent')
+  })
+
   it('replaces a cover with a readable placeholder after retries are exhausted', async () => {
     await act(async () => {
       root.render(
