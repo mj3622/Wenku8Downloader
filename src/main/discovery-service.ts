@@ -27,6 +27,7 @@ export interface DiscoveryCache {
 
 interface DiscoveryServiceOptions {
   source: DiscoverySource
+  refreshSource?: DiscoverySource
   cache: DiscoveryCache
   now?: () => number
 }
@@ -47,6 +48,7 @@ function cloneRanking(value: RankingPage): RankingPage {
 
 export class DiscoveryService {
   private readonly source: DiscoverySource
+  private readonly refreshSource: DiscoverySource
   private readonly cache: DiscoveryCache
   private readonly now: () => number
   private readonly memory = new Map<string, DiscoveryHome | RankingPage>()
@@ -54,6 +56,7 @@ export class DiscoveryService {
 
   constructor(options: DiscoveryServiceOptions) {
     this.source = options.source
+    this.refreshSource = options.refreshSource ?? options.source
     this.cache = options.cache
     this.now = options.now ?? Date.now
   }
@@ -65,7 +68,8 @@ export class DiscoveryService {
     const existing = this.inflight.get(key)
     if (existing) return cloneHome(await existing as DiscoveryHome)
 
-    const request = this.refreshHome(cached).finally(() => this.inflight.delete(key))
+    const source = options.refresh ? this.refreshSource : this.source
+    const request = this.refreshHome(cached, source).finally(() => this.inflight.delete(key))
     this.inflight.set(key, request)
     return cloneHome(await request)
   }
@@ -81,7 +85,8 @@ export class DiscoveryService {
     const existing = this.inflight.get(key)
     if (existing) return cloneRanking(await existing as RankingPage)
 
-    const request = this.refreshRanking(type, page, cached)
+    const source = options.refresh ? this.refreshSource : this.source
+    const request = this.refreshRanking(type, page, cached, source)
       .finally(() => this.inflight.delete(key))
     this.inflight.set(key, request)
     return cloneRanking(await request)
@@ -119,11 +124,14 @@ export class DiscoveryService {
     return value !== null && Math.max(0, this.now() - value.fetchedAt) <= STALE_FALLBACK_MS
   }
 
-  private async refreshHome(cached: DiscoveryHome | null): Promise<DiscoveryHome> {
+  private async refreshHome(
+    cached: DiscoveryHome | null,
+    source: DiscoverySource,
+  ): Promise<DiscoveryHome> {
     const guard = this.cache.captureWriteGuard()
     try {
       const value: DiscoveryHome = {
-        sections: await this.source.fetchHome(),
+        sections: await source.fetchHome(),
         fetchedAt: this.now(),
         stale: false,
       }
@@ -142,12 +150,13 @@ export class DiscoveryService {
     type: RankingType,
     page: number,
     cached: RankingPage | null,
+    source: DiscoverySource,
   ): Promise<RankingPage> {
     const key = `ranking:${type}:${page}`
     const guard = this.cache.captureWriteGuard()
     try {
       const value: RankingPage = {
-        ...await this.source.fetchRanking(type, page),
+        ...await source.fetchRanking(type, page),
         fetchedAt: this.now(),
         stale: false,
       }

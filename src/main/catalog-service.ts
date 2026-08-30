@@ -1,4 +1,8 @@
-import type { CatalogPage, CatalogQuery } from '../shared/ipc-types'
+import {
+  catalogQueryKey,
+  type CatalogPage,
+  type CatalogQuery,
+} from '../shared/ipc-types'
 import type { CacheWriteGuard } from './cache/cache-store'
 
 const FRESH_MS = 30 * 60 * 1_000
@@ -18,18 +22,6 @@ interface CatalogServiceOptions {
   source: CatalogSource
   cache: CatalogCache
   now?: () => number
-}
-
-export function catalogQueryKey(query: CatalogQuery): string {
-  return JSON.stringify([
-    query.publisher ?? '',
-    query.initial ?? '',
-    query.tag ?? '',
-    query.status,
-    query.animation,
-    query.sort,
-    query.page,
-  ])
 }
 
 function clonePage(value: CatalogPage): CatalogPage {

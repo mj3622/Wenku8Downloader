@@ -97,7 +97,7 @@ export const useSearchStore = create<SearchState>((set) => {
           })
           toast.warning({
             title: '搜索需要稍等',
-            message: `原站限制了搜索频率，请在 ${seconds} 秒后重试。`,
+            message: `原站限制了搜索频率，请在 ${seconds} 秒后重试`,
           })
         } else {
           set({

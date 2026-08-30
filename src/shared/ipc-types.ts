@@ -120,6 +120,18 @@ export interface CatalogQuery {
   page: number
 }
 
+export function catalogQueryKey(query: CatalogQuery): string {
+  return JSON.stringify([
+    query.publisher ?? '',
+    query.initial ?? '',
+    query.tag ?? '',
+    query.status,
+    query.animation,
+    query.sort,
+    query.page,
+  ])
+}
+
 export interface CatalogPage {
   query: CatalogQuery
   books: SearchResult[]

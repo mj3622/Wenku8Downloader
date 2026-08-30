@@ -18,6 +18,7 @@ import {
   CATALOG_SORTS,
   CATALOG_STATUSES,
   CATALOG_TAGS,
+  catalogQueryKey,
   type CatalogInitial,
   type CatalogQuery,
   type CatalogTag,
@@ -48,18 +49,6 @@ const PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => optio
 const ROUTE_KEYS = new Set([
   'tab', 'publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page',
 ])
-
-function catalogQueryKey(query: CatalogQuery): string {
-  return JSON.stringify([
-    query.publisher ?? '',
-    query.initial ?? '',
-    query.tag ?? '',
-    query.status,
-    query.animation,
-    query.sort,
-    query.page,
-  ])
-}
 
 function buildSearchParams(tab: Tab, query: CatalogQuery): URLSearchParams {
   const params = new URLSearchParams()

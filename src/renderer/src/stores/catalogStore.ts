@@ -1,5 +1,9 @@
 import { create } from 'zustand'
-import type { CatalogPage, CatalogQuery } from '../../../shared/ipc-types'
+import {
+  catalogQueryKey,
+  type CatalogPage,
+  type CatalogQuery,
+} from '../../../shared/ipc-types'
 import { api } from '../api/client'
 import { getUserFeedback } from '../utils/userFeedback'
 import { toast } from './toastStore'
@@ -39,18 +43,6 @@ function cloneQuery(query: CatalogQuery): CatalogQuery {
   }
 }
 
-function queryKey(query: CatalogQuery): string {
-  return JSON.stringify([
-    query.publisher ?? '',
-    query.initial ?? '',
-    query.tag ?? '',
-    query.status,
-    query.animation,
-    query.sort,
-    query.page,
-  ])
-}
-
 export const useCatalogStore = create<CatalogState>((set, get) => {
   let requestGeneration = 0
 
@@ -65,7 +57,7 @@ export const useCatalogStore = create<CatalogState>((set, get) => {
       const nextQuery = cloneQuery(requested ?? get().query)
       const current = get()
       const generation = ++requestGeneration
-      const sameQuery = queryKey(current.query) === queryKey(nextQuery)
+      const sameQuery = catalogQueryKey(current.query) === catalogQueryKey(nextQuery)
       set({
         query: nextQuery,
         page: nextQuery.page,
@@ -88,7 +80,7 @@ export const useCatalogStore = create<CatalogState>((set, get) => {
         if (result.stale) {
           toast.warning({
             title: '正在使用缓存',
-            message: '网络更新失败，当前显示最近缓存的找书结果。',
+            message: '网络更新失败，当前显示最近缓存的找书结果',
           })
         }
       } catch (error) {

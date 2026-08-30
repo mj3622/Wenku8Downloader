@@ -113,6 +113,29 @@ describe('DiscoveryService', () => {
     expect(harness.source.fetchRanking).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the interactive source only for explicit refreshes', async () => {
+    const harness = createHarness({ now: 31 * MINUTE, homeCache: cachedHome(0) })
+    const refreshSource = {
+      fetchHome: vi.fn(async () => sections),
+      fetchRanking: vi.fn(async (type: RankingType, page: number) => ({
+        type, title: '总排行榜', page, totalPages: 2, books: sections[0].books,
+      })),
+    }
+    const service = new DiscoveryService({
+      source: harness.source,
+      refreshSource,
+      cache: harness.cache,
+      now: () => 31 * MINUTE,
+    })
+
+    await service.getHome()
+    await service.getRanking('allvisit', 1, { refresh: true })
+
+    expect(harness.source.fetchHome).toHaveBeenCalledTimes(1)
+    expect(refreshSource.fetchHome).not.toHaveBeenCalled()
+    expect(refreshSource.fetchRanking).toHaveBeenCalledWith('allvisit', 1)
+  })
+
   it('clears process memory so a later read consults persistent cache again', async () => {
     const harness = createHarness({ now: 10 * MINUTE, homeCache: cachedHome(0) })
     await harness.service.getHome()

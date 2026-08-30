@@ -38,7 +38,7 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   },
   catalog: {
     title: '找书失败',
-    message: '暂时无法读取轻小说列表，请检查网络后重试。',
+    message: '暂时无法读取轻小说列表，请检查网络后重试',
   },
   discovery: {
     title: '发现内容加载失败',
@@ -82,7 +82,7 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   },
   'download-artifact': {
     title: '无法打开下载内容',
-    message: '下载文件可能已被移动或删除，请检查下载位置后重试。',
+    message: '下载文件可能已被移动或删除，请检查下载位置后重试',
   },
   'cache-clear': {
     title: '缓存清除失败',

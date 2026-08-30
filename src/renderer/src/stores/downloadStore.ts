@@ -52,7 +52,7 @@ function showTransition(event: DownloadStateEvent): void {
   if (!task) return
 
   if (transition.to === 'pending') {
-    toast.success({ title: '已加入下载队列', message: `${task.title} 将按顺序下载。` })
+    toast.success({ title: '已加入下载队列', message: `${task.title} 将按顺序下载` })
   } else if (transition.to === 'completed') {
     if (task.warning) {
       toast.warning({ title: '下载完成，但有提醒', message: task.warning })
@@ -87,7 +87,7 @@ async function runEnqueue(
     if (result.status === 'duplicate') {
       toast.info({
         title: '任务已在下载中',
-        message: `${title} 的相同下载任务不会重复加入队列。`,
+        message: `${title} 的相同下载任务不会重复加入队列`,
       })
     }
   } catch (error) {

@@ -177,6 +177,23 @@ describe('DownloadRateLimiter', () => {
     })).toBe(120_000)
   })
 
+  it('honors Retry-After on temporary service failures', () => {
+    const limiter = new DownloadRateLimiter(() => undefined)
+    const state = limiter.recordResponse(
+      'document',
+      'https://www.wenku8.net/index.php',
+      { status: 503, latencyMs: 200, retryAfterMs: 12_000 },
+      'background',
+    )
+
+    expect(state.cooldownMs).toBe(12_000)
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      'network.wenku.request.throttled',
+      expect.any(String),
+      expect.objectContaining({ priority: 'background', cooldownMs: 12_000 }),
+    )
+  })
+
   it('isolates document throttling from image CDN requests', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
@@ -192,6 +209,33 @@ describe('DownloadRateLimiter', () => {
     const release = await limiter.acquire('image', 'https://pic.example/image.jpg')
     expect(release).toEqual(expect.any(Function))
     expect(vi.getTimerCount()).toBe(1)
+    release()
+  })
+
+  it('shares Wenku8 cooldowns across the main site and image host', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const limiter = new DownloadRateLimiter()
+
+    limiter.recordResponse('document', 'https://www.wenku8.net/book/3057.htm', {
+      status: 429,
+      latencyMs: 200,
+      retryAfterMs: 5_000,
+    }, 'interactive')
+
+    let started = false
+    const request = limiter.acquire(
+      'image',
+      'https://img.wenku8.com/image/3/3057/3057s.jpg',
+    ).then((release) => {
+      started = true
+      return release
+    })
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(started).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    const release = await request
+    expect(started).toBe(true)
     release()
   })
 
@@ -212,6 +256,23 @@ describe('DownloadRateLimiter', () => {
     const releaseSecond = await second
     releaseFirst()
     releaseSecond()
+  })
+
+  it('clears a spacing timer when its only waiter is cancelled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const limiter = new DownloadRateLimiter()
+    const url = 'https://www.wenku8.net/novel/1/2/3.htm'
+    const controller = new AbortController()
+
+    const releaseFirst = await limiter.acquire('document', url)
+    const cancelled = limiter.acquire('document', url, controller.signal)
+    expect(vi.getTimerCount()).toBe(1)
+    controller.abort()
+
+    await expect(cancelled).rejects.toThrow('下载已取消')
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0))
+    releaseFirst()
   })
 
   it('enforces one origin-wide in-flight limit across document and image requests', async () => {
@@ -289,6 +350,57 @@ describe('DownloadRateLimiter', () => {
     const releaseBackground = await background
     expect(order).toEqual(['interactive', 'background'])
     releaseBackground()
+  })
+
+  it('prioritizes interactive work before permitted but not-started background work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const limiter = new DownloadRateLimiter()
+    const url = 'https://www.wenku8.net/book/3057.htm'
+    const releaseFirst = await limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'background',
+    )
+    const order: string[] = []
+    const backgrounds = Array.from({ length: 4 }, (_value, index) => limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'background',
+    ).then((release) => {
+      order.push(`background-${index}`)
+      return release
+    }))
+    const interactive = limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'interactive',
+    ).then((release) => {
+      order.push('interactive')
+      return release
+    })
+
+    await vi.advanceTimersByTimeAsync(100)
+    const releaseInteractive = await interactive
+    expect(order).toEqual(['interactive'])
+    releaseInteractive()
+
+    await vi.advanceTimersByTimeAsync(400)
+    const backgroundReleases = await Promise.all(backgrounds)
+    expect(order.slice(1)).toEqual([
+      'background-0',
+      'background-1',
+      'background-2',
+      'background-3',
+    ])
+    releaseFirst()
+    backgroundReleases.forEach(release => release())
   })
 
   it('ages a background waiter so interactive traffic cannot starve it', async () => {

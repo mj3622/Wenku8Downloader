@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { CatalogPage, CatalogQuery } from '../../shared/ipc-types'
+import {
+  catalogQueryKey,
+  type CatalogPage,
+  type CatalogQuery,
+} from '../../shared/ipc-types'
 import {
   CatalogService,
-  catalogQueryKey,
   type CatalogCache,
   type CatalogSource,
 } from '../catalog-service'

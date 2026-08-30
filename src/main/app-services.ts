@@ -128,6 +128,7 @@ export function createAppServices(): AppServices {
   const assetCache = new DownloadAssetCache(cacheStore)
   const discovery = new DiscoveryService({
     source: new WenkuDiscoverySource(crawler, createControlFactory('background')),
+    refreshSource: new WenkuDiscoverySource(crawler, createControlFactory('interactive')),
     cache: new DiscoveryCacheRepository(cacheStore),
   })
   const search = new SearchService(crawler)

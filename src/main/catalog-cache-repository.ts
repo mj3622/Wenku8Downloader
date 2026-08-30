@@ -5,6 +5,7 @@ import {
   CATALOG_SORTS,
   CATALOG_STATUSES,
   CATALOG_TAGS,
+  catalogQueryKey,
   type CatalogAnimation,
   type CatalogInitial,
   type CatalogPage,
@@ -20,7 +21,6 @@ import type {
   CacheWriteGuard,
   SharedCacheAddress,
 } from './cache/cache-store'
-import { catalogQueryKey } from './catalog-service'
 
 const SCHEMA_VERSION = 1 as const
 const PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
