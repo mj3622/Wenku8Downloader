@@ -1,4 +1,4 @@
-import { app, session, type Session } from 'electron'
+import { app, net, session, type Session } from 'electron'
 import { Book } from './book'
 import { BookService } from './book-service'
 import { ConfigService } from './config/config-service'
@@ -39,6 +39,7 @@ import { WenkuCatalogSource } from './catalog-source'
 import { BookshelfCacheRepository } from './bookshelf-cache-repository'
 import { BookshelfService } from './bookshelf-service'
 import { WenkuBookshelfSource } from './bookshelf-source'
+import { UpdateCheckService } from './update-check-service'
 
 export interface AppServices {
   networkSession: Session
@@ -48,6 +49,7 @@ export interface AppServices {
   catalog: CatalogService
   discovery: DiscoveryService
   bookshelf: BookshelfService
+  updates: UpdateCheckService
   books: BookService
   downloads: DownloadManager
   initializeCache(): Promise<void>
@@ -204,6 +206,10 @@ export function createAppServices(): AppServices {
     getCredentialRevision: () => config.getCredentialRevision(),
     getDownloadSnapshot: () => downloads.getSnapshot(),
   })
+  const updates = new UpdateCheckService({
+    request: (url, init) => net.fetch(url, init),
+    getCurrentVersion: () => app.getVersion(),
+  })
   let stopCentralMaintenance: (() => void) | undefined
   let legacyMaintenanceTimer: ReturnType<typeof setInterval> | undefined
 
@@ -288,6 +294,7 @@ export function createAppServices(): AppServices {
     catalog,
     discovery,
     bookshelf,
+    updates,
     books,
     downloads,
     initializeCache,

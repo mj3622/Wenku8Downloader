@@ -41,6 +41,7 @@ beforeEach(() => {
         legacyImportCompleted: true,
       }),
       onDownloadStateChanged: () => () => undefined,
+      getAppInfo: async () => ({ version: '2.1.0' }),
       getDiscoveryHome: async () => ({
         sections: [],
         fetchedAt: Date.now(),

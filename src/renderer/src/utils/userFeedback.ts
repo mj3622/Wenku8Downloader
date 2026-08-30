@@ -19,6 +19,8 @@ export type FeedbackContext =
   | 'log-stats'
   | 'select-folder'
   | 'open-external'
+  | 'app-info'
+  | 'update-check'
   | 'unexpected'
 
 export interface UserFeedbackAction {
@@ -112,6 +114,14 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   'open-external': {
     title: '无法打开链接',
     message: '请检查系统默认浏览器设置后重试。',
+  },
+  'app-info': {
+    title: '版本读取失败',
+    message: '暂时无法读取当前应用版本',
+  },
+  'update-check': {
+    title: '检查更新失败',
+    message: '暂时无法连接 GitHub 检查新版本，请稍后重试',
   },
   unexpected: {
     title: '应用遇到了一点问题',

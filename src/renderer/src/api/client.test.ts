@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import type { ConfigApi } from '../../../shared/config-types'
-import type { CacheApi, CatalogApi, DiscoveryApi, DownloadApi } from '../../../shared/ipc-types'
+import type { AppApi, CacheApi, CatalogApi, DiscoveryApi, DownloadApi } from '../../../shared/ipc-types'
 import { api } from './client'
 
 describe('renderer configuration API contract', () => {
@@ -22,5 +22,9 @@ describe('renderer configuration API contract', () => {
 
   it('implements the restricted catalog API', () => {
     expectTypeOf(api).toMatchTypeOf<CatalogApi>()
+  })
+
+  it('implements the restricted application API', () => {
+    expectTypeOf(api).toMatchTypeOf<AppApi>()
   })
 })

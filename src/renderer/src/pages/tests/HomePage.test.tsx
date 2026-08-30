@@ -5,7 +5,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ openExternal: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  openExternal: vi.fn(),
+  getAppInfo: vi.fn(async () => ({ version: '9.8.7' })),
+  checkForUpdates: vi.fn(),
+}))
 vi.mock('../../api/client', () => ({ api: mocks }))
 
 import HomePage from '../HomePage'
@@ -48,6 +52,30 @@ describe('HomePage', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1)
     expect(container.querySelectorAll('a[href="/discover"]')).toHaveLength(1)
     expect(container.textContent).toContain('面向 Wenku8 的桌面端开源工具')
+    expect(container.textContent).toContain('v9.8.7')
+  })
+
+  it('checks for updates only after user action and shows the release state', async () => {
+    expect(mocks.checkForUpdates).not.toHaveBeenCalled()
+    mocks.checkForUpdates.mockResolvedValueOnce({
+      currentVersion: '9.8.7',
+      latestVersion: '10.0.0',
+      updateAvailable: true,
+      releaseUrl: 'https://github.com/mj3622/Wenku8Downloader/releases/tag/v10.0.0',
+      checkedAt: 1,
+    })
+    const button = [...container.querySelectorAll('button')]
+      .find(element => element.textContent?.includes('检查更新'))
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.checkForUpdates).toHaveBeenCalledWith(false)
+    expect(container.textContent).toContain('新版本 v10.0.0 已发布')
+    expect(container.textContent).toContain('查看发布页')
   })
 
   it('groups the project positioning, capabilities and principles', () => {

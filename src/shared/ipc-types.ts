@@ -445,3 +445,20 @@ export interface DiscoveryApi {
   getRanking(type: RankingType, page: number, refresh?: boolean): Promise<RankingPage>
   getAnnualRanking(year: number, refresh?: boolean): Promise<AnnualRankingPage>
 }
+
+export interface AppInfo {
+  version: string
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string
+  latestVersion?: string
+  updateAvailable: boolean
+  releaseUrl?: string
+  checkedAt: number
+}
+
+export interface AppApi {
+  getAppInfo(): Promise<AppInfo>
+  checkForUpdates(refresh?: boolean): Promise<UpdateCheckResult>
+}

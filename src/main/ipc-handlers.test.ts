@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     handlers,
     listeners,
     downloadsPath: process.cwd(),
+    packaged: true,
     logsPath: `${process.cwd()}\\logs`,
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
@@ -67,7 +68,8 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: {
-    isPackaged: true,
+    get isPackaged() { return mocks.packaged },
+    getVersion: vi.fn(() => '2.1.0'),
     getPath: vi.fn((name: string) => name === 'downloads' ? mocks.downloadsPath : 'unused'),
   },
   BrowserWindow: { getAllWindows: () => mocks.browserWindows },
@@ -206,6 +208,15 @@ function createServices(
     bookshelf: {
       getPage: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
     },
+    updates: {
+      check: vi.fn(async () => ({
+        currentVersion: '2.1.0',
+        latestVersion: '2.1.0',
+        updateAvailable: false,
+        releaseUrl: 'https://github.com/mj3622/Wenku8Downloader/releases/tag/v2.1.0',
+        checkedAt: 1,
+      })),
+    },
     books: {
       get: vi.fn(() => bookPromise),
     },
@@ -242,6 +253,7 @@ beforeEach(() => {
   mocks.listeners.clear()
   mocks.browserWindows.length = 0
   mocks.downloadSubscriber = undefined
+  mocks.packaged = true
   vi.clearAllMocks()
   services = createServices()
   registerIpcHandlers(services)
@@ -538,6 +550,17 @@ describe('registerIpcHandlers application operations', () => {
     })).rejects.toThrow('榜单类型')
     await expect(invoke('discovery:get-annual-ranking', {}, { year: 2027 }))
       .rejects.toThrow('年度榜单')
+  })
+
+  it('returns the Electron app version and validates manual update checks', async () => {
+    mocks.packaged = false
+    await expect(invoke('app:get-info', {})).resolves.toEqual({ version: '2.1.0' })
+    mocks.packaged = true
+    await expect(invoke('app:get-info', {})).resolves.toEqual({ version: '2.1.0' })
+    await invoke('app:check-update', {}, { refresh: true })
+    expect(services.updates.check).toHaveBeenCalledWith({ refresh: true })
+    await expect(invoke('app:check-update', {}, { refresh: true, url: 'https://example.com' }))
+      .rejects.toThrow('版本检查请求格式无效')
   })
 
   it('accepts only the fixed readonly bookshelf refresh option', async () => {

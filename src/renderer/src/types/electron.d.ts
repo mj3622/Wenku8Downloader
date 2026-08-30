@@ -2,6 +2,7 @@ import type { ConfigApi } from '../../../shared/config-types'
 import type { BookInfo } from '../../../shared/book-types'
 import type {
   CookieProgress,
+  AppApi,
   BookLoadOptions,
   BookshelfApi,
   CacheApi,
@@ -15,7 +16,7 @@ import type {
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 
-export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, CatalogApi, DiscoveryApi, SearchApi, BookshelfApi {
+export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, CatalogApi, DiscoveryApi, SearchApi, BookshelfApi, AppApi {
   platform: NodeJS.Platform
   autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
   getBook: (bookId: string, options?: BookLoadOptions) => Promise<BookInfo>

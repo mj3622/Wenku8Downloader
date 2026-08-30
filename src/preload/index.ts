@@ -7,6 +7,7 @@ import type {
 } from '../shared/config-types'
 import type {
   CookieProgress,
+  AppApi,
   BookLoadOptions,
   BookshelfApi,
   CacheApi,
@@ -89,6 +90,11 @@ const discoveryApi: DiscoveryApi = {
   ),
 }
 
+const appApi: AppApi = {
+  getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+  checkForUpdates: (refresh = false) => ipcRenderer.invoke('app:check-update', { refresh }),
+}
+
 const searchApi: SearchApi = {
   searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
@@ -101,6 +107,7 @@ const bookshelfApi: BookshelfApi = {
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
+  ...appApi,
   ...configApi,
   ...downloadApi,
   ...cacheApi,

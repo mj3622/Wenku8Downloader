@@ -44,6 +44,7 @@ import type { DiscoveryService } from './discovery-service'
 import type { SearchService } from './search-service'
 import type { CatalogService } from './catalog-service'
 import type { BookshelfService } from './bookshelf-service'
+import type { UpdateCheckService } from './update-check-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -75,6 +76,7 @@ export interface IpcServices {
   catalog: Pick<CatalogService, 'getPage'>
   discovery: Pick<DiscoveryService, 'getHome' | 'getRanking' | 'getAnnualRanking'>
   bookshelf: Pick<BookshelfService, 'getPage'>
+  updates: Pick<UpdateCheckService, 'check'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
   }
@@ -118,6 +120,15 @@ function validateBookshelfPayload(value: unknown): { refresh: boolean } {
   if (Object.keys(payload).some(key => key !== 'refresh')
     || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
     throw new Error('请求参数格式无效')
+  }
+  return { refresh: payload.refresh === true }
+}
+
+function validateUpdateCheckPayload(value: unknown): { refresh: boolean } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'refresh')
+    || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
+    throw new Error('版本检查请求格式无效')
   }
   return { refresh: payload.refresh === true }
 }
@@ -184,6 +195,15 @@ export function registerIpcHandlers(services: IpcServices): void {
     () => services.config.getPublicSnapshot(),
     { logStart: false, logSuccess: false },
   ))
+
+  ipcMain.handle('app:get-info', () => ({ version: app.getVersion() }))
+
+  ipcMain.handle('app:check-update', (_event, rawPayload: unknown) => {
+    const { refresh } = validateUpdateCheckPayload(rawPayload)
+    return runLoggedOperation('app.check-update', { refresh }, () => (
+      services.updates.check({ refresh })
+    ))
+  })
 
   ipcMain.handle('config:update-download', (_event, input: unknown) => {
     const context: LogContext = {}

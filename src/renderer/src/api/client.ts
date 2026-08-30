@@ -6,6 +6,7 @@ import type {
 import type {
   CookieProgress,
   AnnualRankingPage,
+  AppInfo,
   BookLoadOptions,
   BookshelfPage,
   CacheClearResult,
@@ -19,6 +20,7 @@ import type {
   OpenFolderTarget,
   RankingPage,
   RankingType,
+  UpdateCheckResult,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 export type { BookInfo } from '../../../shared/book-types'
@@ -40,6 +42,12 @@ async function invoke<T>(
 }
 
 export const api = {
+  // 应用
+  getAppInfo: (): Promise<AppInfo> => invoke('app-info', () => window.electronAPI.getAppInfo()),
+  checkForUpdates: (refresh = false): Promise<UpdateCheckResult> => (
+    invoke('update-check', () => window.electronAPI.checkForUpdates(refresh))
+  ),
+
   // 配置
   getConfig: (context: FeedbackContext = 'config-load') =>
     invoke(context, () => window.electronAPI.getConfig()),

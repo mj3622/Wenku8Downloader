@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DownloadApi,
+  AppApi,
   CacheApi,
   CatalogApi,
   BookshelfApi,
@@ -29,7 +30,7 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & BookshelfApi & {
+type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & BookshelfApi & AppApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
@@ -139,6 +140,16 @@ describe('preload download boundary', () => {
       year: 2026,
       refresh: true,
     })
+  })
+
+  it('uses fixed app information and update channels', async () => {
+    await exposedApi.getAppInfo()
+    await exposedApi.checkForUpdates(true)
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['app:get-info'],
+      ['app:check-update', { refresh: true }],
+    ])
   })
 
   it('uses the fixed readonly bookshelf channel', async () => {

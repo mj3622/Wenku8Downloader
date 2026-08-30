@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   IconArrowRight,
@@ -7,14 +8,17 @@ import {
   IconCompass,
   IconDownload,
   IconGauge,
+  IconRefresh,
   IconSearch,
   IconShieldLock,
   type Icon,
 } from '@tabler/icons-react'
+import type { UpdateCheckResult } from '../../../shared/ipc-types'
 import logoUrl from '../../../../resources/icon.png'
 import { api } from '../api/client'
 import { toast } from '../stores/toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
+import { useAppVersion } from '../hooks/useAppVersion'
 
 const GITHUB_URL = 'https://github.com/mj3622/Wenku8Downloader'
 
@@ -60,11 +64,30 @@ const principles: Array<{ icon: Icon; title: string; description: string }> = [
 ]
 
 export default function HomePage() {
+  const version = useAppVersion()
+  const [checking, setChecking] = useState(false)
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const availableReleaseUrl = updateResult?.updateAvailable ? updateResult.releaseUrl : undefined
+
   const openExternal = async (url: string): Promise<void> => {
     try {
       await api.openExternal(url)
     } catch (error) {
       toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
+  const checkForUpdates = async (): Promise<void> => {
+    if (checking) return
+    setChecking(true)
+    setUpdateError(null)
+    try {
+      setUpdateResult(await api.checkForUpdates(updateResult !== null))
+    } catch (error) {
+      setUpdateError(getUserFeedback(error, 'update-check').message)
+    } finally {
+      setChecking(false)
     }
   }
 
@@ -76,7 +99,7 @@ export default function HomePage() {
           <div className="min-w-0 flex-1">
             <div className="mb-3 flex flex-wrap items-center gap-2.5">
               <span className="rounded-full bg-apple-accent-light px-2.5 py-1 text-xs font-medium text-apple-accent">
-                v2.1.0
+                {version ? `v${version}` : '版本读取中'}
               </span>
               <span className="text-[13px] font-medium text-apple-secondary">
                 面向 Wenku8 的桌面端开源工具
@@ -107,6 +130,30 @@ export default function HomePage() {
                 <IconBrandGithub aria-hidden="true" size={17} stroke={1.8} />
                 GitHub 仓库
               </a>
+              <button
+                type="button"
+                disabled={checking}
+                onClick={() => void checkForUpdates()}
+                className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-white px-4 py-2.5 text-sm font-medium text-apple-secondary hover:bg-apple-bg hover:text-apple-heading disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+              >
+                <IconRefresh aria-hidden="true" size={17} stroke={1.8} className={checking ? 'motion-spinner animate-spin motion-reduce:animate-none' : ''} />
+                {checking ? '正在检查' : updateResult ? '重新检查' : '检查更新'}
+              </button>
+            </div>
+            <div className="mt-3 min-h-5 text-[13px] text-apple-secondary" aria-live="polite">
+              {updateError && <p className="text-red-600">{updateError}</p>}
+              {updateResult && !updateResult.updateAvailable && (
+                <p>当前已是最新版本 v{updateResult.currentVersion}</p>
+              )}
+              {updateResult?.updateAvailable && updateResult.latestVersion && availableReleaseUrl && (
+                <p>
+                  新版本 v{updateResult.latestVersion} 已发布
+                  {' · '}
+                  <button type="button" onClick={() => void openExternal(availableReleaseUrl)} className="rounded font-medium text-apple-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25">
+                    查看发布页
+                  </button>
+                </p>
+              )}
             </div>
           </div>
         </div>

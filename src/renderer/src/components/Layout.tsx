@@ -9,6 +9,7 @@ import {
   type Icon,
 } from '@tabler/icons-react'
 import logoUrl from '../../../../resources/icon.png'
+import { useAppVersion } from '../hooks/useAppVersion'
 
 type NavigationItem = { to: string; label: string; icon: Icon }
 
@@ -71,6 +72,7 @@ function NavigationItems({ items }: { items: NavigationItem[] }) {
 }
 
 export default function Layout() {
+  const version = useAppVersion()
   return (
     <div className="flex h-screen bg-apple-bg text-apple-heading">
       <aside className="w-[220px] flex-shrink-0 flex flex-col bg-white border-r border-apple-border-medium">
@@ -99,7 +101,9 @@ export default function Layout() {
 
         {/* Version */}
         <div className="px-5 py-4">
-          <p className="text-[12px] text-apple-tertiary">v2.1.0</p>
+          <p className="min-h-4 text-[12px] text-apple-tertiary">
+            {version ? `v${version}` : '版本读取中'}
+          </p>
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-y-auto p-8">
