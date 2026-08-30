@@ -155,10 +155,14 @@ describe('AnnualRankingPage', () => {
       stale: false,
     }))
     await renderPage()
-    const select = container.querySelector<HTMLSelectElement>('#annual-ranking-year')!
+    const select = container.querySelector<HTMLButtonElement>('#annual-ranking-year')!
     await act(async () => {
-      select.value = '2025'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
+      select.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const yearOption = [...container.querySelectorAll('[role="option"]')]
+      .find(option => option.textContent?.includes('2025 年'))!
+    await act(async () => {
+      yearOption.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
       await Promise.resolve()
     })

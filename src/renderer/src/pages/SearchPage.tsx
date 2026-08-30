@@ -13,13 +13,11 @@ import {
 } from '@tabler/icons-react'
 import {
   CATALOG_ANIMATIONS,
-  CATALOG_INITIALS,
   CATALOG_PUBLISHER_OPTIONS,
   CATALOG_SORTS,
   CATALOG_STATUSES,
   CATALOG_TAGS,
   catalogQueryKey,
-  type CatalogInitial,
   type CatalogQuery,
   type CatalogTag,
 } from '../../../shared/ipc-types'
@@ -47,7 +45,7 @@ const tabs: Array<{ key: Tab; label: string }> = [
 
 const PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
 const ROUTE_KEYS = new Set([
-  'mode', 'tab', 'q', 'publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page',
+  'mode', 'tab', 'q', 'publisher', 'tag', 'status', 'animation', 'sort', 'page',
 ])
 
 function buildSearchParams(
@@ -59,7 +57,6 @@ function buildSearchParams(
   if (tab !== 'browse') params.set('tab', tab)
   if ((tab === 'title' || tab === 'author') && searchTerm) params.set('q', searchTerm)
   if (query.publisher) params.set('publisher', query.publisher)
-  if (query.initial) params.set('initial', query.initial)
   if (query.tag) params.set('tag', query.tag)
   if (query.status !== 'all') params.set('status', query.status)
   if (query.animation !== 'all') params.set('animation', query.animation)
@@ -96,12 +93,6 @@ function parseRoute(params: URLSearchParams): {
     if (PUBLISHERS.has(publisher)) query.publisher = publisher as CatalogQuery['publisher']
     else invalid = true
   }
-  const initial = params.get('initial')
-  if (initial !== null) {
-    if (CATALOG_INITIALS.includes(initial as CatalogInitial)) {
-      query.initial = initial as CatalogInitial
-    } else invalid = true
-  }
   const tag = params.get('tag')
   if (tag !== null) {
     if (CATALOG_TAGS.includes(tag as CatalogTag)) query.tag = tag as CatalogTag
@@ -133,12 +124,11 @@ function parseRoute(params: URLSearchParams): {
     } else invalid = true
   }
 
-  if (query.tag && (query.publisher || query.initial)) {
+  if (query.tag && query.publisher) {
     delete query.publisher
-    delete query.initial
     invalid = true
   }
-  if ((query.publisher || query.initial) && query.sort === 'allvisit') {
+  if (query.publisher && query.sort === 'allvisit') {
     query.sort = 'lastupdate'
     invalid = true
   }

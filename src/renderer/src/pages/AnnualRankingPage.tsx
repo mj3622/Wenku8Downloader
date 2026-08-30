@@ -9,6 +9,7 @@ import {
   type AnnualRankingPage as AnnualRankingData,
 } from '../../../shared/ipc-types'
 import StatusAlert from '../components/StatusAlert'
+import Select from '../components/Select'
 import { useAnnualRankingStore } from '../stores/annualRankingStore'
 
 const GROUP_OPTIONS: Array<{ value: AnnualRankingCategory; label: string }> = [
@@ -81,15 +82,17 @@ export default function AnnualRankingPage() {
           <p className="mt-1 text-[13px] text-apple-secondary">按原站年度专题整理，缺失作品仅保留榜单名称</p>
         </div>
         <div className="flex items-center gap-2">
-          <label htmlFor="annual-ranking-year" className="sr-only">榜单年份</label>
-          <select
+          <label id="annual-ranking-year-label" htmlFor="annual-ranking-year" className="sr-only">榜单年份</label>
+          <Select
             id="annual-ranking-year"
-            value={year}
-            onChange={(event) => navigate(`/discover/annual/${event.target.value}`)}
-            className="h-9 rounded-lg border border-apple-border-input bg-white px-3 text-[13px] font-medium text-apple-body focus:border-apple-accent/30 focus:outline-none focus:ring-2 focus:ring-apple-accent/15"
-          >
-            {ANNUAL_RANKING_YEARS.map(option => <option key={option} value={option}>{option} 年</option>)}
-          </select>
+            value={String(year)}
+            onChange={nextYear => navigate(`/discover/annual/${nextYear}`)}
+            options={ANNUAL_RANKING_YEARS.map(option => ({ value: String(option), label: `${option} 年` }))}
+            ariaLabelledBy="annual-ranking-year-label"
+            className="w-28"
+            size="compact"
+            align="end"
+          />
           <button
             type="button"
             aria-label="刷新当前年度榜单"

@@ -56,6 +56,36 @@ body {
     transform 180ms var(--motion-ease-out);
 }
 
+.motion-select-popover--start {
+  transform-origin: top left;
+}
+
+.motion-select-popover--end {
+  transform-origin: top right;
+}
+
+.select-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+.select-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.select-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  background-clip: padding-box;
+}
+
+.select-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+  background-clip: padding-box;
+}
+
 @starting-style {
   .motion-popover {
     opacity: 0;

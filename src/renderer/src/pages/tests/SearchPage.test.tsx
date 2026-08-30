@@ -268,19 +268,22 @@ describe('SearchPage', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('restores catalog filters and pagination from the route query', async () => {
+  it('normalizes a legacy initial filter while restoring supported catalog filters', async () => {
     await renderPage('/search?publisher=10&initial=A&status=completed&animation=all&sort=lastupdate&page=2')
 
     expect(mocks.getCatalog).toHaveBeenCalledWith({
       publisher: '10',
-      initial: 'A',
       status: 'completed',
       animation: 'all',
       sort: 'lastupdate',
       page: 2,
     }, false)
-    expect((container.querySelector('#catalog-publisher') as HTMLSelectElement).value).toBe('10')
-    expect((container.querySelector('#catalog-initial') as HTMLSelectElement).value).toBe('A')
+    expect(container.querySelector('#catalog-publisher')?.textContent).toContain('小学馆')
+    expect(container.querySelector('#catalog-initial')).toBeNull()
+    expect(useToastStore.getState().items[0]).toMatchObject({
+      tone: 'warning',
+      title: '找书条件已调整',
+    })
   })
 
   it('accepts detail-page browse mode and restores a tag filter', async () => {
