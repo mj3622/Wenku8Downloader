@@ -12,7 +12,10 @@ import {
   type DownloadExecutorBook,
 } from './download-executor'
 import { DownloadManager } from './download-manager'
-import { sharedDownloadRateLimiter } from './download-rate-limiter'
+import {
+  sharedDownloadRateLimiter,
+  type WenkuRequestPriority,
+} from './download-rate-limiter'
 import { DownloadTaskStore, resolveDownloadTaskPath } from './download-task-store'
 import { resolveDownloadRoot, selectVolumeCoverUrl } from './downloader'
 import { configureLogger, logger } from './logging/logger'
@@ -85,11 +88,25 @@ export function createAppServices(): AppServices {
   const cloudflareChallenge = new ElectronCloudflareChallengeSolver({
     networkSession: wenkuSession,
   })
+  const createControlFactory = (
+    priority: WenkuRequestPriority,
+    onThrottleWait?: (waitMs: number) => void,
+  ) => (
+    (kind, url) => sharedDownloadRateLimiter.createRequestControl(
+      kind,
+      url,
+      {
+        priority,
+        ...(onThrottleWait ? { onThrottleWait } : {}),
+      },
+    )
+  ) satisfies CrawlerRequestControlFactory
   const crawler = new WebCrawler(
     config,
     undefined,
     cloudflareChallenge,
     wenkuSession,
+    createControlFactory('interactive'),
   )
   const environment = {
     isPackaged: app.isPackaged,
@@ -104,22 +121,15 @@ export function createAppServices(): AppServices {
   const bookCache = new BookCacheRepository(cacheStore)
   const assetCache = new DownloadAssetCache(cacheStore)
   const discovery = new DiscoveryService({
-    source: new WenkuDiscoverySource(crawler),
+    source: new WenkuDiscoverySource(crawler, createControlFactory('background')),
     cache: new DiscoveryCacheRepository(cacheStore),
   })
-  const createControlFactory = (onThrottleWait?: (waitMs: number) => void) => (
-    (kind, url) => sharedDownloadRateLimiter.createRequestControl(
-      kind,
-      url,
-      onThrottleWait ? { onThrottleWait } : {},
-    )
-  ) satisfies CrawlerRequestControlFactory
   const books = new BookService({
     fetchPage: (bookId, signal, onThrottleWait) => Book.fetchPage(
       bookId,
       crawler,
       signal,
-      createControlFactory(onThrottleWait),
+      createControlFactory('interactive', onThrottleWait),
     ),
     buildFromPage: (
       bookId,
@@ -135,13 +145,13 @@ export function createAppServices(): AppServices {
       version,
       legacyImportGenerationKey,
       signal,
-      createControlFactory(onThrottleWait),
+      createControlFactory('interactive', onThrottleWait),
       bookCache,
     ),
     restore: (snapshot) => Book.fromSnapshot(
       snapshot,
       crawler,
-      createControlFactory(),
+      createControlFactory('interactive'),
       bookCache,
     ),
   }, bookCache)

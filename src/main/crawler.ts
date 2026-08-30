@@ -189,6 +189,7 @@ export class WebCrawler {
     cookie?: Record<string, string>,
     private readonly cloudflareChallenge?: CloudflareChallengeSolver,
     networkSession?: CrawlerNetworkSession,
+    private readonly defaultRequestControlFactory?: CrawlerRequestControlFactory,
   ) {
     this.cookies = cookie ?? this.getCookieDefaults()
     this.networkSession = networkSession ?? {
@@ -329,6 +330,7 @@ export class WebCrawler {
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
     }
+    control ??= this.defaultRequestControlFactory?.('document', url)
     const maxRetries = 3
     let lastError: Error | null = null
     let lastStatus: number | undefined
@@ -619,6 +621,7 @@ export class WebCrawler {
     control?: CrawlerRequestControl,
   ): Promise<Buffer | null> {
     url = url.replace('http://', 'https://')
+    control ??= this.defaultRequestControlFactory?.('image', url)
     let lastError: string | null = null
     let lastCause: Error | null = null
 

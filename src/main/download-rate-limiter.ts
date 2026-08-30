@@ -25,6 +25,7 @@ type Scheduler = (callback: () => void, delayMs: number) => unknown
 type RequestSleep = (delayMs: number, signal?: AbortSignal) => Promise<void>
 
 export type DownloadRequestKind = CrawlerRequestKind
+export type WenkuRequestPriority = 'interactive' | 'download' | 'background'
 
 export interface DownloadResponseObservation {
   status: number
@@ -49,6 +50,9 @@ type CapacityRelease = () => void
 
 type CapacityWaiter = {
   kind: DownloadRequestKind
+  priority: WenkuRequestPriority
+  enqueuedAt: number
+  sequence: number
   resolve(release: CapacityRelease): void
   cleanup(): void
 }
@@ -63,9 +67,17 @@ type RequestSlot = {
 }
 
 export interface DownloadRequestControlOptions {
+  priority?: WenkuRequestPriority
   onResponseObserved?: () => void
   onThrottleWait?: (waitMs: number) => void
 }
+
+const REQUEST_PRIORITY_SCORE: Readonly<Record<WenkuRequestPriority, number>> = {
+  interactive: 2,
+  download: 1,
+  background: 0,
+}
+const PRIORITY_AGING_MS = 5_000
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -130,6 +142,7 @@ export class DownloadRateLimiter {
   private readonly now: () => number
   private readonly random: () => number
   private readonly sleep: RequestSleep
+  private waiterSequence = 0
 
   constructor(optionsOrSchedule: DownloadRateLimiterOptions | Scheduler = {}) {
     const options = typeof optionsOrSchedule === 'function'
@@ -255,9 +268,21 @@ export class DownloadRateLimiter {
 
   private drainCapacity(slot: RequestSlot): void {
     while (slot.capacityWaiters.length > 0) {
-      const waiterIndex = slot.capacityWaiters.findIndex((waiter) => (
-        this.canStart(slot, waiter.kind)
-      ))
+      const now = this.now()
+      let waiterIndex = -1
+      let bestScore = Number.NEGATIVE_INFINITY
+      let bestSequence = Number.POSITIVE_INFINITY
+      for (let index = 0; index < slot.capacityWaiters.length; index++) {
+        const waiter = slot.capacityWaiters[index]
+        if (!this.canStart(slot, waiter.kind)) continue
+        const ageBoost = Math.floor(Math.max(0, now - waiter.enqueuedAt) / PRIORITY_AGING_MS)
+        const score = REQUEST_PRIORITY_SCORE[waiter.priority] + ageBoost
+        if (score > bestScore || (score === bestScore && waiter.sequence < bestSequence)) {
+          waiterIndex = index
+          bestScore = score
+          bestSequence = waiter.sequence
+        }
+      }
       if (waiterIndex < 0) return
       const [waiter] = slot.capacityWaiters.splice(waiterIndex, 1)
       waiter.cleanup()
@@ -270,6 +295,7 @@ export class DownloadRateLimiter {
     slot: RequestSlot,
     kind: DownloadRequestKind,
     signal?: AbortSignal,
+    priority: WenkuRequestPriority = 'download',
   ): Promise<CapacityRelease> {
     throwIfDownloadCancelled(signal)
     if (this.canStart(slot, kind) && slot.capacityWaiters.length === 0) {
@@ -286,6 +312,9 @@ export class DownloadRateLimiter {
       }
       const waiter: CapacityWaiter = {
         kind,
+        priority,
+        enqueuedAt: this.now(),
+        sequence: ++this.waiterSequence,
         resolve,
         cleanup: () => signal?.removeEventListener('abort', onAbort),
       }
@@ -300,9 +329,10 @@ export class DownloadRateLimiter {
     url: string,
     signal?: AbortSignal,
     onThrottleWait?: (waitMs: number) => void,
+    priority: WenkuRequestPriority = 'download',
   ): Promise<CapacityRelease> {
     const slot = this.getSlot(kind, url)
-    const releaseCapacity = await this.acquireCapacity(slot, kind, signal)
+    const releaseCapacity = await this.acquireCapacity(slot, kind, signal, priority)
     const previous = slot.queue
     let release!: () => void
     const current = new Promise<void>((resolve) => { release = resolve })
@@ -345,6 +375,7 @@ export class DownloadRateLimiter {
           url,
           signal,
           options.onThrottleWait,
+          options.priority,
         )
       },
       afterAttempt: () => {
@@ -414,7 +445,7 @@ export class DownloadRateLimiter {
     }
 
     if (cooldownMs !== undefined) {
-      logger.warn('download.request.throttled', '下载请求已进入自适应等待', {
+      logger.warn('network.wenku.request.throttled', 'Wenku8 请求已进入自适应等待', {
         kind,
         origin: requestOrigin(kind, url),
         status: observation.status,

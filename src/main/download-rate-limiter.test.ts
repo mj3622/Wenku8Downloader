@@ -243,6 +243,102 @@ describe('DownloadRateLimiter', () => {
     releaseSecond()
   })
 
+  it('starts an interactive waiter before an earlier background waiter', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const unlocks: Array<() => void> = []
+    const limiter = new DownloadRateLimiter({
+      schedule: (callback) => { unlocks.push(callback) },
+    })
+    limiter.record(429)
+    unlocks.shift()?.()
+    limiter.record(503)
+    expect(limiter.speed.level).toBe(3)
+
+    const url = 'https://www.wenku8.net/book/3057.htm'
+    const releaseFirst = await limiter.acquire('document', url)
+    const order: string[] = []
+    const background = limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'background',
+    ).then((release) => {
+      order.push('background')
+      return release
+    })
+    const interactive = limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'interactive',
+    ).then((release) => {
+      order.push('interactive')
+      return release
+    })
+
+    releaseFirst()
+    await vi.advanceTimersByTimeAsync(2_000)
+    const releaseInteractive = await interactive
+    expect(order).toEqual(['interactive'])
+
+    releaseInteractive()
+    await vi.advanceTimersByTimeAsync(2_000)
+    const releaseBackground = await background
+    expect(order).toEqual(['interactive', 'background'])
+    releaseBackground()
+  })
+
+  it('ages a background waiter so interactive traffic cannot starve it', async () => {
+    vi.useFakeTimers()
+    let now = 1_000
+    const unlocks: Array<() => void> = []
+    const limiter = new DownloadRateLimiter({
+      now: () => now,
+      schedule: (callback) => { unlocks.push(callback) },
+      sleep: async (delayMs) => { now += delayMs },
+    })
+    limiter.record(429)
+    unlocks.shift()?.()
+    limiter.record(503)
+
+    const url = 'https://www.wenku8.net/book/3057.htm'
+    const releaseFirst = await limiter.acquire('document', url)
+    const order: string[] = []
+    const background = limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'background',
+    ).then((release) => {
+      order.push('background')
+      return release
+    })
+    now += 15_000
+    const interactive = limiter.acquire(
+      'document',
+      url,
+      undefined,
+      undefined,
+      'interactive',
+    ).then((release) => {
+      order.push('interactive')
+      return release
+    })
+
+    releaseFirst()
+    const releaseBackground = await background
+    expect(order).toEqual(['background'])
+
+    releaseBackground()
+    const releaseInteractive = await interactive
+    expect(order).toEqual(['background', 'interactive'])
+    releaseInteractive()
+  })
+
   it('groups upgraded HTTP image URLs with their actual HTTPS origin', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
