@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   IconCompass,
@@ -10,8 +11,12 @@ import {
 } from '@tabler/icons-react'
 import logoUrl from '../../../../resources/icon.png'
 import { useAppVersion } from '../hooks/useAppVersion'
+import { useBookshelfUpdateStore } from '../stores/bookshelfUpdateStore'
+import { useConfigStore } from '../stores/configStore'
 
 type NavigationItem = { to: string; label: string; icon: Icon }
+
+const BOOKSHELF_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
 const primaryNavItems: NavigationItem[] = [
   {
@@ -49,9 +54,16 @@ const secondaryNavItems: NavigationItem[] = [
   },
 ]
 
-function NavigationItems({ items }: { items: NavigationItem[] }) {
+function NavigationItems({
+  items,
+  bookshelfUpdateCount = 0,
+}: {
+  items: NavigationItem[]
+  bookshelfUpdateCount?: number
+}) {
   return items.map((item) => {
     const Glyph = item.icon
+    const showBookshelfUpdate = item.to === '/bookshelf' && bookshelfUpdateCount > 0
     return (
       <NavLink
         key={item.to}
@@ -66,6 +78,16 @@ function NavigationItems({ items }: { items: NavigationItem[] }) {
       >
         <Glyph aria-hidden="true" className="flex-shrink-0" size={20} stroke={1.7} />
         <span className="flex-1">{item.label}</span>
+        {showBookshelfUpdate && (
+          <>
+            <span
+              aria-hidden="true"
+              data-bookshelf-update-indicator
+              className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500"
+            />
+            <span className="sr-only">{bookshelfUpdateCount} 部作品有更新</span>
+          </>
+        )}
       </NavLink>
     )
   })
@@ -73,6 +95,24 @@ function NavigationItems({ items }: { items: NavigationItem[] }) {
 
 export default function Layout() {
   const version = useAppVersion()
+  const bookshelfUpdateCount = useBookshelfUpdateStore(state => state.updateCount)
+  const checkBookshelfUpdates = useBookshelfUpdateStore(state => state.check)
+  const clearBookshelfUpdates = useBookshelfUpdateStore(state => state.clear)
+  const hasCookies = useConfigStore(state => state.snapshot?.account.hasCookies)
+
+  useEffect(() => {
+    void checkBookshelfUpdates()
+    const timer = window.setInterval(() => {
+      void checkBookshelfUpdates()
+    }, BOOKSHELF_CHECK_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [checkBookshelfUpdates])
+
+  useEffect(() => {
+    if (hasCookies === true) void checkBookshelfUpdates()
+    else if (hasCookies === false) clearBookshelfUpdates()
+  }, [checkBookshelfUpdates, clearBookshelfUpdates, hasCookies])
+
   return (
     <div className="flex h-screen bg-apple-bg text-apple-heading">
       <aside className="w-[220px] flex-shrink-0 flex flex-col bg-white border-r border-apple-border-medium">
@@ -92,7 +132,10 @@ export default function Layout() {
         {/* Navigation */}
         <nav className="flex flex-1 flex-col px-2 pb-1">
           <div className="space-y-0.5">
-            <NavigationItems items={primaryNavItems} />
+            <NavigationItems
+              items={primaryNavItems}
+              bookshelfUpdateCount={bookshelfUpdateCount}
+            />
           </div>
           <div className="mt-auto space-y-0.5 border-t border-apple-border-subtle pt-2">
             <NavigationItems items={secondaryNavItems} />

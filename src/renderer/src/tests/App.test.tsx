@@ -2,9 +2,15 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
+import { useBookshelfUpdateStore } from '../stores/bookshelfUpdateStore'
 import { useToastStore } from '../stores/toastStore'
+
+const mocks = {
+  getConfig: vi.fn(),
+  getBookshelf: vi.fn(),
+}
 
 let container: HTMLDivElement
 let root: Root
@@ -22,7 +28,11 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  vi.clearAllMocks()
+  useBookshelfUpdateStore.getState().clear()
   useToastStore.getState().clear()
+  mocks.getConfig.mockResolvedValue({ account: { hasCookies: false } })
+  mocks.getBookshelf.mockResolvedValue({ entries: [], fetchedAt: 1, stale: false })
   window.location.hash = '#/missing-page'
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -42,6 +52,8 @@ beforeEach(() => {
       }),
       onDownloadStateChanged: () => () => undefined,
       getAppInfo: async () => ({ version: '2.1.0' }),
+      getConfig: mocks.getConfig,
+      getBookshelf: mocks.getBookshelf,
       getDiscoveryHome: async () => ({
         sections: [],
         fetchedAt: Date.now(),
@@ -91,5 +103,46 @@ describe('App routing', () => {
     expect(labels).toEqual(['发现', '找书', '书架', '下载', '配置', '项目介绍'])
     expect(container.querySelector('a[href="#/about"]')).not.toBeNull()
     expect(container.querySelector('h1')?.textContent).toBe('轻小说文库下载器')
+  })
+
+  it('shows a quiet accessible indicator when the automatic bookshelf check finds updates', async () => {
+    window.location.hash = '#/about'
+    mocks.getConfig.mockResolvedValue({ account: { hasCookies: true } })
+    mocks.getBookshelf.mockResolvedValue({
+      entries: [{
+        bookId: '101',
+        title: '星海图书馆',
+        author: '林间笔记',
+        latestChapter: '第十二章',
+        bookmark: null,
+        updatedAt: '2026-08-30',
+        localState: 'update',
+        updateAvailable: true,
+      }],
+      fetchedAt: 1,
+      stale: false,
+    })
+
+    await act(async () => root.render(<App />))
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-bookshelf-update-indicator]')).not.toBeNull()
+    })
+
+    const bookshelfLink = container.querySelector('a[href="#/bookshelf"]')
+    expect(bookshelfLink?.textContent).toContain('1 部作品有更新')
+    expect(useToastStore.getState().items).toEqual([
+      expect.objectContaining({ tone: 'info', title: '书架发现更新' }),
+    ])
+  })
+
+  it('schedules low-frequency bookshelf checks while the application is running', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval')
+    try {
+      await act(async () => root.render(<App />))
+
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 6 * 60 * 60 * 1_000)
+    } finally {
+      setIntervalSpy.mockRestore()
+    }
   })
 })

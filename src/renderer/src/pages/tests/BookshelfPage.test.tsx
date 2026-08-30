@@ -10,6 +10,7 @@ vi.mock('../../api/client', () => ({ api: mocks }))
 
 import BookshelfPage from '../BookshelfPage'
 import { useBookshelfStore } from '../../stores/bookshelfStore'
+import { useBookshelfUpdateStore } from '../../stores/bookshelfUpdateStore'
 import { useToastStore } from '../../stores/toastStore'
 
 const ENTRY = {
@@ -37,6 +38,7 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks()
   useBookshelfStore.getState().clear()
+  useBookshelfUpdateStore.getState().clear()
   useToastStore.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)

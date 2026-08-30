@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { BookshelfPage } from '../../../shared/ipc-types'
 import { api } from '../api/client'
 import { getUserFeedback } from '../utils/userFeedback'
+import { useBookshelfUpdateStore } from './bookshelfUpdateStore'
 import { toast } from './toastStore'
 
 interface BookshelfState {
@@ -25,6 +26,7 @@ export const useBookshelfStore = create<BookshelfState>((set, get) => {
       try {
         const page = await api.getBookshelf(refresh)
         if (generation !== requestGeneration) return
+        useBookshelfUpdateStore.getState().syncPage(page)
         set({ page, loading: false, error: null })
       } catch (error) {
         if (generation !== requestGeneration) return

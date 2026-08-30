@@ -4,10 +4,20 @@ const mocks = vi.hoisted(() => ({ getBookshelf: vi.fn() }))
 vi.mock('../../api/client', () => ({ api: mocks }))
 
 import { useBookshelfStore } from '../bookshelfStore'
+import { useBookshelfUpdateStore } from '../bookshelfUpdateStore'
 import { useToastStore } from '../toastStore'
 
 const PAGE = {
-  entries: [],
+  entries: [{
+    bookId: '101',
+    title: '星海图书馆',
+    author: '林间笔记',
+    latestChapter: '第十二章',
+    bookmark: null,
+    updatedAt: '2026-08-30',
+    localState: 'update' as const,
+    updateAvailable: true,
+  }],
   fetchedAt: 100,
   stale: false,
 }
@@ -15,6 +25,7 @@ const PAGE = {
 beforeEach(() => {
   vi.clearAllMocks()
   useBookshelfStore.getState().clear()
+  useBookshelfUpdateStore.getState().clear()
   useToastStore.getState().clear()
 })
 
@@ -26,6 +37,7 @@ describe('bookshelfStore', () => {
 
     expect(mocks.getBookshelf).toHaveBeenCalledWith(true)
     expect(useBookshelfStore.getState()).toMatchObject({ page: PAGE, loading: false, error: null })
+    expect(useBookshelfUpdateStore.getState().updateCount).toBe(1)
   })
 
   it('ignores a completed request after the page is cleared', async () => {
