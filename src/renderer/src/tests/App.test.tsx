@@ -51,7 +51,7 @@ beforeEach(() => {
         legacyImportCompleted: true,
       }),
       onDownloadStateChanged: () => () => undefined,
-      getAppInfo: async () => ({ version: '2.1.0' }),
+      getAppInfo: async () => ({ version: '2.2.0' }),
       getConfig: mocks.getConfig,
       getBookshelf: mocks.getBookshelf,
       getDiscoveryHome: async () => ({
