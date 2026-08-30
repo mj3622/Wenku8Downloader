@@ -317,13 +317,13 @@ export class DownloadManager {
     if (batch.length === 0) throw new Error('下载批次不存在，请刷新页面后重试')
     const timestamp = this.now()
     const abortTaskIds = new Set<string>()
+    const pendingTaskIds = new Set<string>()
     let changed = false
     const tasks = this.state.tasks.map((task) => {
       if (task.batchId !== batchId) return task
       if (task.status === 'pending') {
         changed = true
-        const queueIndex = this.queue.indexOf(task.id)
-        if (queueIndex >= 0) this.queue.splice(queueIndex, 1)
+        pendingTaskIds.add(task.id)
         return { ...task, status: 'cancelled' as const, phase: '已取消', updatedAt: timestamp }
       }
       if (task.status === 'downloading') {
@@ -335,6 +335,9 @@ export class DownloadManager {
     })
     if (!changed) return this.getSnapshot()
     this.commitRequired(this.nextState(tasks))
+    for (let index = this.queue.length - 1; index >= 0; index--) {
+      if (pendingTaskIds.has(this.queue[index])) this.queue.splice(index, 1)
+    }
     this.publish()
     if (this.active && abortTaskIds.has(this.active.taskId) && !this.active.controller.signal.aborted) {
       this.active.controller.abort()

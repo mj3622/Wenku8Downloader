@@ -75,6 +75,21 @@ describe('BookshelfPage', () => {
     expect(container.textContent).toContain('作品详情')
   })
 
+  it('renders one hundred readonly entries without dropping rows', async () => {
+    const entries = Array.from({ length: 100 }, (_, index) => ({
+      ...ENTRY,
+      bookId: String(index + 1),
+      title: `测试作品 ${index + 1}`,
+    }))
+    mocks.getBookshelf.mockResolvedValue({ entries, fetchedAt: 1, stale: false })
+
+    await render()
+
+    expect(container.querySelectorAll('section[aria-label="原站书架"] button'))
+      .toHaveLength(100)
+    expect(container.textContent).toContain('测试作品 100')
+  })
+
   it('shows stale and empty states without blocking refresh', async () => {
     mocks.getBookshelf.mockResolvedValue({ entries: [], fetchedAt: 1, stale: true })
     await render()

@@ -236,6 +236,30 @@ describe('DownloadManager scheduling', () => {
     expect(taskByBook(snapshot, '200').status).toBe('pending')
   })
 
+  it('keeps the batch queue intact when cancellation cannot be persisted', async () => {
+    const first = deferred<DownloadExecutionResult>()
+    const { manager, executor, store } = setup()
+    executor.execute
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(completedExecution())
+    const batch = manager.enqueueBatch([
+      input({ bookId: '100', type: 'epub_volume', volume: '第一卷' }),
+      input({ bookId: '100', type: 'epub_volume', volume: '第二卷' }),
+    ])
+    store.save.mockImplementationOnce(() => { throw new Error('disk') })
+
+    expect(() => manager.cancelBatch(batch.batchId!))
+      .toThrow('任务状态无法保存，请检查磁盘后重试')
+    expect(manager.getSnapshot().tasks.filter(task => task.batchId === batch.batchId)
+      .map(task => task.status)).toEqual(['downloading', 'pending'])
+
+    first.resolve(completedExecution())
+    await vi.waitFor(() => expect(executor.execute).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(manager.getSnapshot().tasks
+      .filter(task => task.batchId === batch.batchId)
+      .map(task => task.status)).toEqual(['completed', 'completed']))
+  })
+
   it('retries only retryable batch tasks and keeps active duplicates unchanged', () => {
     const batchId = '223e4567-e89b-42d3-a456-426614174000'
     const initial: PersistedDownloadState = {

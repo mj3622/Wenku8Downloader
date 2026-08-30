@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CATALOG_TAGS } from '../../../../shared/ipc-types'
 
 const mocks = vi.hoisted(() => ({
   book: {
@@ -74,6 +75,7 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.book.volumes = {}
+  mocks.book.basic_info.作者 = '测试作者'
   mocks.book.basic_info.标签 = ['校园', '青春']
   mocks.book.basic_info.动画化 = true
   mocks.book.basic_info.热度 = 'S级'
@@ -143,6 +145,41 @@ describe('BookDetailPage', () => {
     await act(async () => tag?.click())
     expect(container.querySelector('[data-testid="location"]')?.textContent)
       .toBe('/search?mode=browse&tag=%E6%A0%A1%E5%9B%AD')
+  })
+
+  it('keeps a long author and thirty tags available without clipping metadata', async () => {
+    const longAuthor = '可以正常换行的长作者名称'.repeat(12)
+    mocks.book.basic_info.作者 = longAuthor
+    mocks.book.basic_info.标签 = [...CATALOG_TAGS.slice(0, 30)]
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const author = [...container.querySelectorAll('button')]
+      .find(item => item.textContent === longAuthor)
+    expect(author?.className).toContain('break-all')
+    expect(container.querySelectorAll('section[aria-labelledby="book-tags-heading"] button'))
+      .toHaveLength(30)
+  })
+
+  it('omits the tag section when migrated metadata has no tags', async () => {
+    mocks.book.basic_info.标签 = []
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    expect(container.querySelector('section[aria-labelledby="book-tags-heading"]')).toBeNull()
+    expect(container.querySelector('[role="group"][aria-label="下载方式"]')).not.toBeNull()
   })
 
   it('opens the corresponding original detail page through the external-link boundary', async () => {
