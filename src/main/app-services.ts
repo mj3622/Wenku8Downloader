@@ -36,6 +36,9 @@ import { SearchService } from './search-service'
 import { CatalogCacheRepository } from './catalog-cache-repository'
 import { CatalogService } from './catalog-service'
 import { WenkuCatalogSource } from './catalog-source'
+import { BookshelfCacheRepository } from './bookshelf-cache-repository'
+import { BookshelfService } from './bookshelf-service'
+import { WenkuBookshelfSource } from './bookshelf-source'
 
 export interface AppServices {
   networkSession: Session
@@ -44,6 +47,7 @@ export interface AppServices {
   search: SearchService
   catalog: CatalogService
   discovery: DiscoveryService
+  bookshelf: BookshelfService
   books: BookService
   downloads: DownloadManager
   initializeCache(): Promise<void>
@@ -192,6 +196,13 @@ export function createAppServices(): AppServices {
     executor,
     getDownloadRoot: currentDownloadRoot,
   })
+  const bookshelf = new BookshelfService({
+    source: new WenkuBookshelfSource(crawler, createControlFactory('background')),
+    refreshSource: new WenkuBookshelfSource(crawler, createControlFactory('interactive')),
+    cache: new BookshelfCacheRepository(cacheStore),
+    getCredentialRevision: () => config.getCredentialRevision(),
+    getDownloadSnapshot: () => downloads.getSnapshot(),
+  })
   let stopCentralMaintenance: (() => void) | undefined
   let legacyMaintenanceTimer: ReturnType<typeof setInterval> | undefined
 
@@ -229,6 +240,7 @@ export function createAppServices(): AppServices {
     search.clearMemory()
     catalog.clearMemory()
     discovery.clearMemory()
+    bookshelf.clearMemory()
     try {
       const result = await cacheStore.clear()
       await clearLegacyDownloadCache(currentDownloadRoot())
@@ -274,6 +286,7 @@ export function createAppServices(): AppServices {
     search,
     catalog,
     discovery,
+    bookshelf,
     books,
     downloads,
     initializeCache,

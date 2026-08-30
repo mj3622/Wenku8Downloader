@@ -3,6 +3,7 @@ import type {
   DownloadApi,
   CacheApi,
   CatalogApi,
+  BookshelfApi,
   DiscoveryApi,
   DownloadStateEvent,
   EnqueueDownloadInput,
@@ -28,7 +29,7 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & {
+type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & BookshelfApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
@@ -116,6 +117,14 @@ describe('preload download boundary', () => {
       page: 2,
       refresh: false,
     })
+  })
+
+  it('uses the fixed readonly bookshelf channel', async () => {
+    mocks.invoke.mockResolvedValue({ entries: [], fetchedAt: 1, stale: false })
+
+    await exposedApi.getBookshelf(true)
+
+    expect(mocks.invoke).toHaveBeenCalledWith('bookshelf:get', { refresh: true })
   })
 
   it('uses the fixed catalog channel and a typed query payload', async () => {

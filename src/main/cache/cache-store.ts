@@ -30,7 +30,7 @@ export interface CacheAddress {
   sourceKey: string
 }
 
-export type SharedCacheNamespace = 'discovery' | 'catalog'
+export type SharedCacheNamespace = 'discovery' | 'catalog' | 'bookshelf'
 
 export interface SharedCacheAddress {
   namespace: SharedCacheNamespace
@@ -620,7 +620,9 @@ export class CacheStore {
 
   private resolveSharedAddress(address: SharedCacheAddress): string | null {
     if (
-      (address.namespace !== 'discovery' && address.namespace !== 'catalog')
+      (address.namespace !== 'discovery'
+        && address.namespace !== 'catalog'
+        && address.namespace !== 'bookshelf')
       || !address.sourceKey
       || address.sourceKey.length > 2_048
     ) return null

@@ -145,6 +145,38 @@ export interface CatalogApi {
   getCatalog(query: CatalogQuery, refresh?: boolean): Promise<CatalogPage>
 }
 
+export const BOOKSHELF_LOCAL_STATES = [
+  'none',
+  'partial',
+  'current',
+  'update',
+  'unknown',
+] as const
+
+export type BookshelfLocalState = typeof BOOKSHELF_LOCAL_STATES[number]
+
+export interface BookshelfEntry {
+  bookId: string
+  title: string
+  author: string
+  latestChapter: string | null
+  bookmark: string | null
+  updatedAt: string | null
+  localState: BookshelfLocalState
+  localCompletedVersion?: import('./book-types').BookVersionFields
+  updateAvailable: boolean
+}
+
+export interface BookshelfPage {
+  entries: BookshelfEntry[]
+  fetchedAt: number
+  stale: boolean
+}
+
+export interface BookshelfApi {
+  getBookshelf(refresh?: boolean): Promise<BookshelfPage>
+}
+
 export const DOWNLOAD_TASK_TYPES = ['epub_full', 'epub_volume', 'images'] as const
 
 export type DownloadTaskType = typeof DOWNLOAD_TASK_TYPES[number]

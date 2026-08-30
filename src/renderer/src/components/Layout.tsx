@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   IconCompass,
+  IconBooks,
   IconDownload,
   IconInfoCircle,
   IconSearch,
@@ -21,6 +22,11 @@ const primaryNavItems: NavigationItem[] = [
     to: '/search',
     label: '找书',
     icon: IconSearch,
+  },
+  {
+    to: '/bookshelf',
+    label: '书架',
+    icon: IconBooks,
   },
   {
     to: '/download',

@@ -193,6 +193,9 @@ function createServices(
         type, page, title: '排行榜', totalPages: 1, books: [], fetchedAt: 1, stale: false,
       })),
     },
+    bookshelf: {
+      getPage: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
+    },
     books: {
       get: vi.fn(() => bookPromise),
     },
@@ -518,6 +521,16 @@ describe('registerIpcHandlers application operations', () => {
     await expect(invoke('discovery:get-ranking', {}, {
       type: 'arbitrary', page: 1,
     })).rejects.toThrow('榜单类型')
+  })
+
+  it('accepts only the fixed readonly bookshelf refresh option', async () => {
+    await invoke('bookshelf:get', {}, { refresh: true })
+
+    expect(services.bookshelf.getPage).toHaveBeenCalledWith({ refresh: true })
+    await expect(invoke('bookshelf:get', {}, {
+      refresh: false,
+      url: 'https://example.com/',
+    })).rejects.toThrow('请求参数格式无效')
   })
 
   it('validates and forwards catalog requests without logging arbitrary fields', async () => {

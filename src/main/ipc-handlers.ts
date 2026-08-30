@@ -40,6 +40,7 @@ import type { CacheClearResult } from '../shared/ipc-types'
 import type { DiscoveryService } from './discovery-service'
 import type { SearchService } from './search-service'
 import type { CatalogService } from './catalog-service'
+import type { BookshelfService } from './bookshelf-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -70,6 +71,7 @@ export interface IpcServices {
   search: Pick<SearchService, 'search'>
   catalog: Pick<CatalogService, 'getPage'>
   discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
+  bookshelf: Pick<BookshelfService, 'getPage'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
   }
@@ -103,6 +105,15 @@ function validateBookGetPayload(value: unknown): { bookId: string; revalidate: b
     bookId: validateBookId(payload.bookId),
     revalidate: payload.revalidate === true,
   }
+}
+
+function validateBookshelfPayload(value: unknown): { refresh: boolean } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'refresh')
+    || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
+    throw new Error('请求参数格式无效')
+  }
+  return { refresh: payload.refresh === true }
 }
 
 async function runLoggedOperation<T>(
@@ -303,6 +314,17 @@ export function registerIpcHandlers(services: IpcServices): void {
     return runLoggedOperation('discovery.ranking', context, async () => {
       const result = await services.discovery.getRanking(type, page, { refresh })
       context.resultCount = result.books.length
+      context.stale = result.stale
+      return result
+    })
+  })
+
+  ipcMain.handle('bookshelf:get', (_event, rawPayload: unknown) => {
+    const { refresh } = validateBookshelfPayload(rawPayload)
+    const context: LogContext = { refresh }
+    return runLoggedOperation('bookshelf.get', context, async () => {
+      const result = await services.bookshelf.getPage({ refresh })
+      context.resultCount = result.entries.length
       context.stale = result.stale
       return result
     })

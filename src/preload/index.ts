@@ -8,6 +8,7 @@ import type {
 import type {
   CookieProgress,
   BookLoadOptions,
+  BookshelfApi,
   CacheApi,
   CatalogApi,
   CatalogQuery,
@@ -84,6 +85,10 @@ const searchApi: SearchApi = {
   searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
 }
 
+const bookshelfApi: BookshelfApi = {
+  getBookshelf: (refresh = false) => ipcRenderer.invoke('bookshelf:get', { refresh }),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
@@ -93,6 +98,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ...catalogApi,
   ...discoveryApi,
   ...searchApi,
+  ...bookshelfApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
   getBook: (bookId: string, options?: BookLoadOptions) => ipcRenderer.invoke('book:get', {
     bookId,

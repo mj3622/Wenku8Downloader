@@ -83,6 +83,10 @@ describe('createAppServices', () => {
         getRanking: expect.any(Function),
         clearMemory: expect.any(Function),
       }))
+      expect(services.bookshelf).toEqual(expect.objectContaining({
+        getPage: expect.any(Function),
+        clearMemory: expect.any(Function),
+      }))
       expect(mocks.fromPartition).toHaveBeenCalledWith('wenku8')
       expect(services.networkSession).toBe(mocks.fromPartition.mock.results[0]?.value)
 

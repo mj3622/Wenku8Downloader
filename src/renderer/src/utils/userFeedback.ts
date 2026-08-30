@@ -2,6 +2,7 @@ export type FeedbackContext =
   | 'search'
   | 'catalog'
   | 'discovery'
+  | 'bookshelf'
   | 'book'
   | 'config-load'
   | 'config-save'
@@ -43,6 +44,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   discovery: {
     title: '发现内容加载失败',
     message: '暂时无法读取推荐和排行榜，请检查网络后重试。',
+  },
+  bookshelf: {
+    title: '书架加载失败',
+    message: '暂时无法读取原站书架，请检查登录状态和网络后重试',
   },
   book: {
     title: '作品信息加载失败',

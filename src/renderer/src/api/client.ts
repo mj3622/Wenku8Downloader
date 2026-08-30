@@ -6,6 +6,7 @@ import type {
 import type {
   CookieProgress,
   BookLoadOptions,
+  BookshelfPage,
   CacheClearResult,
   CatalogPage,
   CatalogQuery,
@@ -81,6 +82,11 @@ export const api = {
   getBookImages: (id: string) => invoke('book', () => window.electronAPI.getBookImages(id)),
   getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
     invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
+
+  // 书架
+  getBookshelf: (refresh = false): Promise<BookshelfPage> => (
+    invoke('bookshelf', () => window.electronAPI.getBookshelf(refresh))
+  ),
 
   // 下载
   getDownloadSnapshot: () =>
