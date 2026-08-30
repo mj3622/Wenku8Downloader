@@ -5,6 +5,7 @@ type Props = {
   page: number
   totalPages: number
   pageHref: (page: number) => string
+  ariaLabel?: string
 }
 
 type PageItem = number | `ellipsis-${'start' | 'end'}`
@@ -29,14 +30,14 @@ function pageItems(page: number, totalPages: number): PageItem[] {
   return items
 }
 
-export default function Pagination({ page, totalPages, pageHref }: Props) {
+export default function Pagination({ page, totalPages, pageHref, ariaLabel = '排行榜分页' }: Props) {
   if (totalPages <= 1) return null
 
   const linkClass = 'motion-pressable inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-apple-border-input bg-white px-2 text-[13px] font-medium text-apple-body hover:border-apple-accent/30 hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25'
   const disabledClass = 'inline-flex h-9 min-w-9 cursor-not-allowed items-center justify-center rounded-lg border border-apple-border-subtle bg-white/50 px-2 text-[13px] text-apple-tertiary'
 
   return (
-    <nav aria-label="排行榜分页" className="mt-8 flex flex-wrap items-center justify-center gap-1.5">
+    <nav aria-label={ariaLabel} className="mt-8 flex flex-wrap items-center justify-center gap-1.5">
       {page > 1 ? (
         <Link to={pageHref(page - 1)} className={linkClass} aria-label="上一页">
           <IconChevronLeft aria-hidden="true" size={17} stroke={1.8} />

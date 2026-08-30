@@ -16,7 +16,7 @@ export default function SearchResultList({ results, onSelect }: Props) {
         <article
           key={item.id}
           className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-apple-border-subtle
-                     bg-apple-card shadow-card transition-colors hover:border-apple-accent/20"
+                     bg-apple-card transition-colors hover:border-apple-accent/20"
         >
           <button
             type="button"
@@ -31,8 +31,10 @@ export default function SearchResultList({ results, onSelect }: Props) {
             <h3 className="min-h-[2.5em] line-clamp-2 text-[13px] font-semibold leading-snug text-apple-heading">
               {item.title}
             </h3>
-            {item.author && (
-              <p className="mt-1 truncate text-xs text-apple-secondary">{item.author}</p>
+            {(item.author || item.publisher) && (
+              <p className="mt-1 truncate text-xs text-apple-secondary">
+                {[item.author, item.publisher].filter(Boolean).join(' · ')}
+              </p>
             )}
             <SearchResultMetadata
               status={item.status}
@@ -40,6 +42,26 @@ export default function SearchResultList({ results, onSelect }: Props) {
               wordCount={item.wordCount}
               isAnimated={item.isAnimated}
             />
+            {item.tags && (
+              <div className="mt-2 flex max-h-[3.25rem] flex-wrap gap-1 overflow-hidden" aria-label="作品标签">
+                {item.tags.split(/\s+/).filter(Boolean).map(tag => (
+                  <span
+                    key={tag}
+                    className="rounded-md bg-apple-bg px-1.5 py-0.5 text-[11px] leading-4 text-apple-secondary"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            {item.desc && (
+              <p
+                data-testid="result-description"
+                className="mt-2 line-clamp-3 text-xs leading-relaxed text-apple-secondary"
+              >
+                {item.desc}
+              </p>
+            )}
             <div className="flex-1" />
             <button
               onClick={() => onSelect(item.id)}

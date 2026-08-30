@@ -13,6 +13,7 @@ export interface SearchResult {
   cover: string
   id: string
   author?: string
+  publisher?: string
   status?: string
   updateTime?: string
   wordCount?: string
@@ -37,6 +38,99 @@ export type SearchResponse =
 export interface SearchApi {
   searchAuthor(query: string): Promise<SearchResponse>
   searchTitle(query: string): Promise<SearchResponse>
+}
+
+export const CATALOG_PUBLISHER_OPTIONS = [
+  { value: '1', label: '电击文库' },
+  { value: '2', label: '富士见文库' },
+  { value: '3', label: '角川文库' },
+  { value: '4', label: 'MF文库J' },
+  { value: '5', label: 'Fami通文库' },
+  { value: '6', label: 'GA文库' },
+  { value: '7', label: 'HJ文库' },
+  { value: '8', label: '一迅社' },
+  { value: '9', label: '集英社' },
+  { value: '10', label: '小学馆' },
+  { value: '11', label: '讲谈社' },
+  { value: '12', label: '少女文库' },
+  { value: '13', label: '其他文库' },
+  { value: '14', label: '游戏剧本' },
+] as const
+
+export type CatalogPublisher = typeof CATALOG_PUBLISHER_OPTIONS[number]['value']
+
+export const CATALOG_INITIALS = [
+  '1',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+] as const
+
+export type CatalogInitial = typeof CATALOG_INITIALS[number]
+
+export const CATALOG_TAG_GROUPS = [
+  {
+    key: 'daily',
+    label: '日常系',
+    tags: ['校园', '青春', '恋爱', '治愈', '群像', '竞技', '音乐', '美食', '旅行', '欢乐向', '经营', '职场', '斗智', '脑洞', '宅文化'],
+  },
+  {
+    key: 'fantasy',
+    label: '幻想系',
+    tags: ['穿越', '奇幻', '魔法', '异能', '战斗', '科幻', '机战', '战争', '冒险', '龙傲天'],
+  },
+  {
+    key: 'dark',
+    label: '黑深残',
+    tags: ['悬疑', '犯罪', '复仇', '黑暗', '猎奇', '惊悚', '间谍', '末日', '游戏', '大逃杀'],
+  },
+  {
+    key: 'character',
+    label: '人物属性',
+    tags: ['青梅竹马', '妹妹', '女儿', 'JK', 'JC', '大小姐', '性转', '伪娘', '人外'],
+  },
+  {
+    key: 'special',
+    label: '特殊属性',
+    tags: ['后宫', '百合', '耽美', 'NTR', '女性视角'],
+  },
+] as const
+
+export type CatalogTag = typeof CATALOG_TAG_GROUPS[number]['tags'][number]
+
+export const CATALOG_TAGS: readonly CatalogTag[] = Object.freeze(
+  CATALOG_TAG_GROUPS.flatMap(group => [...group.tags]),
+)
+
+export const CATALOG_SORTS = ['lastupdate', 'allvisit'] as const
+export type CatalogSort = typeof CATALOG_SORTS[number]
+
+export const CATALOG_STATUSES = ['all', 'serializing', 'completed'] as const
+export type CatalogStatus = typeof CATALOG_STATUSES[number]
+
+export const CATALOG_ANIMATIONS = ['all', 'animated'] as const
+export type CatalogAnimation = typeof CATALOG_ANIMATIONS[number]
+
+export interface CatalogQuery {
+  publisher?: CatalogPublisher
+  initial?: CatalogInitial
+  tag?: CatalogTag
+  status: CatalogStatus
+  animation: CatalogAnimation
+  sort: CatalogSort
+  page: number
+}
+
+export interface CatalogPage {
+  query: CatalogQuery
+  books: SearchResult[]
+  page: number
+  totalPages: number
+  fetchedAt: number
+  stale: boolean
+}
+
+export interface CatalogApi {
+  getCatalog(query: CatalogQuery, refresh?: boolean): Promise<CatalogPage>
 }
 
 export const DOWNLOAD_TASK_TYPES = ['epub_full', 'epub_volume', 'images'] as const

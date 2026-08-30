@@ -129,7 +129,7 @@ describe('DownloadHistoryPage', () => {
     await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
 
     const searchLink = container.querySelector<HTMLAnchorElement>('a[href="#/search"]')
-    expect(searchLink?.textContent).toContain('检索作品')
+    expect(searchLink?.textContent).toContain('前往找书')
   })
 
   it('formats existing task titles with the current download setting', async () => {

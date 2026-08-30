@@ -130,12 +130,12 @@ export default function DownloadHistoryPage() {
             <IconDownload aria-hidden="true" size={22} stroke={1.7} />
           </div>
           <h2 className="text-sm font-semibold text-apple-heading">暂无下载记录</h2>
-          <p className="mt-1 text-sm text-apple-secondary">检索作品并选择整本、分卷或插图下载</p>
+          <p className="mt-1 text-sm text-apple-secondary">找到作品后，可选择整本、分卷或插图下载</p>
           <a
             href="#/search"
             className="motion-pressable mt-4 rounded-lg bg-apple-accent-light px-4 py-2 text-sm font-medium text-apple-accent hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
           >
-            检索作品
+            前往找书
           </a>
         </div>
       </div>

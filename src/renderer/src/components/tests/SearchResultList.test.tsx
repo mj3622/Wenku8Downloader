@@ -81,6 +81,9 @@ describe('SearchResultList', () => {
             updateTime: '2026-07-19',
             wordCount: '1271K',
             isAnimated: true,
+            publisher: '小学馆',
+            tags: '校园 青春 恋爱 欢乐向 后宫 妹妹',
+            desc: '一段需要限制行数展示的作品简介',
           }]}
           onSelect={vi.fn()}
         />,
@@ -92,6 +95,11 @@ describe('SearchResultList', () => {
     expect(container.textContent).toContain('1271K')
     expect(container.textContent).toContain('2026-07-19 更新')
     expect(container.textContent).toContain('已动画化')
+    expect(container.textContent).toContain('小学馆')
+    expect(container.textContent).toContain('校园')
+    expect(container.textContent).toContain('一段需要限制行数展示的作品简介')
+    expect(container.querySelector('[data-testid="result-description"]')?.className)
+      .toContain('line-clamp-3')
   })
 
   it('replaces a cover with a readable placeholder after retries are exhausted', async () => {

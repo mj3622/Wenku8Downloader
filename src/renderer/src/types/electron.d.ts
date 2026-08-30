@@ -3,6 +3,7 @@ import type {
   CookieProgress,
   BookLoadOptions,
   CacheApi,
+  CatalogApi,
   DiscoveryApi,
   DownloadApi,
   LogStats,
@@ -12,7 +13,7 @@ import type {
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 
-export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, DiscoveryApi, SearchApi {
+export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, CatalogApi, DiscoveryApi, SearchApi {
   platform: NodeJS.Platform
   autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
   getBook: (bookId: string, options?: BookLoadOptions) => Promise<BookInfo>

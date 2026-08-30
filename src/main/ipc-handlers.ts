@@ -14,6 +14,7 @@ import type { DownloadExecutorBook } from './download-executor'
 import { resolveWithin } from './path-safety'
 import {
   validateBookId,
+  validateCatalogPayload,
   validateDiscoveryHomePayload,
   validateDiscoveryRankingPayload,
   validateDownloadHistoryScope,
@@ -37,6 +38,7 @@ import type { BookGetOptions } from './book-service'
 import type { CacheClearResult } from '../shared/ipc-types'
 import type { DiscoveryService } from './discovery-service'
 import type { SearchService } from './search-service'
+import type { CatalogService } from './catalog-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -65,6 +67,7 @@ export interface IpcServices {
     'syncCookies' | 'getCookie' | 'fetch' | 'getImageContent'
   >
   search: Pick<SearchService, 'search'>
+  catalog: Pick<CatalogService, 'getPage'>
   discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
@@ -258,6 +261,26 @@ export function registerIpcHandlers(services: IpcServices): void {
         ? response.results.length
         : response.cachedResults?.length ?? 0
       return response
+    })
+  })
+
+  ipcMain.handle('catalog:get', (_event, rawPayload: unknown) => {
+    const { query, refresh } = validateCatalogPayload(rawPayload)
+    const context: LogContext = {
+      page: query.page,
+      refresh,
+      hasPublisher: Boolean(query.publisher),
+      hasInitial: Boolean(query.initial),
+      hasTag: Boolean(query.tag),
+      status: query.status,
+      animation: query.animation,
+      sort: query.sort,
+    }
+    return runLoggedOperation('catalog.get', context, async () => {
+      const result = await services.catalog.getPage(query, { refresh })
+      context.resultCount = result.books.length
+      context.stale = result.stale
+      return result
     })
   })
 

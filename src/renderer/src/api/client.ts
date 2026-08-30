@@ -7,6 +7,8 @@ import type {
   CookieProgress,
   BookLoadOptions,
   CacheClearResult,
+  CatalogPage,
+  CatalogQuery,
   DiscoveryHome,
   DownloadHistoryScope,
   DownloadStateEvent,
@@ -57,6 +59,11 @@ export const api = {
   // 搜索
   searchAuthor: (q: string) => invoke('search', () => window.electronAPI.searchAuthor(q)),
   searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
+
+  // 找书
+  getCatalog: (query: CatalogQuery, refresh = false): Promise<CatalogPage> => (
+    invoke('catalog', () => window.electronAPI.getCatalog(query, refresh))
+  ),
 
   // 发现
   getDiscoveryHome: (refresh = false): Promise<DiscoveryHome> => (

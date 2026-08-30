@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DownloadApi,
   CacheApi,
+  CatalogApi,
   DiscoveryApi,
   DownloadStateEvent,
   EnqueueDownloadInput,
@@ -27,7 +28,7 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & CacheApi & DiscoveryApi & {
+type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
@@ -115,6 +116,21 @@ describe('preload download boundary', () => {
       page: 2,
       refresh: false,
     })
+  })
+
+  it('uses the fixed catalog channel and a typed query payload', async () => {
+    const query = {
+      tag: '校园' as const,
+      status: 'all' as const,
+      animation: 'all' as const,
+      sort: 'lastupdate' as const,
+      page: 2,
+    }
+    mocks.invoke.mockResolvedValue({ query, books: [], page: 2, totalPages: 3 })
+
+    await exposedApi.getCatalog(query, true)
+
+    expect(mocks.invoke).toHaveBeenCalledWith('catalog:get', { query, refresh: true })
   })
 
   it('forwards task and history mutation payloads', async () => {

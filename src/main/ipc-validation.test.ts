@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
+  validateCatalogPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateDiscoveryRankingPayload,
@@ -120,6 +121,47 @@ describe('IPC validation', () => {
     expect(validateDiscoveryHomePayload({ refresh: true })).toEqual({ refresh: true })
     expect(() => validateDiscoveryHomePayload({ refresh: 'yes' })).toThrow('发现页')
     expect(() => validateDiscoveryHomePayload(null)).toThrow('发现页')
+  })
+
+  it('validates catalog queries field by field and rejects unknown input', () => {
+    expect(validateCatalogPayload({
+      query: {
+        publisher: '10',
+        initial: 'A',
+        status: 'completed',
+        animation: 'all',
+        sort: 'lastupdate',
+        page: 2,
+      },
+      refresh: true,
+    })).toEqual({
+      query: {
+        publisher: '10',
+        initial: 'A',
+        status: 'completed',
+        animation: 'all',
+        sort: 'lastupdate',
+        page: 2,
+      },
+      refresh: true,
+    })
+
+    expect(() => validateCatalogPayload({
+      query: {
+        status: 'all', animation: 'all', sort: 'lastupdate', page: 1, url: 'file:///tmp',
+      },
+    })).toThrow('找书请求格式无效')
+    expect(() => validateCatalogPayload({
+      query: { status: 'all', animation: 'all', sort: 'lastupdate', page: 501 },
+    })).toThrow('找书页码无效')
+    expect(() => validateCatalogPayload({
+      query: { tag: '不存在', status: 'all', animation: 'all', sort: 'lastupdate', page: 1 },
+    })).toThrow('标签筛选无效')
+    expect(() => validateCatalogPayload({
+      query: {
+        tag: '校园', publisher: '1', status: 'all', animation: 'all', sort: 'lastupdate', page: 1,
+      },
+    })).toThrow('标签不能与出版社或首字母同时筛选')
   })
 
   it.each([

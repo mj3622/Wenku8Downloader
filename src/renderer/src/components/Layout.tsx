@@ -19,7 +19,7 @@ const primaryNavItems: NavigationItem[] = [
   },
   {
     to: '/search',
-    label: '检索',
+    label: '找书',
     icon: IconSearch,
   },
   {

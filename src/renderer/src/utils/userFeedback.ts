@@ -1,5 +1,6 @@
 export type FeedbackContext =
   | 'search'
+  | 'catalog'
   | 'discovery'
   | 'book'
   | 'config-load'
@@ -33,6 +34,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   search: {
     title: '搜索失败',
     message: '暂时无法完成搜索，请检查网络后重试。',
+  },
+  catalog: {
+    title: '找书失败',
+    message: '暂时无法读取轻小说列表，请检查网络后重试。',
   },
   discovery: {
     title: '发现内容加载失败',

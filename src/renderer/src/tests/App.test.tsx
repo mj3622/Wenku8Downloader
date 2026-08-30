@@ -87,7 +87,7 @@ describe('App routing', () => {
 
     const labels = [...container.querySelectorAll('aside nav a')]
       .map(link => link.textContent?.trim())
-    expect(labels).toEqual(['发现', '检索', '下载', '配置', '项目介绍'])
+    expect(labels).toEqual(['发现', '找书', '下载', '配置', '项目介绍'])
     expect(container.querySelector('a[href="#/about"]')).not.toBeNull()
     expect(container.querySelector('h1')?.textContent).toBe('轻小说文库下载器')
   })

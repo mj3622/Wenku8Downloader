@@ -1,7 +1,20 @@
 import {
+  CATALOG_ANIMATIONS,
+  CATALOG_INITIALS,
+  CATALOG_PUBLISHER_OPTIONS,
+  CATALOG_SORTS,
+  CATALOG_STATUSES,
+  CATALOG_TAGS,
   DOWNLOAD_TASK_TYPES,
   OPEN_FOLDER_TARGETS,
   RANKING_TYPES,
+  type CatalogAnimation,
+  type CatalogInitial,
+  type CatalogPublisher,
+  type CatalogQuery,
+  type CatalogSort,
+  type CatalogStatus,
+  type CatalogTag,
   type DownloadHistoryScope,
   type DownloadTaskType,
   type EnqueueDownloadInput,
@@ -17,6 +30,8 @@ const MAX_RENDERER_SOURCE = 4 * 1024
 const MAX_RENDERER_REPORT = 64 * 1024
 const MAX_VOLUME_COVER_REQUESTS = 500
 const MAX_RANKING_PAGE = 10_000
+const MAX_CATALOG_PAGE = 500
+const CATALOG_PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
 const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
 
@@ -77,6 +92,77 @@ export function validateDiscoveryHomePayload(value: unknown): { refresh: boolean
     throw new Error('发现页刷新参数无效')
   }
   return { refresh: refresh === true }
+}
+
+export function validateCatalogPayload(value: unknown): {
+  query: CatalogQuery
+  refresh: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('找书请求格式无效')
+  }
+  const payload = value as Record<string, unknown>
+  if (Object.keys(payload).some(key => key !== 'query' && key !== 'refresh')) {
+    throw new Error('找书请求格式无效')
+  }
+  if (!payload.query || typeof payload.query !== 'object' || Array.isArray(payload.query)) {
+    throw new Error('找书请求格式无效')
+  }
+  if (payload.refresh !== undefined && typeof payload.refresh !== 'boolean') {
+    throw new Error('找书刷新参数无效')
+  }
+  const record = payload.query as Record<string, unknown>
+  const allowedKeys = new Set(['publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page'])
+  if (Object.keys(record).some(key => !allowedKeys.has(key))) {
+    throw new Error('找书请求格式无效')
+  }
+  if (record.publisher !== undefined
+    && (typeof record.publisher !== 'string' || !CATALOG_PUBLISHERS.has(record.publisher))) {
+    throw new Error('出版社筛选无效')
+  }
+  if (record.initial !== undefined
+    && (typeof record.initial !== 'string' || !CATALOG_INITIALS.includes(record.initial as CatalogInitial))) {
+    throw new Error('首字母筛选无效')
+  }
+  if (record.tag !== undefined
+    && (typeof record.tag !== 'string' || !CATALOG_TAGS.includes(record.tag as CatalogTag))) {
+    throw new Error('标签筛选无效')
+  }
+  if (typeof record.status !== 'string'
+    || !CATALOG_STATUSES.includes(record.status as CatalogStatus)) {
+    throw new Error('连载状态无效')
+  }
+  if (typeof record.animation !== 'string'
+    || !CATALOG_ANIMATIONS.includes(record.animation as CatalogAnimation)) {
+    throw new Error('动画化筛选无效')
+  }
+  if (typeof record.sort !== 'string'
+    || !CATALOG_SORTS.includes(record.sort as CatalogSort)) {
+    throw new Error('排序方式无效')
+  }
+  if (!Number.isSafeInteger(record.page)
+    || (record.page as number) < 1
+    || (record.page as number) > MAX_CATALOG_PAGE) {
+    throw new Error('找书页码无效')
+  }
+  if (record.tag !== undefined && (record.publisher !== undefined || record.initial !== undefined)) {
+    throw new Error('标签不能与出版社或首字母同时筛选')
+  }
+  if ((record.publisher !== undefined || record.initial !== undefined) && record.sort === 'allvisit') {
+    throw new Error('出版社或首字母筛选仅支持按更新排序')
+  }
+  return {
+    query: {
+      ...(record.publisher === undefined ? {} : { publisher: record.publisher as CatalogPublisher }),
+      ...(record.initial === undefined ? {} : { initial: record.initial as CatalogInitial }),
+      ...(record.tag === undefined ? {} : { tag: record.tag as CatalogTag }),
+      status: record.status as CatalogStatus,
+      animation: record.animation as CatalogAnimation,
+      sort: record.sort as CatalogSort,
+      page: record.page as number,
+    },
+    refresh: payload.refresh === true,
+  }
 }
 
 export function validateExternalUrl(value: unknown): string {

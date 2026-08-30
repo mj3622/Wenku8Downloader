@@ -168,6 +168,11 @@ function createServices(
         cached: false,
       })),
     },
+    catalog: {
+      getPage: vi.fn(async query => ({
+        query, books: [], page: query.page, totalPages: 1, fetchedAt: 1, stale: false,
+      })),
+    },
     discovery: {
       getHome: vi.fn(async () => ({
         sections: [], fetchedAt: 1, stale: false,
@@ -500,6 +505,25 @@ describe('registerIpcHandlers application operations', () => {
     await expect(invoke('discovery:get-ranking', {}, {
       type: 'arbitrary', page: 1,
     })).rejects.toThrow('榜单类型')
+  })
+
+  it('validates and forwards catalog requests without logging arbitrary fields', async () => {
+    const query = {
+      tag: '校园' as const,
+      status: 'serializing' as const,
+      animation: 'animated' as const,
+      sort: 'lastupdate' as const,
+      page: 3,
+    }
+
+    await invoke('catalog:get', {}, { query, refresh: true })
+
+    expect(services.catalog.getPage).toHaveBeenCalledWith(query, { refresh: true })
+    await expect(invoke('catalog:get', {}, {
+      query: { ...query, url: 'file:///tmp' }, refresh: false,
+    })).rejects.toThrow('找书请求格式无效')
+    expect(mocks.logger.info.mock.calls.flatMap(call => Object.keys(call[2] ?? {})))
+      .not.toContain('tag')
   })
 
   it('exposes only a parameter-free full cache clear', async () => {

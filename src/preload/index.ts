@@ -9,6 +9,8 @@ import type {
   CookieProgress,
   BookLoadOptions,
   CacheApi,
+  CatalogApi,
+  CatalogQuery,
   DiscoveryApi,
   DownloadApi,
   DownloadHistoryScope,
@@ -58,6 +60,12 @@ const cacheApi: CacheApi = {
   clearCache: () => ipcRenderer.invoke('cache:clear'),
 }
 
+const catalogApi: CatalogApi = {
+  getCatalog: (query: CatalogQuery, refresh = false) => (
+    ipcRenderer.invoke('catalog:get', { query, refresh })
+  ),
+}
+
 const discoveryApi: DiscoveryApi = {
   getDiscoveryHome: (refresh = false) => (
     ipcRenderer.invoke('discovery:get-home', { refresh })
@@ -78,6 +86,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ...configApi,
   ...downloadApi,
   ...cacheApi,
+  ...catalogApi,
   ...discoveryApi,
   ...searchApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
