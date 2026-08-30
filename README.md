@@ -80,16 +80,12 @@
 
 macOS 版本要求为 13 Ventura 或更高版本
 
-### 未签名发布说明
+### 首次打开
 
-本项目所有正式发布包均保持未签名，不申请或使用 Apple Developer ID、Apple 公证或 Windows 代码签名证书
+发布包未签名，首次运行时系统可能显示安全提示：
 
-请只从本项目 GitHub Releases 下载，并在运行前确认文件名、版本和发布页信息一致，不要从第三方转载地址获取安装包
-
-安装方式很简单：
-
-- macOS：打开 `.dmg`，把应用拖进 `Applications` 文件夹；首次启动若被系统拦截，请在 Finder 中右键应用并选择「打开」
-- Windows：下载 `.exe` 后直接双击运行；若 Microsoft Defender SmartScreen 提示未知发布者，请先确认文件来自本项目 Releases，再选择「更多信息」→「仍要运行」
+- macOS：打开 `.dmg` 并将应用拖入 `Applications`，然后在 Finder 中右键应用并选择「打开」
+- Windows：双击 `.exe` 运行；若出现 SmartScreen 提示，选择「更多信息」→「仍要运行」
 
 ## 🧭 使用流程
 
