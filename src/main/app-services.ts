@@ -32,11 +32,13 @@ import { DiscoveryCacheRepository } from './discovery-cache-repository'
 import { DiscoveryService } from './discovery-service'
 import { WenkuDiscoverySource } from './discovery-source'
 import { ElectronCloudflareChallengeSolver } from './cloudflare-challenge'
+import { SearchService } from './search-service'
 
 export interface AppServices {
   networkSession: Session
   config: ConfigService
   crawler: WebCrawler
+  search: SearchService
   discovery: DiscoveryService
   books: BookService
   downloads: DownloadManager
@@ -124,6 +126,7 @@ export function createAppServices(): AppServices {
     source: new WenkuDiscoverySource(crawler, createControlFactory('background')),
     cache: new DiscoveryCacheRepository(cacheStore),
   })
+  const search = new SearchService(crawler)
   const books = new BookService({
     fetchPage: (bookId, signal, onThrottleWait) => Book.fetchPage(
       bookId,
@@ -214,6 +217,7 @@ export function createAppServices(): AppServices {
 
   const clearCache = async (): Promise<CacheClearResult> => {
     books.clearMemory()
+    search.clearMemory()
     discovery.clearMemory()
     try {
       const result = await cacheStore.clear()
@@ -257,6 +261,7 @@ export function createAppServices(): AppServices {
     networkSession: wenkuSession,
     config,
     crawler,
+    search,
     discovery,
     books,
     downloads,

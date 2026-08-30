@@ -6,6 +6,39 @@ export const OPEN_FOLDER_TARGETS = ['root', ...DOWNLOAD_FOLDERS] as const
 
 export type OpenFolderTarget = typeof OPEN_FOLDER_TARGETS[number]
 
+export type SearchType = 'author' | 'title'
+
+export interface SearchResult {
+  title: string
+  cover: string
+  id: string
+  author?: string
+  status?: string
+  updateTime?: string
+  wordCount?: string
+  isAnimated?: boolean
+  tags?: string
+  desc?: string
+}
+
+export type SearchResponse =
+  | {
+      status: 'ok'
+      results: SearchResult[]
+      fetchedAt: number
+      cached: boolean
+    }
+  | {
+      status: 'cooldown'
+      retryAt: number
+      cachedResults?: SearchResult[]
+    }
+
+export interface SearchApi {
+  searchAuthor(query: string): Promise<SearchResponse>
+  searchTitle(query: string): Promise<SearchResponse>
+}
+
 export const DOWNLOAD_TASK_TYPES = ['epub_full', 'epub_volume', 'images'] as const
 
 export type DownloadTaskType = typeof DOWNLOAD_TASK_TYPES[number]

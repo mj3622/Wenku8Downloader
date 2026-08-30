@@ -1,9 +1,8 @@
 import { create } from 'zustand'
+import type { SearchType } from '../../../shared/ipc-types'
 import { api, type SearchResult } from '../api/client'
 import { toast } from './toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
-
-type SearchType = 'author' | 'title'
 
 type SearchState = {
   results: SearchResult[]
@@ -12,6 +11,8 @@ type SearchState = {
   hasSearched: boolean
   lastType: SearchType | null
   lastQuery: string | null
+  retryAt: number | null
+  cached: boolean
   search: (type: SearchType, query: string) => Promise<void>
   clear: () => void
 }
@@ -26,6 +27,8 @@ export const useSearchStore = create<SearchState>((set) => {
     hasSearched: false,
     lastType: null,
     lastQuery: null,
+    retryAt: null,
+    cached: false,
     search: async (type, query) => {
       if (type !== 'author' && type !== 'title') {
         requestGeneration++
@@ -36,6 +39,8 @@ export const useSearchStore = create<SearchState>((set) => {
           hasSearched: false,
           lastType: null,
           lastQuery: null,
+          retryAt: null,
+          cached: false,
         })
         toast.warning({
           title: '搜索方式不可用',
@@ -57,6 +62,8 @@ export const useSearchStore = create<SearchState>((set) => {
           hasSearched: false,
           lastType: null,
           lastQuery: null,
+          retryAt: null,
+          cached: false,
         })
         toast.warning({ title: '请检查搜索内容', message })
         return
@@ -70,16 +77,36 @@ export const useSearchStore = create<SearchState>((set) => {
         hasSearched: true,
         lastType: type,
         lastQuery: normalizedQuery,
+        retryAt: null,
+        cached: false,
       })
       try {
-        if (type === 'author') {
-          const data = await api.searchAuthor(normalizedQuery)
-          if (currentGeneration !== requestGeneration) return
-          set({ results: data.results, loading: false, hasSearched: true })
+        const response = type === 'author'
+          ? await api.searchAuthor(normalizedQuery)
+          : await api.searchTitle(normalizedQuery)
+        if (currentGeneration !== requestGeneration) return
+        if (response.status === 'cooldown') {
+          const cachedResults = response.cachedResults ?? []
+          const seconds = Math.max(1, Math.ceil((response.retryAt - Date.now()) / 1_000))
+          set({
+            results: cachedResults,
+            loading: false,
+            hasSearched: true,
+            retryAt: response.retryAt,
+            cached: cachedResults.length > 0,
+          })
+          toast.warning({
+            title: '搜索需要稍等',
+            message: `原站限制了搜索频率，请在 ${seconds} 秒后重试。`,
+          })
         } else {
-          const data = await api.searchTitle(normalizedQuery)
-          if (currentGeneration !== requestGeneration) return
-          set({ results: data.results, loading: false, hasSearched: true })
+          set({
+            results: response.results,
+            loading: false,
+            hasSearched: true,
+            retryAt: null,
+            cached: response.cached,
+          })
         }
       } catch (e) {
         if (currentGeneration !== requestGeneration) return
@@ -97,6 +124,8 @@ export const useSearchStore = create<SearchState>((set) => {
         hasSearched: false,
         lastType: null,
         lastQuery: null,
+        retryAt: null,
+        cached: false,
       })
     },
   }

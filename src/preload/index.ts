@@ -18,6 +18,7 @@ import type {
   OpenFolderTarget,
   RankingType,
   RendererErrorReport,
+  SearchApi,
   VolumeCoverSnapshot,
 } from '../shared/ipc-types'
 
@@ -66,6 +67,11 @@ const discoveryApi: DiscoveryApi = {
   ),
 }
 
+const searchApi: SearchApi = {
+  searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
+  searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
@@ -73,9 +79,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ...downloadApi,
   ...cacheApi,
   ...discoveryApi,
+  ...searchApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
-  searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
-  searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
   getBook: (bookId: string, options?: BookLoadOptions) => ipcRenderer.invoke('book:get', {
     bookId,
     ...(options?.revalidate === undefined ? {} : { revalidate: options.revalidate }),

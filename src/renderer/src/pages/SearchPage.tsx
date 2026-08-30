@@ -24,6 +24,8 @@ export default function SearchPage() {
     hasSearched,
     lastType,
     lastQuery,
+    retryAt,
+    cached,
     search,
     clear: clearSearch,
   } = useSearchStore()
@@ -95,6 +97,8 @@ export default function SearchPage() {
           error={searchError}
           hasSearched={hasSearched}
           lastQuery={lastQuery}
+          retryAt={retryAt}
+          cached={cached}
           onSearch={(v) => handleSearch('author', v)}
           onSelect={handleSelect}
           onClear={clearSearch}
@@ -111,6 +115,8 @@ export default function SearchPage() {
           error={searchError}
           hasSearched={hasSearched}
           lastQuery={lastQuery}
+          retryAt={retryAt}
+          cached={cached}
           onSearch={(v) => handleSearch('title', v)}
           onSelect={handleSelect}
           onClear={clearSearch}
@@ -140,7 +146,8 @@ function IdTab({ onQuery }: { onQuery: (id: string) => void }) {
 }
 
 function SearchTab({
-  type, placeholder, results, loading, error, hasSearched, lastQuery, onSearch, onSelect, onClear,
+  type, placeholder, results, loading, error, hasSearched, lastQuery, retryAt, cached,
+  onSearch, onSelect, onClear,
 }: {
   type: 'author' | 'title'
   placeholder: string
@@ -149,6 +156,8 @@ function SearchTab({
   error: string | null
   hasSearched: boolean
   lastQuery: string | null
+  retryAt: number | null
+  cached: boolean
   onSearch: (value: string) => void
   onSelect: (id: string) => void
   onClear: () => void
@@ -161,9 +170,25 @@ function SearchTab({
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = `search-${type}`
   const errorId = `${inputId}-error`
+  const [now, setNow] = useState(() => Date.now())
+  const cooldownSeconds = retryAt === null
+    ? 0
+    : Math.max(0, Math.ceil((retryAt - now) / 1_000))
+  const coolingDown = cooldownSeconds > 0
+
+  useEffect(() => {
+    if (retryAt === null || retryAt <= Date.now()) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => {
+      const current = Date.now()
+      setNow(current)
+      if (current >= retryAt) window.clearInterval(timer)
+    }, 1_000)
+    return () => window.clearInterval(timer)
+  }, [retryAt])
 
   const submit = () => {
-    if (loading) return
+    if (loading || coolingDown) return
     const normalized = value.trim()
     if (!normalized) {
       setFieldError(type === 'author' ? '请输入作者名' : '请输入作品名称')
@@ -214,14 +239,21 @@ function SearchTab({
         </div>
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || coolingDown}
           className="motion-pressable inline-flex items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
                      font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <IconSearch aria-hidden="true" size={16} stroke={1.8} />
-          {loading ? '查询中...' : '查询'}
+          {loading ? '查询中...' : coolingDown ? `${cooldownSeconds} 秒后重试` : '查询'}
         </button>
       </form>
+
+      {coolingDown && (
+        <p role="status" className="-mt-3 mb-5 text-xs text-amber-700">
+          原站限制了搜索频率，请稍后重试
+          {cached && results.length > 0 ? '，以下显示上次缓存结果' : ''}
+        </p>
+      )}
 
       {loading && <LoadingSpinner text="正在查询中..." />}
 

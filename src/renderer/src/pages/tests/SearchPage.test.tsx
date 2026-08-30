@@ -36,8 +36,12 @@ afterAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.searchAuthor.mockResolvedValue({ results: [] })
-  mocks.searchTitle.mockResolvedValue({ results: [] })
+  mocks.searchAuthor.mockResolvedValue({
+    status: 'ok', results: [], fetchedAt: 1, cached: false,
+  })
+  mocks.searchTitle.mockResolvedValue({
+    status: 'ok', results: [], fetchedAt: 1, cached: false,
+  })
   useSearchStore.setState({
     results: [],
     loading: false,
@@ -45,6 +49,8 @@ beforeEach(() => {
     hasSearched: false,
     lastType: null,
     lastQuery: null,
+    retryAt: null,
+    cached: false,
   })
   useToastStore.getState().clear()
   container = document.createElement('div')
@@ -70,6 +76,7 @@ async function renderPage(entry = '/search'): Promise<void> {
 afterEach(async () => {
   await act(async () => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 function button(text: string): HTMLButtonElement {
@@ -154,7 +161,10 @@ describe('SearchPage', () => {
 
   it('restores the previous result page after returning from book details', async () => {
     mocks.searchTitle.mockResolvedValue({
+      status: 'ok',
       results: [{ id: '3057', title: '败北女角太多了！', cover: '' }],
+      fetchedAt: 1,
+      cached: false,
     })
     await renderPage()
     await act(async () => button('书名检索').click())
@@ -215,5 +225,24 @@ describe('SearchPage', () => {
 
     expect(mocks.searchTitle).toHaveBeenCalledTimes(1)
     expect(input.disabled).toBe(true)
+  })
+
+  it('disables search with an accessible countdown until the cooldown expires', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    useSearchStore.setState({ retryAt: 12_500 })
+    await renderPage()
+
+    expect(button('3 秒后重试').disabled).toBe(true)
+    expect(container.querySelector('[role="status"]')?.textContent)
+      .toContain('原站限制了搜索频率')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000)
+    })
+
+    expect(button('查询').disabled).toBe(false)
+    expect(container.querySelector('[role="status"]')).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

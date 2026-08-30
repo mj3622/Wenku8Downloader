@@ -7,7 +7,7 @@ import {
   type CookieSnapshot,
   type Credentials,
 } from './config/secret-types'
-import type { SearchResult } from './types'
+import type { SearchResult } from '../shared/ipc-types'
 import { sleep } from './utils'
 import {
   sleepWithSignal,
@@ -108,6 +108,16 @@ export class CloudflareChallengeResponseError extends Error {
     super('网站要求完成安全验证，请前往配置页手动刷新登录状态')
     this.name = 'CloudflareChallengeResponseError'
     this.status = status
+  }
+}
+
+export class SearchCooldownError extends Error {
+  readonly retryAfterMs: number
+
+  constructor(retryAfterMs: number) {
+    super('搜索过于频繁，请等待片刻再试')
+    this.name = 'SearchCooldownError'
+    this.retryAfterMs = Math.min(60_000, Math.max(1_000, Math.round(retryAfterMs)))
   }
 }
 
@@ -751,7 +761,10 @@ export class WebCrawler {
 
     const blockMsg = $('.blockcontent').text()
     if (blockMsg.includes('两次搜索的间隔时间')) {
-      throw new Error('搜索过于频繁，请等待片刻再试')
+      const seconds = Number(blockMsg.match(/(\d+)\s*秒/)?.[1])
+      throw new SearchCooldownError(Number.isFinite(seconds) && seconds > 0
+        ? seconds * 1_000
+        : 10_000)
     }
 
     if (title.includes('搜索结果')) {

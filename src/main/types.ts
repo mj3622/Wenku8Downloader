@@ -1,16 +1,3 @@
-export interface SearchResult {
-  title: string
-  cover: string
-  id: string
-  author: string
-  status: string
-  updateTime: string
-  wordCount: string
-  isAnimated: boolean
-  tags: string
-  desc: string
-}
-
 export interface BasicInfo {
   '标题': string
   '作者': string

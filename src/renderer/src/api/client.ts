@@ -17,6 +17,7 @@ import type {
   RankingType,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
+export type { SearchResult } from '../../../shared/ipc-types'
 import {
   toUserFacingError,
   type FeedbackContext,
@@ -106,19 +107,6 @@ export const api = {
     invoke('select-folder', () => window.electronAPI.selectFolder()),
   openExternal: (url: string) =>
     invoke('open-external', () => window.electronAPI.openExternal(url)),
-}
-
-export type SearchResult = {
-  title: string
-  cover: string
-  id: string
-  author?: string
-  status?: string
-  updateTime?: string
-  wordCount?: string
-  isAnimated?: boolean
-  tags?: string
-  desc?: string
 }
 
 export type BookInfo = {

@@ -156,10 +156,17 @@ function createServices(
     },
     crawler: {
       syncCookies: vi.fn(async () => undefined),
-      search: vi.fn(async () => []),
       getCookie: vi.fn(async () => undefined),
       fetch: vi.fn(),
       getImageContent: vi.fn(async () => null),
+    },
+    search: {
+      search: vi.fn(async () => ({
+        status: 'ok' as const,
+        results: [],
+        fetchedAt: 1,
+        cached: false,
+      })),
     },
     discovery: {
       getHome: vi.fn(async () => ({
@@ -437,7 +444,7 @@ describe('registerIpcHandlers application operations', () => {
   })
 
   it('logs failed operations with safe context and duration', async () => {
-    vi.mocked(services.crawler.search).mockRejectedValueOnce(new Error('HTTP 503'))
+    vi.mocked(services.search.search).mockRejectedValueOnce(new Error('HTTP 503'))
 
     await expect(invoke('search:title', {}, { query: '败犬女主' })).rejects.toThrow('HTTP 503')
 
@@ -451,6 +458,19 @@ describe('registerIpcHandlers application operations', () => {
       }),
     )
     expect(mocks.logger.error.mock.calls.at(-1)?.[3]).not.toHaveProperty('query')
+  })
+
+  it('forwards validated searches to the search service', async () => {
+    vi.mocked(services.search.search).mockResolvedValueOnce({
+      status: 'cooldown',
+      retryAt: 12_000,
+    })
+
+    await expect(invoke('search:author', {}, { query: ' 雨森焚火 ' })).resolves.toEqual({
+      status: 'cooldown',
+      retryAt: 12_000,
+    })
+    expect(services.search.search).toHaveBeenCalledWith('author', '雨森焚火')
   })
 
   it('validates and forwards explicit book revalidation', async () => {
@@ -520,7 +540,7 @@ describe('registerIpcHandlers application operations', () => {
     await expect(invoke('shell:openExternal', {}, 'http://wenku8.net')).rejects.toThrow('允许范围')
     await expect(invoke('shell:openFolder', {}, '../config')).rejects.toThrow('下载文件夹')
 
-    expect(services.crawler.search).not.toHaveBeenCalled()
+    expect(services.search.search).not.toHaveBeenCalled()
     expect(services.books.get).not.toHaveBeenCalled()
     expect(mocks.openExternal).not.toHaveBeenCalled()
     expect(mocks.openPath).not.toHaveBeenCalled()

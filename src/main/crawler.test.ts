@@ -527,6 +527,40 @@ describe('WebCrawler.search', () => {
       cause: expect.objectContaining({ message: '搜索页面缺少标题，可能被拦截' }),
     })
   })
+
+  it('returns a structured cooldown when Wenku8 rejects frequent searches', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(`
+        <html>
+          <title>搜索</title>
+          <body><div class="blockcontent">两次搜索的间隔时间不得少于 12 秒</div></body>
+        </html>
+      `) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
+      name: 'SearchCooldownError',
+      retryAfterMs: 12_000,
+    })
+  })
+
+  it('uses a bounded fallback when the search cooldown has no duration', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(`
+        <html>
+          <title>搜索</title>
+          <body><div class="blockcontent">两次搜索的间隔时间过短</div></body>
+        </html>
+      `) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
+      name: 'SearchCooldownError',
+      retryAfterMs: 10_000,
+    })
+  })
 })
 
 describe('WebCrawler.getImageContent response reporting', () => {

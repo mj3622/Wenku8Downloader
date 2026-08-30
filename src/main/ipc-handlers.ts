@@ -36,6 +36,7 @@ import { RendererErrorReporter } from './logging/renderer-error-reporter'
 import type { BookGetOptions } from './book-service'
 import type { CacheClearResult } from '../shared/ipc-types'
 import type { DiscoveryService } from './discovery-service'
+import type { SearchService } from './search-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -61,8 +62,9 @@ export interface IpcServices {
   >
   crawler: Pick<
     WebCrawler,
-    'syncCookies' | 'search' | 'getCookie' | 'fetch' | 'getImageContent'
+    'syncCookies' | 'getCookie' | 'fetch' | 'getImageContent'
   >
+  search: Pick<SearchService, 'search'>
   discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
@@ -239,9 +241,11 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.author', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      const results = await services.crawler.search(query, 'author')
-      context.resultCount = results.length
-      return { results }
+      const response = await services.search.search('author', query)
+      context.resultCount = response.status === 'ok'
+        ? response.results.length
+        : response.cachedResults?.length ?? 0
+      return response
     })
   })
 
@@ -249,9 +253,11 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.title', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      const results = await services.crawler.search(query, 'title')
-      context.resultCount = results.length
-      return { results }
+      const response = await services.search.search('title', query)
+      context.resultCount = response.status === 'ok'
+        ? response.results.length
+        : response.cachedResults?.length ?? 0
+      return response
     })
   })
 

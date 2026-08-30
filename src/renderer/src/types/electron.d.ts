@@ -8,14 +8,13 @@ import type {
   LogStats,
   OpenFolderTarget,
   RendererErrorReport,
+  SearchApi,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 
-export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, DiscoveryApi {
+export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, DiscoveryApi, SearchApi {
   platform: NodeJS.Platform
   autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
-  searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
-  searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
   getBook: (bookId: string, options?: BookLoadOptions) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<VolumeCoverSnapshot>
@@ -26,19 +25,6 @@ export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, Discovery
   reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
-}
-
-interface SearchResult {
-  title: string
-  cover: string
-  id: string
-  author?: string
-  status?: string
-  updateTime?: string
-  wordCount?: string
-  isAnimated?: boolean
-  tags?: string
-  desc?: string
 }
 
 interface BookInfo {
