@@ -483,7 +483,7 @@ img {
 
 .showcase-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-bottom: 1px solid #cfd4d9;
 }
 
@@ -632,7 +632,7 @@ img {
 
 .capability-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
 }
@@ -1036,7 +1036,7 @@ img {
 
   .showcase-tabs {
     overflow-x: auto;
-    grid-template-columns: repeat(3, minmax(140px, 1fr));
+    grid-template-columns: repeat(4, minmax(140px, 1fr));
   }
 
   .showcase-tabs button {
