@@ -28,7 +28,7 @@ function snapshot(): BookSnapshot {
     updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
   }, 1_000)
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     bookId: '123',
     checkedAt: 1_000,
     version,
@@ -39,6 +39,7 @@ function snapshot(): BookSnapshot {
       '标题': '作品', '作者': '作者', '出版社': '文库', '最新章节': '第一章',
       '连载状态': '连载', '更新时间': '2026-08-29', '全文长度': '1',
       '简介': '简介', 'cover': 'https://img.example/cover.jpg',
+      '标签': [], '动画化': false, '热度': null,
     },
   }
 }

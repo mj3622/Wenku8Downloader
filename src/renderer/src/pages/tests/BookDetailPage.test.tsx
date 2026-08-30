@@ -2,20 +2,27 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CATALOG_TAGS } from '../../../../shared/ipc-types'
 
 const mocks = vi.hoisted(() => ({
   book: {
     book_id: '3057',
-    basic_info: { 标题: '测试作品', 作者: '测试作者', cover: 'https://example.com/book.jpg' },
+    basic_info: {
+      标题: '测试作品', 作者: '测试作者', 出版社: '小学馆', 最新章节: '第十章',
+      连载状态: '连载中', 更新时间: '2026-08-29', 全文长度: '10000字', 简介: '',
+      标签: ['校园', '青春'], 动画化: true, 热度: 'S级', cover: 'https://example.com/book.jpg',
+    },
     volumes: {} as Record<string, unknown[]>,
   },
   fetchBook: vi.fn(),
   clear: vi.fn(),
   downloadEpub: vi.fn(),
   downloadImages: vi.fn(),
+  downloadBatch: vi.fn(),
   getVolumeCovers: vi.fn(),
+  addBookToBookshelf: vi.fn(),
   openExternal: vi.fn(),
 }))
 
@@ -33,18 +40,26 @@ vi.mock('../../stores/downloadStore', () => ({
   useDownloadStore: () => ({
     downloadEpub: mocks.downloadEpub,
     downloadImages: mocks.downloadImages,
+    downloadBatch: mocks.downloadBatch,
   }),
 }))
 
 vi.mock('../../api/client', () => ({
   api: {
     getVolumeCovers: mocks.getVolumeCovers,
+    addBookToBookshelf: mocks.addBookToBookshelf,
     openExternal: mocks.openExternal,
   },
 }))
 
 import BookDetailPage from '../BookDetailPage'
+import { useBookshelfUpdateStore } from '../../stores/bookshelfUpdateStore'
 import { useToastStore } from '../../stores/toastStore'
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+}
 
 let container: HTMLDivElement
 let root: Root
@@ -63,8 +78,18 @@ afterAll(() => {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.book.volumes = {}
+  mocks.book.basic_info.作者 = '测试作者'
+  mocks.book.basic_info.标签 = ['校园', '青春']
+  mocks.book.basic_info.动画化 = true
+  mocks.book.basic_info.热度 = 'S级'
   mocks.getVolumeCovers.mockResolvedValue({ covers: {} })
+  mocks.addBookToBookshelf.mockResolvedValue({
+    entries: [{ bookId: '3057' }],
+    fetchedAt: 1,
+    stale: false,
+  })
   mocks.openExternal.mockResolvedValue(undefined)
+  useBookshelfUpdateStore.getState().clear()
   useToastStore.getState().clear()
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -77,6 +102,95 @@ afterEach(async () => {
 })
 
 describe('BookDetailPage', () => {
+  it('shows related metadata and routes author, publisher and tags back to find-book filters', async () => {
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    expect(container.textContent).toContain('已动画化')
+    expect(container.textContent).toContain('S级')
+
+    const author = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '测试作者')
+    await act(async () => author?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?tab=author&q=%E6%B5%8B%E8%AF%95%E4%BD%9C%E8%80%85')
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+    const publisher = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '小学馆')
+    await act(async () => publisher?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?mode=browse&publisher=10')
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+          <Route path="/search" element={<div>找书页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+    const tag = container.querySelector<HTMLButtonElement>('[aria-label="按标签“校园”找书"]')
+    await act(async () => tag?.click())
+    expect(container.querySelector('[data-testid="location"]')?.textContent)
+      .toBe('/search?mode=browse&tag=%E6%A0%A1%E5%9B%AD')
+  })
+
+  it('keeps a long author and thirty tags available without clipping metadata', async () => {
+    const longAuthor = '可以正常换行的长作者名称'.repeat(12)
+    mocks.book.basic_info.作者 = longAuthor
+    mocks.book.basic_info.标签 = [...CATALOG_TAGS.slice(0, 30)]
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const author = [...container.querySelectorAll('button')]
+      .find(item => item.textContent === longAuthor)
+    expect(author?.className).toContain('break-all')
+    expect(container.querySelectorAll('section[aria-labelledby="book-tags-heading"] button'))
+      .toHaveLength(30)
+  })
+
+  it('omits the tag section when migrated metadata has no tags', async () => {
+    mocks.book.basic_info.标签 = []
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    expect(container.querySelector('section[aria-labelledby="book-tags-heading"]')).toBeNull()
+    expect(container.querySelector('[role="group"][aria-label="下载方式"]')).not.toBeNull()
+  })
+
   it('opens the corresponding original detail page through the external-link boundary', async () => {
     await act(async () => root.render(
       <MemoryRouter
@@ -98,6 +212,62 @@ describe('BookDetailPage', () => {
     })
 
     expect(mocks.openExternal).toHaveBeenCalledWith('https://www.wenku8.net/book/3057.htm')
+  })
+
+  it('adds the work to the remote bookshelf and keeps the completed state visible', async () => {
+    mocks.book.volumes = { '第一卷': [] }
+    let resolveAdd!: (value: { entries: { bookId: string }[]; fetchedAt: number; stale: boolean }) => void
+    mocks.addBookToBookshelf.mockReturnValue(new Promise(resolve => { resolveAdd = resolve }))
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const addButton = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '加入书架')
+    await act(async () => addButton?.click())
+    expect(mocks.addBookToBookshelf).toHaveBeenCalledWith('3057')
+    expect(addButton?.disabled).toBe(true)
+    expect(addButton?.textContent).toContain('正在加入')
+
+    await act(async () => resolveAdd({
+      entries: [{ bookId: '3057' }],
+      fetchedAt: 1,
+      stale: false,
+    }))
+    expect(addButton?.disabled).toBe(true)
+    expect(addButton?.textContent).toContain('已在书架')
+    expect(useToastStore.getState().items).toEqual([
+      expect.objectContaining({ tone: 'success', title: '已加入书架' }),
+    ])
+  })
+
+  it('restores the bookshelf action after a failed request', async () => {
+    mocks.book.volumes = { '第一卷': [] }
+    mocks.addBookToBookshelf.mockRejectedValue(new Error('请先刷新登录状态'))
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={['/book/3057']}>
+        <Routes>
+          <Route path="/book/:id" element={<BookDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    ))
+
+    const addButton = [...container.querySelectorAll('button')]
+      .find(item => item.textContent?.trim() === '加入书架')
+    await act(async () => {
+      addButton?.click()
+      await Promise.resolve()
+    })
+
+    expect(addButton?.disabled).toBe(false)
+    expect(addButton?.textContent).toContain('加入书架')
+    expect(useToastStore.getState().items).toEqual([
+      expect.objectContaining({ tone: 'error', title: '加入书架失败' }),
+    ])
   })
 
   it('shows one warning and offers deterministic retry and search actions', async () => {
@@ -164,9 +334,16 @@ describe('BookDetailPage', () => {
     })
 
     expect(mocks.getVolumeCovers).not.toHaveBeenCalled()
-    expect(mocks.downloadEpub.mock.calls).toEqual([
-      ['3057', '测试作品', 'https://example.com/book.jpg', '第一卷'],
-      ['3057', '测试作品', 'https://example.com/book.jpg', '第二卷'],
+    expect(mocks.downloadBatch).toHaveBeenCalledTimes(1)
+    expect(mocks.downloadBatch).toHaveBeenCalledWith([
+      {
+        bookId: '3057', title: '测试作品', cover: 'https://example.com/book.jpg',
+        type: 'epub_volume', volume: '第一卷',
+      },
+      {
+        bookId: '3057', title: '测试作品', cover: 'https://example.com/book.jpg',
+        type: 'epub_volume', volume: '第二卷',
+      },
     ])
     expect(container.textContent).toContain('下载页')
   })

@@ -1,14 +1,23 @@
-import type { RankingPage, RankingType } from '../shared/ipc-types'
+import type { AnnualRankingPage, RankingPage, RankingType } from '../shared/ipc-types'
 import type { DiscoverySource } from './discovery-service'
-import { parseDiscoveryHome, parseRankingPage } from './discovery-parser'
-import type { WebCrawler } from './crawler'
+import {
+  parseAnnualRankingPage,
+  parseDiscoveryHome,
+  parseRankingPage,
+} from './discovery-parser'
+import type { CrawlerRequestControlFactory, WebCrawler } from './crawler'
 import { WENKU_BASE_URL } from './wenku-network'
 
 export class WenkuDiscoverySource implements DiscoverySource {
-  constructor(private readonly crawler: Pick<WebCrawler, 'fetch'>) {}
+  constructor(
+    private readonly crawler: Pick<WebCrawler, 'fetch'>,
+    private readonly requestControlFactory?: CrawlerRequestControlFactory,
+  ) {}
 
   async fetchHome() {
-    return parseDiscoveryHome(await this.crawler.fetch(`${WENKU_BASE_URL}/index.php`))
+    const url = `${WENKU_BASE_URL}/index.php`
+    const control = this.requestControlFactory?.('document', url)
+    return parseDiscoveryHome(await this.crawler.fetch(url, true, undefined, control))
   }
 
   async fetchRanking(
@@ -18,6 +27,24 @@ export class WenkuDiscoverySource implements DiscoverySource {
     const url = new URL('/modules/article/toplist.php', WENKU_BASE_URL)
     url.searchParams.set('sort', type)
     url.searchParams.set('page', String(page))
-    return parseRankingPage(await this.crawler.fetch(url.toString()), type, page)
+    const target = url.toString()
+    const control = this.requestControlFactory?.('document', target)
+    return parseRankingPage(
+      await this.crawler.fetch(target, true, undefined, control),
+      type,
+      page,
+    )
+  }
+
+  async fetchAnnualRanking(
+    year: number,
+  ): Promise<Omit<AnnualRankingPage, 'fetchedAt' | 'stale'>> {
+    const url = new URL(`/zt/sugoi/${year}.php`, WENKU_BASE_URL)
+    const target = url.toString()
+    const control = this.requestControlFactory?.('document', target)
+    return parseAnnualRankingPage(
+      await this.crawler.fetch(target, true, undefined, control),
+      year,
+    )
   }
 }

@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
-import { IconBookOff, IconRefresh } from '@tabler/icons-react'
+import { IconBookOff, IconChevronDown, IconRefresh } from '@tabler/icons-react'
+import { Link } from 'react-router-dom'
+import { ANNUAL_RANKING_MAX_YEAR, RANKING_OPTIONS } from '../../../shared/ipc-types'
 import {
   DiscoveryCoverSection,
   DiscoveryRankingSection,
@@ -82,21 +84,42 @@ export default function DiscoverPage() {
     <div className="mx-auto max-w-6xl pb-4">
       <div className="mb-7 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-apple-heading">发现</h1>
-        <button
+        <div className="flex items-center gap-2">
+          <details className="group relative">
+            <summary className="motion-pressable flex h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg border border-apple-border-input bg-white px-3 text-[13px] font-medium text-apple-secondary hover:border-apple-accent/30 hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 [&::-webkit-details-marker]:hidden">
+              更多榜单
+              <IconChevronDown aria-hidden="true" size={15} stroke={1.8} className="transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+            </summary>
+            <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-apple-border-subtle bg-white p-1.5 shadow-lg">
+              <Link to={`/discover/annual/${ANNUAL_RANKING_MAX_YEAR}`} className="block rounded-lg px-3 py-2 text-[13px] font-medium text-apple-heading hover:bg-apple-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25">
+                这本轻小说真厉害！年度榜
+              </Link>
+              <div className="my-1 border-t border-apple-border-subtle" />
+              <div className="max-h-72 overflow-y-auto">
+                {RANKING_OPTIONS.map(option => (
+                  <Link key={option.type} to={`/discover/ranking/${option.type}?page=1`} className="block rounded-lg px-3 py-1.5 text-[13px] text-apple-secondary hover:bg-apple-bg hover:text-apple-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25">
+                    {option.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </details>
+          <button
           type="button"
           aria-label="刷新发现内容"
           title="刷新"
           disabled={homeLoading || homeRefreshing}
           onClick={() => void loadHome(true)}
           className="motion-pressable inline-flex h-9 w-9 items-center justify-center rounded-lg border border-apple-border-input bg-white text-apple-secondary hover:border-apple-accent/30 hover:text-apple-accent disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
-        >
+          >
           <IconRefresh
             aria-hidden="true"
             size={18}
             stroke={1.8}
             className={homeRefreshing ? 'motion-spinner animate-spin motion-reduce:animate-none' : ''}
           />
-        </button>
+          </button>
+        </div>
       </div>
 
       {!home && homeLoading && <DiscoverySkeleton />}

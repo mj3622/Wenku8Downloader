@@ -14,11 +14,16 @@ import type { DownloadExecutorBook } from './download-executor'
 import { resolveWithin } from './path-safety'
 import {
   validateBookId,
+  validateAnnualRankingPayload,
+  validateCatalogPayload,
+  validateDownloadArtifactPayload,
+  validateDownloadBatchPayload,
   validateDiscoveryHomePayload,
   validateDiscoveryRankingPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateEnqueueDownloadInput,
+  validateEnqueueDownloadBatchPayload,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
@@ -36,6 +41,10 @@ import { RendererErrorReporter } from './logging/renderer-error-reporter'
 import type { BookGetOptions } from './book-service'
 import type { CacheClearResult } from '../shared/ipc-types'
 import type { DiscoveryService } from './discovery-service'
+import type { SearchService } from './search-service'
+import type { CatalogService } from './catalog-service'
+import type { BookshelfService } from './bookshelf-service'
+import type { UpdateCheckService } from './update-check-service'
 
 function requirePayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -61,9 +70,13 @@ export interface IpcServices {
   >
   crawler: Pick<
     WebCrawler,
-    'syncCookies' | 'search' | 'getCookie' | 'fetch' | 'getImageContent'
+    'syncCookies' | 'getCookie' | 'fetch' | 'getImageContent'
   >
-  discovery: Pick<DiscoveryService, 'getHome' | 'getRanking'>
+  search: Pick<SearchService, 'search'>
+  catalog: Pick<CatalogService, 'getPage'>
+  discovery: Pick<DiscoveryService, 'getHome' | 'getRanking' | 'getAnnualRanking'>
+  bookshelf: Pick<BookshelfService, 'getPage' | 'addBook'>
+  updates: Pick<UpdateCheckService, 'check'>
   books: {
     get(bookId: string, options?: BookGetOptions): Promise<IpcBook>
   }
@@ -74,11 +87,15 @@ export interface IpcServices {
     DownloadManager,
     | 'getSnapshot'
     | 'enqueue'
+    | 'enqueueBatch'
     | 'cancel'
+    | 'cancelBatch'
     | 'retry'
+    | 'retryBatch'
     | 'remove'
     | 'clearHistory'
     | 'importLegacyHistory'
+    | 'getArtifactTarget'
     | 'subscribe'
   >
 }
@@ -96,6 +113,32 @@ function validateBookGetPayload(value: unknown): { bookId: string; revalidate: b
     bookId: validateBookId(payload.bookId),
     revalidate: payload.revalidate === true,
   }
+}
+
+function validateBookshelfPayload(value: unknown): { refresh: boolean } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'refresh')
+    || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
+    throw new Error('请求参数格式无效')
+  }
+  return { refresh: payload.refresh === true }
+}
+
+function validateBookshelfAddPayload(value: unknown): { bookId: string } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'bookId')) {
+    throw new Error('请求参数格式无效')
+  }
+  return { bookId: validateBookId(payload.bookId) }
+}
+
+function validateUpdateCheckPayload(value: unknown): { refresh: boolean } {
+  const payload = requirePayload(value)
+  if (Object.keys(payload).some(key => key !== 'refresh')
+    || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
+    throw new Error('版本检查请求格式无效')
+  }
+  return { refresh: payload.refresh === true }
 }
 
 async function runLoggedOperation<T>(
@@ -160,6 +203,15 @@ export function registerIpcHandlers(services: IpcServices): void {
     () => services.config.getPublicSnapshot(),
     { logStart: false, logSuccess: false },
   ))
+
+  ipcMain.handle('app:get-info', () => ({ version: app.getVersion() }))
+
+  ipcMain.handle('app:check-update', (_event, rawPayload: unknown) => {
+    const { refresh } = validateUpdateCheckPayload(rawPayload)
+    return runLoggedOperation('app.check-update', { refresh }, () => (
+      services.updates.check({ refresh })
+    ))
+  })
 
   ipcMain.handle('config:update-download', (_event, input: unknown) => {
     const context: LogContext = {}
@@ -239,9 +291,11 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.author', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      const results = await services.crawler.search(query, 'author')
-      context.resultCount = results.length
-      return { results }
+      const response = await services.search.search('author', query)
+      context.resultCount = response.status === 'ok'
+        ? response.results.length
+        : response.cachedResults?.length ?? 0
+      return response
     })
   })
 
@@ -249,9 +303,31 @@ export function registerIpcHandlers(services: IpcServices): void {
     const context: LogContext = {}
     return runLoggedOperation('search.title', context, async () => {
       const query = validateSearchQuery(requirePayload(rawPayload).query)
-      const results = await services.crawler.search(query, 'title')
-      context.resultCount = results.length
-      return { results }
+      const response = await services.search.search('title', query)
+      context.resultCount = response.status === 'ok'
+        ? response.results.length
+        : response.cachedResults?.length ?? 0
+      return response
+    })
+  })
+
+  ipcMain.handle('catalog:get', (_event, rawPayload: unknown) => {
+    const { query, refresh } = validateCatalogPayload(rawPayload)
+    const context: LogContext = {
+      page: query.page,
+      refresh,
+      hasPublisher: Boolean(query.publisher),
+      hasInitial: Boolean(query.initial),
+      hasTag: Boolean(query.tag),
+      status: query.status,
+      animation: query.animation,
+      sort: query.sort,
+    }
+    return runLoggedOperation('catalog.get', context, async () => {
+      const result = await services.catalog.getPage(query, { refresh })
+      context.resultCount = result.books.length
+      context.stale = result.stale
+      return result
     })
   })
 
@@ -275,6 +351,35 @@ export function registerIpcHandlers(services: IpcServices): void {
       context.stale = result.stale
       return result
     })
+  })
+
+  ipcMain.handle('discovery:get-annual-ranking', (_event, rawPayload: unknown) => {
+    const { year, refresh } = validateAnnualRankingPayload(rawPayload)
+    const context: LogContext = { year, refresh }
+    return runLoggedOperation('discovery.annual-ranking', context, async () => {
+      const result = await services.discovery.getAnnualRanking(year, { refresh })
+      context.resultCount = result.categories.bunko.length + result.categories.tankobon.length
+      context.stale = result.stale
+      return result
+    })
+  })
+
+  ipcMain.handle('bookshelf:get', (_event, rawPayload: unknown) => {
+    const { refresh } = validateBookshelfPayload(rawPayload)
+    const context: LogContext = { refresh }
+    return runLoggedOperation('bookshelf.get', context, async () => {
+      const result = await services.bookshelf.getPage({ refresh })
+      context.resultCount = result.entries.length
+      context.stale = result.stale
+      return result
+    })
+  })
+
+  ipcMain.handle('bookshelf:add', (_event, rawPayload: unknown) => {
+    const { bookId } = validateBookshelfAddPayload(rawPayload)
+    return runLoggedOperation('bookshelf.add', { bookId }, () => (
+      services.bookshelf.addBook(bookId)
+    ))
   })
 
   ipcMain.handle('book:get', (_event, rawPayload: unknown) => {
@@ -337,6 +442,29 @@ export function registerIpcHandlers(services: IpcServices): void {
     })
   })
 
+  ipcMain.handle('download:enqueue-batch', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.enqueue-batch', context, () => {
+      const inputs = validateEnqueueDownloadBatchPayload(rawPayload)
+      context.taskCount = inputs.length
+      return services.downloads.enqueueBatch(inputs)
+    })
+  })
+
+  for (const [channel, eventName, command] of [
+    ['download:cancel-batch', 'download.cancel-batch', services.downloads.cancelBatch],
+    ['download:retry-batch', 'download.retry-batch', services.downloads.retryBatch],
+  ] as const) {
+    ipcMain.handle(channel, (_event, rawPayload: unknown) => {
+      const context: LogContext = {}
+      return runLoggedOperation(eventName, context, () => {
+        const { batchId } = validateDownloadBatchPayload(rawPayload)
+        context.batchId = batchId
+        return command.call(services.downloads, batchId)
+      })
+    })
+  }
+
   for (const [channel, eventName, command] of [
     ['download:cancel', 'download.cancel', services.downloads.cancel],
     ['download:retry', 'download.retry', services.downloads.retry],
@@ -372,6 +500,28 @@ export function registerIpcHandlers(services: IpcServices): void {
       return services.downloads.importLegacyHistory(tasks)
     })
   })
+
+  for (const [channel, eventName, action] of [
+    ['download:artifact-open', 'download.artifact-open', 'open'],
+    ['download:artifact-reveal', 'download.artifact-reveal', 'reveal'],
+  ] as const) {
+    ipcMain.handle(channel, (_event, rawPayload: unknown) => {
+      const context: LogContext = {}
+      return runLoggedOperation(eventName, context, async () => {
+        const { taskId, artifactId } = validateDownloadArtifactPayload(rawPayload)
+        Object.assign(context, { taskId, artifactId })
+        const target = await services.downloads.getArtifactTarget(taskId, artifactId)
+        context.artifactKind = target.kind
+
+        if (action === 'reveal' && target.kind === 'file') {
+          shell.showItemInFolder(target.path)
+          return
+        }
+        const error = await shell.openPath(target.path)
+        if (error) throw new Error('无法打开下载文件，请确认文件仍然存在')
+      })
+    })
+  }
 
   ipcMain.handle('shell:openExternal', (_event, rawUrl: unknown) => {
     const context: LogContext = {}

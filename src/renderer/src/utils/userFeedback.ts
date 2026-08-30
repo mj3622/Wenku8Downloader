@@ -1,6 +1,9 @@
 export type FeedbackContext =
   | 'search'
+  | 'catalog'
   | 'discovery'
+  | 'bookshelf'
+  | 'bookshelf-add'
   | 'book'
   | 'config-load'
   | 'config-save'
@@ -10,12 +13,15 @@ export type FeedbackContext =
   | 'config-reset'
   | 'download'
   | 'download-warning'
+  | 'download-artifact'
   | 'cache-clear'
   | 'open-folder'
   | 'open-log-folder'
   | 'log-stats'
   | 'select-folder'
   | 'open-external'
+  | 'app-info'
+  | 'update-check'
   | 'unexpected'
 
 export interface UserFeedbackAction {
@@ -34,9 +40,21 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
     title: '搜索失败',
     message: '暂时无法完成搜索，请检查网络后重试。',
   },
+  catalog: {
+    title: '找书失败',
+    message: '暂时无法读取轻小说列表，请检查网络后重试',
+  },
   discovery: {
     title: '发现内容加载失败',
     message: '暂时无法读取推荐和排行榜，请检查网络后重试。',
+  },
+  bookshelf: {
+    title: '书架加载失败',
+    message: '暂时无法读取原站书架，请检查登录状态和网络后重试',
+  },
+  'bookshelf-add': {
+    title: '加入书架失败',
+    message: '暂时无法将作品加入原站书架，请检查登录状态和网络后重试',
   },
   book: {
     title: '作品信息加载失败',
@@ -74,6 +92,10 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
     title: '下载完成，但有部分内容缺失',
     message: '部分附加资源未能保存，正文内容仍可正常阅读。',
   },
+  'download-artifact': {
+    title: '无法打开下载内容',
+    message: '下载文件可能已被移动或删除，请检查下载位置后重试',
+  },
   'cache-clear': {
     title: '缓存清除失败',
     message: '缓存清除失败，请稍后重试。',
@@ -97,6 +119,14 @@ const FALLBACKS: Record<FeedbackContext, UserFeedback> = {
   'open-external': {
     title: '无法打开链接',
     message: '请检查系统默认浏览器设置后重试。',
+  },
+  'app-info': {
+    title: '版本读取失败',
+    message: '暂时无法读取当前应用版本',
+  },
+  'update-check': {
+    title: '检查更新失败',
+    message: '暂时无法连接 GitHub 检查新版本，请稍后重试',
   },
   unexpected: {
     title: '应用遇到了一点问题',

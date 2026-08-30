@@ -27,6 +27,7 @@ function page(overrides: Partial<ParsedBookPage['versionFields']> = {}): ParsedB
       '连载状态': versionFields.status,
       '更新时间': versionFields.updatedAt || null,
       '全文长度': '100', '简介': '新简介', 'cover': null,
+      '标签': ['校园'], '动画化': false, '热度': 'A级',
     },
   }
 }
@@ -38,7 +39,7 @@ function snapshot(options: {
 } = {}): BookSnapshot {
   const version = options.version ?? createBookVersion(STABLE_FIELDS, 1_000)
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     bookId: '123',
     checkedAt: options.checkedAt ?? 1_000,
     version,
@@ -49,6 +50,7 @@ function snapshot(options: {
       '标题': '测试作品', '作者': '作者', '出版社': '文库', '最新章节': '第一章',
       '连载状态': '连载', '更新时间': '2026-08-29', '全文长度': '100',
       '简介': '旧简介', 'cover': null,
+      '标签': [], '动画化': false, '热度': null,
     },
   }
 }

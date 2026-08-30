@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DownloadApi,
+  AppApi,
   CacheApi,
+  CatalogApi,
+  BookshelfApi,
   DiscoveryApi,
   DownloadStateEvent,
   EnqueueDownloadInput,
@@ -27,7 +30,7 @@ vi.mock('electron', () => ({
 
 import '../index'
 
-type ExposedApi = DownloadApi & CacheApi & DiscoveryApi & {
+type ExposedApi = DownloadApi & CacheApi & CatalogApi & DiscoveryApi & BookshelfApi & AppApi & {
   autoGetCookie: (operationId: string) => Promise<unknown>
   getLogStats: () => Promise<unknown>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<unknown>
@@ -71,6 +74,23 @@ describe('preload download boundary', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'download:enqueue', input)
   })
 
+  it('forwards atomic batch commands through fixed channels', async () => {
+    const inputs: EnqueueDownloadInput[] = [{
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }]
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+
+    await exposedApi.enqueueDownloadBatch(inputs)
+    await exposedApi.cancelDownloadBatch(batchId)
+    await exposedApi.retryDownloadBatch(batchId)
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['download:enqueue-batch', { inputs }],
+      ['download:cancel-batch', { batchId }],
+      ['download:retry-batch', { batchId }],
+    ])
+  })
+
   it('requests log statistics through the fixed channel', async () => {
     const result = { totalSizeBytes: 2048 }
     mocks.invoke.mockResolvedValue(result)
@@ -108,6 +128,7 @@ describe('preload download boundary', () => {
 
     await exposedApi.getDiscoveryHome(true)
     await exposedApi.getRanking('dayvisit', 2, false)
+    await exposedApi.getAnnualRanking(2026, true)
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'discovery:get-home', { refresh: true })
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'discovery:get-ranking', {
@@ -115,6 +136,47 @@ describe('preload download boundary', () => {
       page: 2,
       refresh: false,
     })
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'discovery:get-annual-ranking', {
+      year: 2026,
+      refresh: true,
+    })
+  })
+
+  it('uses fixed app information and update channels', async () => {
+    await exposedApi.getAppInfo()
+    await exposedApi.checkForUpdates(true)
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['app:get-info'],
+      ['app:check-update', { refresh: true }],
+    ])
+  })
+
+  it('uses fixed bookshelf channels and bounded payloads', async () => {
+    mocks.invoke.mockResolvedValue({ entries: [], fetchedAt: 1, stale: false })
+
+    await exposedApi.getBookshelf(true)
+    await exposedApi.addBookToBookshelf('3057')
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['bookshelf:get', { refresh: true }],
+      ['bookshelf:add', { bookId: '3057' }],
+    ])
+  })
+
+  it('uses the fixed catalog channel and a typed query payload', async () => {
+    const query = {
+      tag: '校园' as const,
+      status: 'all' as const,
+      animation: 'all' as const,
+      sort: 'lastupdate' as const,
+      page: 2,
+    }
+    mocks.invoke.mockResolvedValue({ query, books: [], page: 2, totalPages: 3 })
+
+    await exposedApi.getCatalog(query, true)
+
+    expect(mocks.invoke).toHaveBeenCalledWith('catalog:get', { query, refresh: true })
   })
 
   it('forwards task and history mutation payloads', async () => {
@@ -126,6 +188,8 @@ describe('preload download boundary', () => {
     await exposedApi.removeDownload(taskId)
     await exposedApi.clearDownloadHistory('terminal')
     await exposedApi.importLegacyDownloadHistory([{ id: taskId }])
+    await exposedApi.openDownloadArtifact(taskId, 'primary')
+    await exposedApi.revealDownloadArtifact(taskId, 'primary')
 
     expect(mocks.invoke.mock.calls).toEqual([
       ['download:cancel', { taskId }],
@@ -133,6 +197,8 @@ describe('preload download boundary', () => {
       ['download:remove', { taskId }],
       ['download:clear-history', { scope: 'terminal' }],
       ['download:import-legacy-history', { tasks: [{ id: taskId }] }],
+      ['download:artifact-open', { taskId, artifactId: 'primary' }],
+      ['download:artifact-reveal', { taskId, artifactId: 'primary' }],
     ])
   })
 

@@ -2,11 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   IconArrowLeft,
+  IconBookmarkPlus,
+  IconBolt,
+  IconCheck,
   IconDownload,
   IconExternalLink,
+  IconLoader2,
   IconRefresh,
 } from '@tabler/icons-react'
+import {
+  CATALOG_PUBLISHER_OPTIONS,
+  CATALOG_TAGS,
+  type EnqueueDownloadInput,
+} from '../../../shared/ipc-types'
 import { useBookStore } from '../stores/bookStore'
+import { useBookshelfUpdateStore } from '../stores/bookshelfUpdateStore'
 import { useDownloadStore } from '../stores/downloadStore'
 import LoadingSpinner from '../components/LoadingSpinner'
 import StatusAlert from '../components/StatusAlert'
@@ -16,6 +26,7 @@ import { api } from '../api/client'
 import { getUserFeedback } from '../utils/userFeedback'
 
 type DownloadTab = 'full' | 'divided' | 'pictures'
+type BookshelfActionStatus = 'idle' | 'adding' | 'added'
 
 const tabs: { key: DownloadTab; label: string }[] = [
   { key: 'full', label: '整本下载' },
@@ -23,13 +34,40 @@ const tabs: { key: DownloadTab; label: string }[] = [
   { key: 'pictures', label: '插图下载' },
 ]
 
+const publisherByLabel = new Map<string, string>(
+  CATALOG_PUBLISHER_OPTIONS.map(option => [option.label, option.value]),
+)
+
+function authorSearchHref(author: string): string {
+  const params = new URLSearchParams({ tab: 'author', q: author })
+  return `/search?${params.toString()}`
+}
+
+function publisherBrowseHref(publisher: string): string | null {
+  const value = publisherByLabel.get(publisher)
+  if (!value) return null
+  return `/search?${new URLSearchParams({ mode: 'browse', publisher: value }).toString()}`
+}
+
+function tagBrowseHref(tag: string): string {
+  return `/search?${new URLSearchParams({ mode: 'browse', tag }).toString()}`
+}
+
 export default function BookDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { book, loading, error, fetchBook, clear } = useBookStore()
-  const { downloadEpub, downloadImages } = useDownloadStore()
+  const { downloadEpub, downloadImages, downloadBatch } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
+  const [bookshelfAction, setBookshelfAction] = useState<{
+    bookId: string
+    status: BookshelfActionStatus
+  }>({ bookId: '', status: 'idle' })
   const warnedEmptyBooks = useRef(new Set<string>())
+  const bookshelfStatus: BookshelfActionStatus = book
+    && bookshelfAction.bookId === book.book_id
+    ? bookshelfAction.status
+    : 'idle'
 
   useEffect(() => {
     fetchBook(id ?? '')
@@ -56,9 +94,9 @@ export default function BookDetailPage() {
       return
     }
     if (type === 'pictures') {
-      downloadImages(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
+      downloadImages(book.book_id, book.basic_info['标题'], book.basic_info['cover'] ?? undefined)
     } else {
-      downloadEpub(book.book_id, book.basic_info['标题'] ?? '', book.basic_info['cover'])
+      downloadEpub(book.book_id, book.basic_info['标题'], book.basic_info['cover'] ?? undefined)
     }
     navigate('/download')
   }
@@ -75,14 +113,15 @@ export default function BookDetailPage() {
       toast.warning({ title: '尚未选择分卷', message: '请至少选择一个要下载的分卷。' })
       return
     }
-    volumes.forEach((volumeName) => {
-      const cover = book.basic_info['cover']
-      if (type === 'pictures') {
-        downloadImages(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
-      } else {
-        downloadEpub(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
-      }
-    })
+    const cover = book.basic_info['cover'] ?? undefined
+    const inputs: EnqueueDownloadInput[] = volumes.map(volumeName => ({
+      bookId: book.book_id,
+      title: book.basic_info['标题'],
+      ...(cover === undefined ? {} : { cover }),
+      type: type === 'pictures' ? 'images' : 'epub_volume',
+      volume: volumeName,
+    }))
+    downloadBatch(inputs)
     navigate('/download')
   }
 
@@ -93,6 +132,26 @@ export default function BookDetailPage() {
       await api.openExternal(sourceUrl)
     } catch (error) {
       toast.error(getUserFeedback(error, 'open-external'))
+    }
+  }
+
+  const handleAddToBookshelf = async (): Promise<void> => {
+    if (!book) return
+    const bookId = book.book_id
+    setBookshelfAction({ bookId, status: 'adding' })
+    try {
+      const page = await api.addBookToBookshelf(bookId)
+      useBookshelfUpdateStore.getState().syncPage(page)
+      setBookshelfAction({ bookId, status: 'added' })
+      toast.success({
+        title: '已加入书架',
+        message: `《${book.basic_info['标题']}》已同步到原站书架`,
+      })
+    } catch (error) {
+      setBookshelfAction(current => (
+        current.bookId === bookId ? { bookId, status: 'idle' } : current
+      ))
+      toast.error(getUserFeedback(error, 'bookshelf-add'))
     }
   }
 
@@ -134,39 +193,95 @@ export default function BookDetailPage() {
 
       {book && (
         <>
-          {/* 信息区 */}
-          <div className="flex items-start gap-6 mb-6">
+          <div className="mb-6 flex items-start gap-6">
             <BookCover
               src={book.basic_info['cover']}
               title={book.basic_info['标题'] ?? '作品'}
               className="w-[130px] h-[184px] rounded-[14px] shadow-md"
             />
             <div className="min-w-0 flex-1">
-              <h1 className="text-[20px] font-bold text-apple-heading mb-1 tracking-tight">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {book.basic_info['连载状态'] && (
+                  <span className="rounded-md bg-apple-bg px-2 py-1 text-[11px] font-medium text-apple-secondary">
+                    {book.basic_info['连载状态']}
+                  </span>
+                )}
+                {book.basic_info['动画化'] && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+                    <IconBolt aria-hidden="true" size={13} stroke={1.8} />
+                    已动画化
+                  </span>
+                )}
+              </div>
+              <h1 className="mb-2 break-words text-[20px] font-bold tracking-tight text-apple-heading">
                 {book.basic_info['标题']}
               </h1>
-              <p className="text-[12px] text-apple-secondary">
-                {book.basic_info['作者']}
-                {book.basic_info['出版社'] && ` · ${book.basic_info['出版社']}`}
-                {book.basic_info['连载状态'] && ` · ${book.basic_info['连载状态']}`}
-              </p>
-              <a
-                href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
-                onClick={(event) => {
-                  event.preventDefault()
-                  void handleOpenSource()
-                }}
-                className="motion-pressable mt-4 inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-[13px] font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
-              >
-                <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
-                在原网站查看
-              </a>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-apple-secondary">
+                {book.basic_info['作者'] && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(authorSearchHref(book.basic_info['作者']))}
+                    className="motion-pressable max-w-full break-all rounded px-1 py-0.5 text-left text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                  >
+                    {book.basic_info['作者']}
+                  </button>
+                )}
+                {book.basic_info['出版社'] && (
+                  <>
+                    <span aria-hidden="true" className="text-apple-tertiary">·</span>
+                    {publisherBrowseHref(book.basic_info['出版社']) ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(publisherBrowseHref(book.basic_info['出版社'])!)}
+                        className="motion-pressable rounded px-1 py-0.5 text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                      >
+                        {book.basic_info['出版社']}
+                      </button>
+                    ) : (
+                      <span>{book.basic_info['出版社']}</span>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={bookshelfStatus !== 'idle'}
+                  onClick={() => void handleAddToBookshelf()}
+                  className={`motion-pressable inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25 disabled:cursor-not-allowed ${
+                    bookshelfStatus === 'added'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-apple-accent/25 bg-apple-accent-light text-apple-accent hover:border-apple-accent/40'
+                  }`}
+                >
+                  {bookshelfStatus === 'adding' ? (
+                    <IconLoader2 aria-hidden="true" className="motion-spinner animate-spin" size={16} stroke={1.8} />
+                  ) : bookshelfStatus === 'added' ? (
+                    <IconCheck aria-hidden="true" size={16} stroke={1.9} />
+                  ) : (
+                    <IconBookmarkPlus aria-hidden="true" size={16} stroke={1.8} />
+                  )}
+                  {bookshelfStatus === 'adding'
+                    ? '正在加入'
+                    : bookshelfStatus === 'added' ? '已在书架' : '加入书架'}
+                </button>
+                <a
+                  href={`https://www.wenku8.net/book/${encodeURIComponent(book.book_id)}.htm`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void handleOpenSource()
+                  }}
+                  className="motion-pressable inline-flex items-center gap-1.5 rounded-lg border border-apple-border-input bg-apple-card px-3 py-2 text-[13px] font-medium text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                >
+                  <IconExternalLink aria-hidden="true" size={16} stroke={1.8} />
+                  在原网站查看
+                </a>
+              </div>
             </div>
           </div>
 
-          {/* 统计区 */}
-          <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
-            <div className="grid grid-cols-3 gap-4">
+          <div className="mb-6 rounded-xl border border-apple-border-subtle bg-apple-card p-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-4">
               {book.basic_info['最新章节'] && (
                 <div>
                   <h4 className="text-[12px] font-semibold text-apple-heading mb-1">最新</h4>
@@ -185,10 +300,45 @@ export default function BookDetailPage() {
                   <p className="text-[13px] text-apple-body">{book.basic_info['全文长度']}</p>
                 </div>
               )}
+              {book.basic_info['热度'] && (
+                <div>
+                  <h4 className="mb-1 text-[12px] font-semibold text-apple-heading">热度</h4>
+                  <p className="break-words text-[13px] text-apple-body">{book.basic_info['热度']}</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* 简介 */}
+          {book.basic_info['标签'].length > 0 && (
+            <section aria-labelledby="book-tags-heading" className="mb-6">
+              <h2 id="book-tags-heading" className="mb-2 text-[12px] font-semibold text-apple-heading">
+                标签
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {book.basic_info['标签'].map(tag => (
+                  CATALOG_TAGS.includes(tag as typeof CATALOG_TAGS[number]) ? (
+                    <button
+                      key={tag}
+                      type="button"
+                      aria-label={`按标签“${tag}”找书`}
+                      onClick={() => navigate(tagBrowseHref(tag))}
+                      className="motion-pressable rounded-lg border border-apple-border-input bg-apple-card px-2.5 py-1 text-[12px] text-apple-accent hover:bg-apple-accent-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                    >
+                      {tag}
+                    </button>
+                  ) : (
+                    <span
+                      key={tag}
+                      className="rounded-lg border border-apple-border-subtle bg-apple-bg px-2.5 py-1 text-[12px] text-apple-secondary"
+                    >
+                      {tag}
+                    </span>
+                  )
+                ))}
+              </div>
+            </section>
+          )}
+
           {book.basic_info['简介'] && (
             <div className="p-4 rounded-xl border border-apple-border-subtle bg-apple-card mb-6">
               <h4 className="text-[12px] font-semibold text-apple-heading mb-2">简介</h4>
@@ -198,7 +348,6 @@ export default function BookDetailPage() {
             </div>
           )}
 
-          {/* 下载区 — 方案 B Tab 切换 */}
           <div className="overflow-hidden rounded-xl border border-apple-border-subtle bg-apple-card shadow-card">
             <div role="group" aria-label="下载方式" className="flex border-b border-apple-border-subtle">
               {tabs.map((t) => (

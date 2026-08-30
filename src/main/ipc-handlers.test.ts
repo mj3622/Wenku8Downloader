@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     handlers,
     listeners,
     downloadsPath: process.cwd(),
+    packaged: true,
     logsPath: `${process.cwd()}\\logs`,
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       handlers.set(channel, handler)
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     }),
     openExternal: vi.fn(async () => undefined),
     openPath: vi.fn(async () => ''),
+    showItemInFolder: vi.fn(() => undefined),
     showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
     mkdir: vi.fn(async () => undefined),
     browserWindows: [] as Array<{
@@ -31,11 +33,18 @@ const mocks = vi.hoisted(() => {
       legacyImportCompleted: false,
     })),
     enqueueDownload: vi.fn(),
+    enqueueDownloadBatch: vi.fn(),
     cancelDownload: vi.fn(),
+    cancelDownloadBatch: vi.fn(),
     retryDownload: vi.fn(),
+    retryDownloadBatch: vi.fn(),
     removeDownload: vi.fn(),
     clearDownloadHistory: vi.fn(),
     importLegacyDownloadHistory: vi.fn(),
+    getArtifactTarget: vi.fn(async () => ({
+      path: resolve(process.cwd(), 'downloads', 'book.epub'),
+      kind: 'file' as 'file' | 'directory',
+    })),
     resolveVolumeCovers: vi.fn(async () => ({
       '第一卷': 'https://example.com/volume-1.jpg',
     })),
@@ -59,12 +68,17 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: {
-    isPackaged: true,
+    get isPackaged() { return mocks.packaged },
+    getVersion: vi.fn(() => '2.1.0'),
     getPath: vi.fn((name: string) => name === 'downloads' ? mocks.downloadsPath : 'unused'),
   },
   BrowserWindow: { getAllWindows: () => mocks.browserWindows },
   ipcMain: { handle: mocks.handle, on: mocks.on },
-  shell: { openExternal: mocks.openExternal, openPath: mocks.openPath },
+  shell: {
+    openExternal: mocks.openExternal,
+    openPath: mocks.openPath,
+    showItemInFolder: mocks.showItemInFolder,
+  },
   dialog: { showOpenDialog: mocks.showOpenDialog },
 }))
 
@@ -115,6 +129,7 @@ function createBookFixture() {
     generationKey: 'a'.repeat(64),
     legacyImportGenerationKey: 'a'.repeat(64),
     baseChapterUrl: 'https://www.wenku8.net/novel/3/3057/',
+    versionFields: { updatedAt: '', latestChapter: '', status: '' },
     basicInfo: {
       '标题': '测试作品',
       '作者': '测试作者',
@@ -124,6 +139,9 @@ function createBookFixture() {
       '更新时间': null,
       '全文长度': null,
       '简介': '',
+      '标签': [],
+      '动画化': false,
+      '热度': null,
       cover: null,
     },
     volumes: { '第一卷': [{ name: '第一章', link: '/chapter/1' }] },
@@ -156,10 +174,22 @@ function createServices(
     },
     crawler: {
       syncCookies: vi.fn(async () => undefined),
-      search: vi.fn(async () => []),
       getCookie: vi.fn(async () => undefined),
       fetch: vi.fn(),
       getImageContent: vi.fn(async () => null),
+    },
+    search: {
+      search: vi.fn(async () => ({
+        status: 'ok' as const,
+        results: [],
+        fetchedAt: 1,
+        cached: false,
+      })),
+    },
+    catalog: {
+      getPage: vi.fn(async query => ({
+        query, books: [], page: query.page, totalPages: 1, fetchedAt: 1, stale: false,
+      })),
     },
     discovery: {
       getHome: vi.fn(async () => ({
@@ -167,6 +197,25 @@ function createServices(
       })),
       getRanking: vi.fn(async (type, page) => ({
         type, page, title: '排行榜', totalPages: 1, books: [], fetchedAt: 1, stale: false,
+      })),
+      getAnnualRanking: vi.fn(async year => ({
+        year,
+        categories: { bunko: [], tankobon: [] },
+        fetchedAt: 1,
+        stale: false,
+      })),
+    },
+    bookshelf: {
+      getPage: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
+      addBook: vi.fn(async () => ({ entries: [], fetchedAt: 1, stale: false })),
+    },
+    updates: {
+      check: vi.fn(async () => ({
+        currentVersion: '2.1.0',
+        latestVersion: '2.1.0',
+        updateAvailable: false,
+        releaseUrl: 'https://github.com/mj3622/Wenku8Downloader/releases/tag/v2.1.0',
+        checkedAt: 1,
       })),
     },
     books: {
@@ -178,11 +227,15 @@ function createServices(
     downloads: {
       getSnapshot: mocks.getDownloadSnapshot,
       enqueue: mocks.enqueueDownload,
+      enqueueBatch: mocks.enqueueDownloadBatch,
       cancel: mocks.cancelDownload,
+      cancelBatch: mocks.cancelDownloadBatch,
       retry: mocks.retryDownload,
+      retryBatch: mocks.retryDownloadBatch,
       remove: mocks.removeDownload,
       clearHistory: mocks.clearDownloadHistory,
       importLegacyHistory: mocks.importLegacyDownloadHistory,
+      getArtifactTarget: mocks.getArtifactTarget,
       subscribe: mocks.subscribeDownloads,
     },
   } satisfies IpcServices
@@ -201,6 +254,7 @@ beforeEach(() => {
   mocks.listeners.clear()
   mocks.browserWindows.length = 0
   mocks.downloadSubscriber = undefined
+  mocks.packaged = true
   vi.clearAllMocks()
   services = createServices()
   registerIpcHandlers(services)
@@ -437,7 +491,7 @@ describe('registerIpcHandlers application operations', () => {
   })
 
   it('logs failed operations with safe context and duration', async () => {
-    vi.mocked(services.crawler.search).mockRejectedValueOnce(new Error('HTTP 503'))
+    vi.mocked(services.search.search).mockRejectedValueOnce(new Error('HTTP 503'))
 
     await expect(invoke('search:title', {}, { query: '败犬女主' })).rejects.toThrow('HTTP 503')
 
@@ -451,6 +505,19 @@ describe('registerIpcHandlers application operations', () => {
       }),
     )
     expect(mocks.logger.error.mock.calls.at(-1)?.[3]).not.toHaveProperty('query')
+  })
+
+  it('forwards validated searches to the search service', async () => {
+    vi.mocked(services.search.search).mockResolvedValueOnce({
+      status: 'cooldown',
+      retryAt: 12_000,
+    })
+
+    await expect(invoke('search:author', {}, { query: ' 雨森焚火 ' })).resolves.toEqual({
+      status: 'cooldown',
+      retryAt: 12_000,
+    })
+    expect(services.search.search).toHaveBeenCalledWith('author', '雨森焚火')
   })
 
   it('validates and forwards explicit book revalidation', async () => {
@@ -470,6 +537,7 @@ describe('registerIpcHandlers application operations', () => {
     await invoke('discovery:get-ranking', {}, {
       type: 'monthvisit', page: 3, refresh: false,
     })
+    await invoke('discovery:get-annual-ranking', {}, { year: 2026, refresh: true })
 
     expect(services.discovery.getHome).toHaveBeenCalledWith({ refresh: true })
     expect(services.discovery.getRanking).toHaveBeenCalledWith(
@@ -477,9 +545,84 @@ describe('registerIpcHandlers application operations', () => {
       3,
       { refresh: false },
     )
+    expect(services.discovery.getAnnualRanking).toHaveBeenCalledWith(2026, { refresh: true })
     await expect(invoke('discovery:get-ranking', {}, {
       type: 'arbitrary', page: 1,
     })).rejects.toThrow('榜单类型')
+    await expect(invoke('discovery:get-annual-ranking', {}, { year: 2027 }))
+      .rejects.toThrow('年度榜单')
+  })
+
+  it('returns the Electron app version and validates manual update checks', async () => {
+    mocks.packaged = false
+    await expect(invoke('app:get-info', {})).resolves.toEqual({ version: '2.1.0' })
+    mocks.packaged = true
+    await expect(invoke('app:get-info', {})).resolves.toEqual({ version: '2.1.0' })
+    await invoke('app:check-update', {}, { refresh: true })
+    expect(services.updates.check).toHaveBeenCalledWith({ refresh: true })
+    await expect(invoke('app:check-update', {}, { refresh: true, url: 'https://example.com' }))
+      .rejects.toThrow('版本检查请求格式无效')
+  })
+
+  it('accepts only the fixed bookshelf refresh option', async () => {
+    await invoke('bookshelf:get', {}, { refresh: true })
+
+    expect(services.bookshelf.getPage).toHaveBeenCalledWith({ refresh: true })
+    await expect(invoke('bookshelf:get', {}, {
+      refresh: false,
+      url: 'https://example.com/',
+    })).rejects.toThrow('请求参数格式无效')
+  })
+
+  it('validates and forwards only a book ID when adding to the bookshelf', async () => {
+    await invoke('bookshelf:add', {}, { bookId: '3057' })
+
+    expect(services.bookshelf.addBook).toHaveBeenCalledWith('3057')
+    await expect(invoke('bookshelf:add', {}, { bookId: '../3057' }))
+      .rejects.toThrow('作品编号')
+    await expect(invoke('bookshelf:add', {}, {
+      bookId: '3057',
+      url: 'https://example.com/',
+    })).rejects.toThrow('请求参数格式无效')
+  })
+
+  it('validates batch inputs and forwards only main-generated batch operations', async () => {
+    const item = {
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+
+    await invoke('download:enqueue-batch', {}, { inputs: [item] })
+    await invoke('download:cancel-batch', {}, { batchId })
+    await invoke('download:retry-batch', {}, { batchId })
+
+    expect(mocks.enqueueDownloadBatch).toHaveBeenCalledWith([item])
+    expect(mocks.cancelDownloadBatch).toHaveBeenCalledWith(batchId)
+    expect(mocks.retryDownloadBatch).toHaveBeenCalledWith(batchId)
+    await expect(invoke('download:enqueue-batch', {}, {
+      inputs: [{ ...item, batchId }],
+    })).rejects.toThrow('批次任务格式')
+    await expect(invoke('download:cancel-batch', {}, { batchId, taskId: batchId }))
+      .rejects.toThrow('批次请求格式')
+  })
+
+  it('validates and forwards catalog requests without logging arbitrary fields', async () => {
+    const query = {
+      tag: '校园' as const,
+      status: 'serializing' as const,
+      animation: 'animated' as const,
+      sort: 'lastupdate' as const,
+      page: 3,
+    }
+
+    await invoke('catalog:get', {}, { query, refresh: true })
+
+    expect(services.catalog.getPage).toHaveBeenCalledWith(query, { refresh: true })
+    await expect(invoke('catalog:get', {}, {
+      query: { ...query, url: 'file:///tmp' }, refresh: false,
+    })).rejects.toThrow('找书请求格式无效')
+    expect(mocks.logger.info.mock.calls.flatMap(call => Object.keys(call[2] ?? {})))
+      .not.toContain('tag')
   })
 
   it('exposes only a parameter-free full cache clear', async () => {
@@ -520,7 +663,7 @@ describe('registerIpcHandlers application operations', () => {
     await expect(invoke('shell:openExternal', {}, 'http://wenku8.net')).rejects.toThrow('允许范围')
     await expect(invoke('shell:openFolder', {}, '../config')).rejects.toThrow('下载文件夹')
 
-    expect(services.crawler.search).not.toHaveBeenCalled()
+    expect(services.search.search).not.toHaveBeenCalled()
     expect(services.books.get).not.toHaveBeenCalled()
     expect(mocks.openExternal).not.toHaveBeenCalled()
     expect(mocks.openPath).not.toHaveBeenCalled()
@@ -571,8 +714,40 @@ describe('registerIpcHandlers application operations', () => {
     ['download:retry', null],
     ['download:clear-history', { scope: 'active' }],
     ['download:import-legacy-history', { tasks: 'invalid' }],
+    ['download:artifact-open', { taskId: 'dl-1720000000000-3', artifactId: '../file' }],
   ] as const)('rejects malformed manager payloads for %s', async (channel, payload) => {
     await expect(invoke(channel, {}, payload)).rejects.toThrow()
+  })
+
+  it('opens and reveals only manager-resolved artifacts', async () => {
+    const taskId = 'dl-1720000000000-3'
+    const artifactId = 'primary'
+    const path = resolve(process.cwd(), 'downloads', 'book.epub')
+    mocks.getArtifactTarget.mockResolvedValue({ path, kind: 'file' })
+
+    await invoke('download:artifact-open', {}, { taskId, artifactId })
+    await invoke('download:artifact-reveal', {}, { taskId, artifactId })
+
+    expect(mocks.getArtifactTarget).toHaveBeenNthCalledWith(1, taskId, artifactId)
+    expect(mocks.getArtifactTarget).toHaveBeenNthCalledWith(2, taskId, artifactId)
+    expect(mocks.openPath).toHaveBeenCalledWith(path)
+    expect(mocks.showItemInFolder).toHaveBeenCalledWith(path)
+  })
+
+  it('opens a directory when revealing it and reports shell failures safely', async () => {
+    const taskId = 'dl-1720000000000-3'
+    const path = resolve(process.cwd(), 'downloads', 'pics', 'book')
+    mocks.getArtifactTarget.mockResolvedValue({ path, kind: 'directory' })
+
+    await invoke('download:artifact-reveal', {}, { taskId, artifactId: 'primary' })
+    expect(mocks.openPath).toHaveBeenCalledWith(path)
+    expect(mocks.showItemInFolder).not.toHaveBeenCalled()
+
+    mocks.openPath.mockResolvedValueOnce('native shell detail')
+    await expect(invoke('download:artifact-open', {}, {
+      taskId,
+      artifactId: 'primary',
+    })).rejects.toThrow('无法打开下载文件，请确认文件仍然存在')
   })
 
   it('broadcasts state changes only to live renderer windows', () => {

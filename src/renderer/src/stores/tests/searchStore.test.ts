@@ -19,6 +19,8 @@ beforeEach(() => {
     hasSearched: false,
     lastType: null,
     lastQuery: null,
+    retryAt: null,
+    cached: false,
   })
   useToastStore.getState().clear()
 })
@@ -55,17 +57,32 @@ describe('searchStore', () => {
   })
 
   it('keeps the newest search result when an older request finishes later', async () => {
-    let resolveFirst!: (value: { results: Array<{ id: string; title: string; cover: string }> }) => void
-    let resolveSecond!: (value: { results: Array<{ id: string; title: string; cover: string }> }) => void
+    let resolveFirst!: (value: {
+      status: 'ok'
+      results: Array<{ id: string; title: string; cover: string }>
+      fetchedAt: number
+      cached: boolean
+    }) => void
+    let resolveSecond!: typeof resolveFirst
     mocks.searchTitle
       .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve }))
 
     const first = useSearchStore.getState().search('title', '旧查询')
     const second = useSearchStore.getState().search('title', '新查询')
-    resolveSecond({ results: [{ id: '2', title: '新结果', cover: '' }] })
+    resolveSecond({
+      status: 'ok',
+      results: [{ id: '2', title: '新结果', cover: '' }],
+      fetchedAt: 2,
+      cached: false,
+    })
     await second
-    resolveFirst({ results: [{ id: '1', title: '旧结果', cover: '' }] })
+    resolveFirst({
+      status: 'ok',
+      results: [{ id: '1', title: '旧结果', cover: '' }],
+      fetchedAt: 1,
+      cached: false,
+    })
     await first
 
     expect(useSearchStore.getState()).toMatchObject({
@@ -76,12 +93,22 @@ describe('searchStore', () => {
   })
 
   it('does not restore results after the user clears a pending search', async () => {
-    let resolveSearch!: (value: { results: Array<{ id: string; title: string; cover: string }> }) => void
+    let resolveSearch!: (value: {
+      status: 'ok'
+      results: Array<{ id: string; title: string; cover: string }>
+      fetchedAt: number
+      cached: boolean
+    }) => void
     mocks.searchTitle.mockReturnValueOnce(new Promise((resolve) => { resolveSearch = resolve }))
 
     const request = useSearchStore.getState().search('title', '即将清除')
     useSearchStore.getState().clear()
-    resolveSearch({ results: [{ id: '1', title: '过期结果', cover: '' }] })
+    resolveSearch({
+      status: 'ok',
+      results: [{ id: '1', title: '过期结果', cover: '' }],
+      fetchedAt: 1,
+      cached: false,
+    })
     await request
 
     expect(useSearchStore.getState()).toMatchObject({
@@ -91,6 +118,29 @@ describe('searchStore', () => {
       hasSearched: false,
       lastType: null,
       lastQuery: null,
+      retryAt: null,
+    })
+  })
+
+  it('stores the retry time and cached results returned during cooldown', async () => {
+    mocks.searchTitle.mockResolvedValue({
+      status: 'cooldown',
+      retryAt: 12_000,
+      cachedResults: [{ id: '1', title: '缓存结果', cover: '' }],
+    })
+
+    await useSearchStore.getState().search('title', '测试')
+
+    expect(useSearchStore.getState()).toMatchObject({
+      loading: false,
+      results: [{ id: '1', title: '缓存结果', cover: '' }],
+      retryAt: 12_000,
+      cached: true,
+      hasSearched: true,
+    })
+    expect(useToastStore.getState().items[0]).toMatchObject({
+      tone: 'warning',
+      title: '搜索需要稍等',
     })
   })
 })

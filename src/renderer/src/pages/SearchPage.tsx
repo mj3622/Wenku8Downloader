@@ -1,122 +1,408 @@
-import { useState, useEffect, useRef } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
-import { IconBookOff, IconSearch } from '@tabler/icons-react'
-import { useSearchStore } from '../stores/searchStore'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  IconBookOff,
+  IconRefresh,
+  IconSearch,
+} from '@tabler/icons-react'
+import {
+  CATALOG_ANIMATIONS,
+  CATALOG_PUBLISHER_OPTIONS,
+  CATALOG_SORTS,
+  CATALOG_STATUSES,
+  CATALOG_TAGS,
+  catalogQueryKey,
+  type CatalogQuery,
+  type CatalogTag,
+} from '../../../shared/ipc-types'
 import BookQueryInput from '../components/BookQueryInput'
-import SearchResultList from '../components/SearchResultList'
+import CatalogFilters from '../components/CatalogFilters'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Pagination from '../components/Pagination'
+import SearchResultList from '../components/SearchResultList'
 import StatusAlert from '../components/StatusAlert'
+import {
+  DEFAULT_CATALOG_QUERY,
+  useCatalogStore,
+} from '../stores/catalogStore'
+import { useSearchStore } from '../stores/searchStore'
 import { toast } from '../stores/toastStore'
 
-type Tab = 'id' | 'author' | 'title'
+type Tab = 'browse' | 'title' | 'author' | 'id'
 
-const tabs: { key: Tab; label: string }[] = [
-  { key: 'title', label: '书名检索' },
-  { key: 'author', label: '作者检索' },
-  { key: 'id', label: '编号检索' },
+const tabs: Array<{ key: Tab; label: string }> = [
+  { key: 'browse', label: '浏览' },
+  { key: 'title', label: '书名' },
+  { key: 'author', label: '作者' },
+  { key: 'id', label: '编号' },
 ]
 
+const PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
+const ROUTE_KEYS = new Set([
+  'mode', 'tab', 'q', 'publisher', 'tag', 'status', 'animation', 'sort', 'page',
+])
+
+function buildSearchParams(
+  tab: Tab,
+  query: CatalogQuery,
+  searchTerm?: string,
+): URLSearchParams {
+  const params = new URLSearchParams()
+  if (tab !== 'browse') params.set('tab', tab)
+  if ((tab === 'title' || tab === 'author') && searchTerm) params.set('q', searchTerm)
+  if (query.publisher) params.set('publisher', query.publisher)
+  if (query.tag) params.set('tag', query.tag)
+  if (query.status !== 'all') params.set('status', query.status)
+  if (query.animation !== 'all') params.set('animation', query.animation)
+  if (query.sort !== 'lastupdate') params.set('sort', query.sort)
+  if (query.page !== 1) params.set('page', String(query.page))
+  return params
+}
+
+function parseRoute(params: URLSearchParams): {
+  tab: Tab
+  query: CatalogQuery
+  searchTerm: string | null
+  invalid: boolean
+} {
+  let invalid = Array.from(params.keys()).some(key => !ROUTE_KEYS.has(key))
+  const mode = params.get('mode')
+  if (mode !== null && mode !== 'browse') invalid = true
+  const rawTab = params.get('tab') ?? 'browse'
+  const tab = tabs.some(item => item.key === rawTab) ? rawTab as Tab : 'browse'
+  if (tab !== rawTab) invalid = true
+  const rawSearchTerm = params.get('q')
+  const normalizedSearchTerm = rawSearchTerm?.trim() ?? ''
+  const searchTerm = normalizedSearchTerm && normalizedSearchTerm.length <= 100
+    ? normalizedSearchTerm
+    : null
+  if (rawSearchTerm !== null
+    && ((tab !== 'title' && tab !== 'author') || searchTerm === null || rawSearchTerm !== searchTerm)) {
+    invalid = true
+  }
+
+  const query: CatalogQuery = { ...DEFAULT_CATALOG_QUERY }
+  const publisher = params.get('publisher')
+  if (publisher !== null) {
+    if (PUBLISHERS.has(publisher)) query.publisher = publisher as CatalogQuery['publisher']
+    else invalid = true
+  }
+  const tag = params.get('tag')
+  if (tag !== null) {
+    if (CATALOG_TAGS.includes(tag as CatalogTag)) query.tag = tag as CatalogTag
+    else invalid = true
+  }
+  const status = params.get('status')
+  if (status !== null) {
+    if (CATALOG_STATUSES.includes(status as CatalogQuery['status'])) {
+      query.status = status as CatalogQuery['status']
+    } else invalid = true
+  }
+  const animation = params.get('animation')
+  if (animation !== null) {
+    if (CATALOG_ANIMATIONS.includes(animation as CatalogQuery['animation'])) {
+      query.animation = animation as CatalogQuery['animation']
+    } else invalid = true
+  }
+  const sort = params.get('sort')
+  if (sort !== null) {
+    if (CATALOG_SORTS.includes(sort as CatalogQuery['sort'])) {
+      query.sort = sort as CatalogQuery['sort']
+    } else invalid = true
+  }
+  const page = params.get('page')
+  if (page !== null) {
+    const parsed = Number(page)
+    if (/^\d+$/.test(page) && Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 500) {
+      query.page = parsed
+    } else invalid = true
+  }
+
+  if (query.tag && query.publisher) {
+    delete query.publisher
+    invalid = true
+  }
+  if (query.publisher && query.sort === 'allvisit') {
+    query.sort = 'lastupdate'
+    invalid = true
+  }
+  return { tab, query, searchTerm, invalid }
+}
+
+function searchHref(query: CatalogQuery): string {
+  const params = buildSearchParams('browse', query).toString()
+  return params ? `/search?${params}` : '/search'
+}
+
 export default function SearchPage() {
-  const {
-    results,
-    loading: searchLoading,
-    error: searchError,
-    hasSearched,
-    lastType,
-    lastQuery,
-    search,
-    clear: clearSearch,
-  } = useSearchStore()
-  const [tab, setTab] = useState<Tab>(lastType ?? 'title')
+  const searchState = useSearchStore()
+  const catalogState = useCatalogStore()
+  const [tab, setTab] = useState<Tab>('browse')
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const paramsKey = searchParams.toString()
+  const route = useMemo(() => parseRoute(new URLSearchParams(paramsKey)), [paramsKey])
+  const warnedRoutes = useRef(new Set<string>())
 
   useEffect(() => {
-    const routeTab = searchParams.get('tab')
-    if (routeTab) {
-      if (tabs.some((item) => item.key === routeTab)) {
-        setTab(routeTab as Tab)
-      } else {
-        setTab('title')
-        toast.warning({
-          title: '检索方式无效',
-          message: '已为你切换到书名检索，请重新选择。',
-        })
-        setSearchParams({}, { replace: true })
-      }
+    setTab(route.tab)
+    if (route.invalid && !warnedRoutes.current.has(paramsKey)) {
+      warnedRoutes.current.add(paramsKey)
+      toast.warning({
+        title: '找书条件已调整',
+        message: '无效或冲突的条件已恢复为可用设置',
+      })
+      setSearchParams(buildSearchParams(route.tab, route.query, route.searchTerm ?? undefined), { replace: true })
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const current = useCatalogStore.getState()
+    const currentSearch = useSearchStore.getState()
+    if (route.tab !== 'browse') {
+      if (catalogQueryKey(current.query) !== catalogQueryKey(route.query)) {
+        current.setQuery(route.query)
+      }
+      if ((route.tab === 'title' || route.tab === 'author')
+        && route.searchTerm
+        && (currentSearch.lastType !== route.tab || currentSearch.lastQuery !== route.searchTerm)) {
+        void currentSearch.search(route.tab, route.searchTerm)
+      }
+      return
+    }
 
-  const handleSelect = (id: string) => {
-    navigate(`/book/${id}`)
+    const hasCurrentResult = current.hasLoaded
+      && catalogQueryKey(current.query) === catalogQueryKey(route.query)
+    if (!hasCurrentResult) void current.load(route.query)
+  }, [paramsKey, route, searchState.lastQuery, searchState.lastType, setSearchParams])
+
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab)
+    setSearchParams(buildSearchParams(nextTab, catalogState.query))
   }
 
-  const handleSearch = (type: 'author' | 'title', value: string) => {
-    search(type, value.trim())
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
+    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = tabs.length - 1
+    if (nextIndex === null) return
+    event.preventDefault()
+    selectTab(tabs[nextIndex].key)
+    document.getElementById(`find-book-tab-${tabs[nextIndex].key}`)?.focus()
   }
+
+  const changeCatalogFilters = (
+    filters: Partial<Omit<CatalogQuery, 'page'>>,
+  ) => {
+    catalogState.setFilters(filters)
+    const next = useCatalogStore.getState().query
+    setSearchParams(buildSearchParams('browse', next))
+  }
+
+  const resetCatalog = () => {
+    catalogState.clear()
+    const params = buildSearchParams('browse', DEFAULT_CATALOG_QUERY)
+    if (params.toString() === paramsKey) void useCatalogStore.getState().load(DEFAULT_CATALOG_QUERY)
+    else setSearchParams(params)
+  }
+
+  const handleSelect = (id: string) => navigate(`/book/${id}`)
+  const activeSearch = searchState.lastType
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-apple-heading mb-2">检索</h1>
-      <div className="w-11 h-1 bg-apple-accent rounded-full mb-4" />
-      <div role="group" aria-label="检索方式" className="mb-6 flex gap-1 border-b border-apple-border-subtle">
-        {tabs.map((t) => (
+    <div className="mx-auto max-w-6xl">
+      <h1 className="mb-2 text-2xl font-bold text-apple-heading">找书</h1>
+      <div className="mb-4 h-1 w-11 rounded-full bg-apple-accent" />
+      <div
+        role="tablist"
+        aria-label="找书方式"
+        className="mb-6 flex gap-1 border-b border-apple-border-subtle"
+      >
+        {tabs.map((item, index) => (
           <button
-            key={t.key}
+            key={item.key}
+            id={`find-book-tab-${item.key}`}
             type="button"
-            aria-pressed={tab === t.key}
-            onClick={() => {
-              if (tab !== t.key) clearSearch()
-              setTab(t.key)
-              setSearchParams(t.key === 'title' ? {} : { tab: t.key }, { replace: true })
-            }}
+            role="tab"
+            aria-selected={tab === item.key}
+            aria-controls={`find-book-panel-${item.key}`}
+            tabIndex={tab === item.key ? 0 : -1}
+            onClick={() => selectTab(item.key)}
+            onKeyDown={event => handleTabKeyDown(event, index)}
             className={`border-b-2 px-4 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-apple-accent/25 ${
-              tab === t.key
+              tab === item.key
                 ? 'border-apple-accent font-medium text-apple-accent'
                 : 'border-transparent text-apple-secondary hover:text-apple-heading'
             }`}
           >
-            {t.label}
+            {item.label}
           </button>
         ))}
       </div>
 
-      {tab === 'id' && (
-        <IdTab onQuery={(id) => navigate(`/book/${id}`)} />
-      )}
-
-      {tab === 'author' && (
-        <SearchTab
-          key="author"
-          type="author"
-          placeholder="例如：三上库太"
-          results={results}
-          loading={searchLoading}
-          error={searchError}
-          hasSearched={hasSearched}
-          lastQuery={lastQuery}
-          onSearch={(v) => handleSearch('author', v)}
-          onSelect={handleSelect}
-          onClear={clearSearch}
+      <div
+        id="find-book-panel-browse"
+        role="tabpanel"
+        aria-labelledby="find-book-tab-browse"
+        hidden={tab !== 'browse'}
+      >
+        <CatalogFilters
+          query={catalogState.query}
+          loading={catalogState.loading}
+          onChange={changeCatalogFilters}
+          onReset={resetCatalog}
+          onRefresh={() => void catalogState.load(catalogState.query, true)}
         />
-      )}
+        <CatalogResults
+          state={catalogState}
+          onSelect={handleSelect}
+          onRetry={() => void catalogState.load(catalogState.query, true)}
+        />
+      </div>
 
-      {tab === 'title' && (
+      <div
+        id="find-book-panel-title"
+        role="tabpanel"
+        aria-labelledby="find-book-tab-title"
+        hidden={tab !== 'title'}
+      >
         <SearchTab
-          key="title"
           type="title"
           placeholder="例如：败犬"
-          results={results}
-          loading={searchLoading}
-          error={searchError}
-          hasSearched={hasSearched}
-          lastQuery={lastQuery}
-          onSearch={(v) => handleSearch('title', v)}
+          results={activeSearch === 'title' ? searchState.results : []}
+          loading={activeSearch === 'title' && searchState.loading}
+          error={activeSearch === 'title' ? searchState.error : null}
+          hasSearched={activeSearch === 'title' && searchState.hasSearched}
+          lastQuery={activeSearch === 'title' ? searchState.lastQuery : null}
+          retryAt={activeSearch === 'title' ? searchState.retryAt : null}
+          cached={activeSearch === 'title' && searchState.cached}
+          onSearch={value => searchState.search('title', value.trim())}
           onSelect={handleSelect}
-          onClear={clearSearch}
+          onClear={searchState.clear}
+        />
+      </div>
+
+      <div
+        id="find-book-panel-author"
+        role="tabpanel"
+        aria-labelledby="find-book-tab-author"
+        hidden={tab !== 'author'}
+      >
+        <SearchTab
+          type="author"
+          placeholder="例如：三上库太"
+          results={activeSearch === 'author' ? searchState.results : []}
+          loading={activeSearch === 'author' && searchState.loading}
+          error={activeSearch === 'author' ? searchState.error : null}
+          hasSearched={activeSearch === 'author' && searchState.hasSearched}
+          lastQuery={activeSearch === 'author' ? searchState.lastQuery : null}
+          retryAt={activeSearch === 'author' ? searchState.retryAt : null}
+          cached={activeSearch === 'author' && searchState.cached}
+          onSearch={value => searchState.search('author', value.trim())}
+          onSelect={handleSelect}
+          onClear={searchState.clear}
+        />
+      </div>
+
+      <div
+        id="find-book-panel-id"
+        role="tabpanel"
+        aria-labelledby="find-book-tab-id"
+        hidden={tab !== 'id'}
+      >
+        <IdTab onQuery={id => navigate(`/book/${id}`)} />
+      </div>
+    </div>
+  )
+}
+
+function CatalogResults({
+  state,
+  onSelect,
+  onRetry,
+}: {
+  state: ReturnType<typeof useCatalogStore.getState>
+  onSelect: (id: string) => void
+  onRetry: () => void
+}) {
+  const headingRef = useRef<HTMLDivElement>(null)
+  const previousPage = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!state.result) return
+    if (previousPage.current !== null && previousPage.current !== state.result.page) {
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+      headingRef.current?.scrollIntoView?.({
+        block: 'start',
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      })
+    }
+    previousPage.current = state.result.page
+  }, [state.result])
+
+  if (state.loading && !state.result) return <LoadingSpinner text="正在读取轻小说列表..." />
+
+  return (
+    <section aria-label="找书结果">
+      <div ref={headingRef} className="scroll-mt-6" />
+      {state.result?.stale && (
+        <StatusAlert type="warning" message="网络更新失败，当前显示最近缓存的找书结果" />
+      )}
+      {state.loading && state.result && (
+        <p role="status" className="mb-3 inline-flex items-center gap-2 text-xs text-apple-secondary">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-apple-border-input border-t-apple-accent" />
+          正在刷新结果
+        </p>
+      )}
+      {state.error && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-[13px] text-red-700">{state.error}</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="motion-pressable inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+          >
+            <IconRefresh aria-hidden="true" size={15} stroke={1.8} />
+            重新加载
+          </button>
+        </div>
+      )}
+
+      {state.result && state.result.books.length > 0 && (
+        <>
+          <p className="mb-3 text-xs text-apple-tertiary">
+            第 {state.result.page} 页 · 本页 {state.result.books.length} 本
+          </p>
+          <SearchResultList results={state.result.books} onSelect={onSelect} />
+        </>
+      )}
+
+      {state.result && state.result.books.length === 0 && !state.loading && (
+        <div className="flex flex-col items-center justify-center py-14 text-center">
+          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-apple-accent-light text-apple-accent">
+            <IconBookOff aria-hidden="true" size={22} stroke={1.7} />
+          </div>
+          <p className="mb-1 text-sm font-medium text-apple-secondary">当前页没有符合条件的作品</p>
+          <p className="max-w-md text-xs leading-relaxed text-apple-tertiary">
+            可以放宽筛选条件，或继续查看其他结果页
+          </p>
+        </div>
+      )}
+
+      {state.result && (
+        <Pagination
+          page={state.result.page}
+          totalPages={state.result.totalPages}
+          ariaLabel="找书分页"
+          pageHref={page => searchHref({ ...state.query, page })}
         />
       )}
-    </div>
+    </section>
   )
 }
 
@@ -140,7 +426,8 @@ function IdTab({ onQuery }: { onQuery: (id: string) => void }) {
 }
 
 function SearchTab({
-  type, placeholder, results, loading, error, hasSearched, lastQuery, onSearch, onSelect, onClear,
+  type, placeholder, results, loading, error, hasSearched, lastQuery, retryAt, cached,
+  onSearch, onSelect, onClear,
 }: {
   type: 'author' | 'title'
   placeholder: string
@@ -149,6 +436,8 @@ function SearchTab({
   error: string | null
   hasSearched: boolean
   lastQuery: string | null
+  retryAt: number | null
+  cached: boolean
   onSearch: (value: string) => void
   onSelect: (id: string) => void
   onClear: () => void
@@ -161,9 +450,29 @@ function SearchTab({
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = `search-${type}`
   const errorId = `${inputId}-error`
+  const [now, setNow] = useState(() => Date.now())
+  const cooldownSeconds = retryAt === null
+    ? 0
+    : Math.max(0, Math.ceil((retryAt - now) / 1_000))
+  const coolingDown = cooldownSeconds > 0
+
+  useEffect(() => {
+    if (lastQuery !== null) setValue(lastQuery)
+  }, [lastQuery])
+
+  useEffect(() => {
+    if (retryAt === null || retryAt <= Date.now()) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => {
+      const current = Date.now()
+      setNow(current)
+      if (current >= retryAt) window.clearInterval(timer)
+    }, 1_000)
+    return () => window.clearInterval(timer)
+  }, [retryAt])
 
   const submit = () => {
-    if (loading) return
+    if (loading || coolingDown) return
     const normalized = value.trim()
     if (!normalized) {
       setFieldError(type === 'author' ? '请输入作者名' : '请输入作品名称')
@@ -189,12 +498,11 @@ function SearchTab({
         }}
       >
         <div className="flex-1">
-          <label htmlFor={inputId} className="block text-sm text-apple-secondary mb-1">{label}</label>
+          <label htmlFor={inputId} className="mb-1 block text-sm text-apple-secondary">{label}</label>
           <input
             id={inputId}
             ref={inputRef}
-            className="w-full px-3 py-2 bg-apple-card border border-apple-border-input rounded-xl text-sm text-apple-heading
-                       focus:outline-none focus:border-apple-accent/30 focus:ring-2 focus:ring-apple-accent/10 transition-colors"
+            className="w-full rounded-xl border border-apple-border-input bg-apple-card px-3 py-2 text-sm text-apple-heading transition-colors focus:border-apple-accent/30 focus:outline-none focus:ring-2 focus:ring-apple-accent/10"
             placeholder={placeholder}
             value={value}
             maxLength={101}
@@ -214,20 +522,23 @@ function SearchTab({
         </div>
         <button
           type="submit"
-          disabled={loading}
-          className="motion-pressable inline-flex items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px]
-                     font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={loading || coolingDown}
+          className="motion-pressable inline-flex items-center gap-1.5 rounded-[24px] bg-apple-accent px-6 py-2.5 text-[13px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <IconSearch aria-hidden="true" size={16} stroke={1.8} />
-          {loading ? '查询中...' : '查询'}
+          {loading ? '查询中...' : coolingDown ? `${cooldownSeconds} 秒后重试` : '查询'}
         </button>
       </form>
 
-      {loading && <LoadingSpinner text="正在查询中..." />}
-
-      {error && (
-        <StatusAlert type="error" message={error} onDismiss={onClear} announce={false} />
+      {coolingDown && (
+        <p role="status" className="-mt-3 mb-5 text-xs text-amber-700">
+          原站限制了搜索频率，请稍后重试
+          {cached && results.length > 0 ? '，以下显示上次缓存结果' : ''}
+        </p>
       )}
+
+      {loading && <LoadingSpinner text="正在查询中..." />}
+      {error && <StatusAlert type="error" message={error} onDismiss={onClear} announce={false} />}
 
       {!loading && !error && results.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -247,11 +558,7 @@ function SearchTab({
 
       {results.length > 0 && (
         <div>
-          {lastQuery && (
-            <p className="mb-3 text-xs text-apple-tertiary">
-              “{lastQuery}”的搜索结果
-            </p>
-          )}
+          {lastQuery && <p className="mb-3 text-xs text-apple-tertiary">“{lastQuery}”的搜索结果</p>}
           <SearchResultList results={results} onSelect={onSelect} />
         </div>
       )}

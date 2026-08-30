@@ -1,11 +1,16 @@
 import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { isAbsolute, join, resolve } from 'path'
 import {
   ACTIVE_DOWNLOAD_STATUSES,
   DOWNLOAD_TASK_STATUSES,
-  type DownloadTask,
+  type DownloadTaskCore,
   type DownloadTaskStatus,
 } from '../shared/ipc-types'
+import type { BookVersionFields } from '../shared/book-types'
+import {
+  normalizeDownloadArtifactRecord,
+  type DownloadArtifactRecord,
+} from './download-artifacts'
 import { atomicWriteFile, backupInvalidFile } from './config/atomic-file'
 import { logger } from './logging/logger'
 import {
@@ -13,11 +18,18 @@ import {
   validateEnqueueDownloadInput,
 } from './ipc-validation'
 
-export const DOWNLOAD_TASK_SCHEMA_VERSION = 1
+export const DOWNLOAD_TASK_SCHEMA_VERSION = 4
+
+type DownloadTaskSchemaVersion = 1 | 2 | 3 | 4
+
+export interface PersistedDownloadTask extends DownloadTaskCore {
+  artifacts: DownloadArtifactRecord[]
+  downloadRoot: string
+}
 
 export interface PersistedDownloadState {
   revision: number
-  tasks: DownloadTask[]
+  tasks: PersistedDownloadTask[]
   legacyImportCompleted: boolean
 }
 
@@ -51,6 +63,32 @@ function optionalBoundedString(value: unknown, maxLength: number): string | null
   return normalized
 }
 
+function normalizeDownloadRoot(value: unknown, schemaVersion: DownloadTaskSchemaVersion): string | null {
+  if (schemaVersion === 1) return ''
+  if (value === '') return ''
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > 4_096
+    || !isAbsolute(value)
+    || resolve(value) !== value
+  ) return null
+  return value
+}
+
+function normalizeCompletedVersion(value: unknown): BookVersionFields | null | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value)) return null
+  const result: BookVersionFields = { updatedAt: '', latestChapter: '', status: '' }
+  for (const key of ['updatedAt', 'latestChapter', 'status'] as const) {
+    if (typeof value[key] !== 'string' || value[key].length > 2_048) return null
+    const normalized = value[key].replace(/\s+/g, ' ').trim()
+    if (normalized !== value[key]) return null
+    result[key] = normalized
+  }
+  return result
+}
+
 export function resolveDownloadTaskPath(input: {
   isPackaged: boolean
   userDataPath: string
@@ -65,7 +103,8 @@ export function resolveDownloadTaskPath(input: {
 export function normalizeStoredDownloadTask(
   value: unknown,
   mode: 'current' | 'legacy',
-): DownloadTask | null {
+  schemaVersion: DownloadTaskSchemaVersion = DOWNLOAD_TASK_SCHEMA_VERSION,
+): PersistedDownloadTask | null {
   if (!isRecord(value)) return null
 
   let id: string
@@ -100,6 +139,32 @@ export function normalizeStoredDownloadTask(
   const interrupted = mode === 'legacy' && ACTIVE_STATUSES.has(storedStatus)
   const status = interrupted ? 'interrupted' : storedStatus
   const normalizedPhase = interrupted ? '下载已中断' : phase
+  const downloadRoot = mode === 'legacy'
+    ? ''
+    : normalizeDownloadRoot(value.downloadRoot, schemaVersion)
+  if (downloadRoot === null) return null
+  let artifacts: DownloadArtifactRecord[] = []
+  if (mode === 'current' && schemaVersion >= 2) {
+    if (!Array.isArray(value.artifacts) || value.artifacts.length > 50) return null
+    const parsed = value.artifacts.map(normalizeDownloadArtifactRecord)
+    if (parsed.some(artifact => artifact === null)) return null
+    artifacts = parsed as DownloadArtifactRecord[]
+    if (new Set(artifacts.map(artifact => artifact.id)).size !== artifacts.length) return null
+  }
+
+  const completedVersion = mode === 'current' && schemaVersion >= 3
+    ? normalizeCompletedVersion(value.completedVersion)
+    : undefined
+  if (completedVersion === null) return null
+
+  let batchId: string | undefined
+  if (mode === 'current' && schemaVersion >= 4 && value.batchId !== undefined) {
+    try {
+      batchId = validateDownloadTaskId(value.batchId)
+    } catch {
+      return null
+    }
+  }
 
   return {
     id,
@@ -111,6 +176,10 @@ export function normalizeStoredDownloadTask(
     ...(warning === undefined ? {} : { warning }),
     createdAt,
     updatedAt,
+    ...(batchId === undefined ? {} : { batchId }),
+    ...(completedVersion === undefined ? {} : { completedVersion }),
+    artifacts,
+    downloadRoot,
   }
 }
 
@@ -123,7 +192,10 @@ export class DownloadTaskStore {
     try {
       const document = JSON.parse(readFileSync(this.filePath, 'utf-8')) as unknown
       if (!isRecord(document)) throw new Error('下载任务文件格式无效')
-      if (document.schemaVersion !== DOWNLOAD_TASK_SCHEMA_VERSION) {
+      if (document.schemaVersion !== 1
+        && document.schemaVersion !== 2
+        && document.schemaVersion !== 3
+        && document.schemaVersion !== DOWNLOAD_TASK_SCHEMA_VERSION) {
         throw new Error('下载任务文件版本不支持')
       }
       if (
@@ -135,18 +207,21 @@ export class DownloadTaskStore {
         throw new Error('下载任务文件格式无效')
       }
 
-      const tasks = document.tasks.map((value) => normalizeStoredDownloadTask(value, 'current'))
+      const schemaVersion = document.schemaVersion as DownloadTaskSchemaVersion
+      const tasks = document.tasks.map((value) => (
+        normalizeStoredDownloadTask(value, 'current', schemaVersion)
+      ))
       if (tasks.some((task) => task === null)) {
         throw new Error('下载任务记录格式无效')
       }
       const taskIds = new Set<string>()
-      for (const task of tasks as DownloadTask[]) {
+      for (const task of tasks as PersistedDownloadTask[]) {
         if (taskIds.has(task.id)) throw new Error('下载任务 ID 重复')
         taskIds.add(task.id)
       }
       return {
         revision: document.revision as number,
-        tasks: tasks as DownloadTask[],
+        tasks: tasks as PersistedDownloadTask[],
         legacyImportCompleted: document.legacyImportCompleted,
       }
     } catch (error) {

@@ -4,8 +4,10 @@ import HomePage from './pages/HomePage'
 import SearchPage from './pages/SearchPage'
 import DiscoverPage from './pages/DiscoverPage'
 import RankingPage from './pages/RankingPage'
+import AnnualRankingPage from './pages/AnnualRankingPage'
 import BookDetailPage from './pages/BookDetailPage'
 import DownloadHistoryPage from './pages/DownloadHistoryPage'
+import BookshelfPage from './pages/BookshelfPage'
 import ConfigPage from './pages/ConfigPage'
 import NotFoundPage from './pages/NotFoundPage'
 import ToastViewport from './components/ToastViewport'
@@ -23,7 +25,9 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
             <Route path="/discover/ranking/:type" element={<RankingPage />} />
+            <Route path="/discover/annual/:year" element={<AnnualRankingPage />} />
             <Route path="/book/:id" element={<BookDetailPage />} />
+            <Route path="/bookshelf" element={<BookshelfPage />} />
             <Route path="/download" element={<DownloadHistoryPage />} />
             <Route path="/config" element={<ConfigPage />} />
             <Route path="*" element={<NotFoundPage />} />

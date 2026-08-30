@@ -151,6 +151,91 @@ describe('WebCrawler.fetch logging', () => {
     expect(mocks.removeCookie).not.toHaveBeenCalled()
   })
 
+  it('uses the default request control when a caller does not provide one', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/index.php',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+    })
+    const beforeAttempt = vi.fn(async () => undefined)
+    const afterAttempt = vi.fn()
+    const onResponse = vi.fn()
+    const controlFactory = vi.fn(() => ({ beforeAttempt, afterAttempt, onResponse }))
+    const crawler = new WebCrawler(
+      createConfig(),
+      {},
+      undefined,
+      undefined,
+      controlFactory,
+    )
+
+    await crawler.fetch('https://www.wenku8.net/index.php')
+
+    expect(controlFactory).toHaveBeenCalledWith(
+      'document',
+      'https://www.wenku8.net/index.php',
+    )
+    expect(beforeAttempt).toHaveBeenCalledTimes(1)
+    expect(afterAttempt).toHaveBeenCalledTimes(1)
+    expect(onResponse).toHaveBeenCalledWith(expect.objectContaining({ status: 200 }))
+  })
+
+  it('prefers an explicit request control over the crawler default', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      url: 'https://www.wenku8.net/index.php',
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('<html><title>ok</title></html>')),
+    })
+    const controlFactory = vi.fn(() => ({ beforeAttempt: vi.fn(async () => undefined) }))
+    const explicitBeforeAttempt = vi.fn(async () => undefined)
+    const crawler = new WebCrawler(
+      createConfig(),
+      {},
+      undefined,
+      undefined,
+      controlFactory,
+    )
+
+    await crawler.fetch('https://www.wenku8.net/index.php', true, undefined, {
+      beforeAttempt: explicitBeforeAttempt,
+    })
+
+    expect(controlFactory).not.toHaveBeenCalled()
+    expect(explicitBeforeAttempt).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the default request control for image requests', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      arrayBuffer: vi.fn(async () => Buffer.from('image-data')),
+    })
+    const beforeAttempt = vi.fn(async () => undefined)
+    const afterAttempt = vi.fn()
+    const controlFactory = vi.fn(() => ({ beforeAttempt, afterAttempt }))
+    const crawler = new WebCrawler(
+      createConfig(),
+      {},
+      undefined,
+      undefined,
+      controlFactory,
+    )
+
+    await crawler.getImageContent('http://img.wenku8.com/image/3/3057/3057s.jpg')
+
+    expect(controlFactory).toHaveBeenCalledWith(
+      'image',
+      'https://img.wenku8.com/image/3/3057/3057s.jpg',
+    )
+    expect(beforeAttempt).toHaveBeenCalledTimes(1)
+    expect(afterAttempt).toHaveBeenCalledTimes(1)
+  })
+
   it('does not open interactive verification for ordinary document requests', async () => {
     const solveChallenge = vi.fn(async () => undefined)
     mocks.fetch.mockResolvedValue({
@@ -440,6 +525,40 @@ describe('WebCrawler.search', () => {
     await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
       message: '网站暂时无法完成搜索，请稍后重试',
       cause: expect.objectContaining({ message: '搜索页面缺少标题，可能被拦截' }),
+    })
+  })
+
+  it('returns a structured cooldown when Wenku8 rejects frequent searches', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(`
+        <html>
+          <title>搜索</title>
+          <body><div class="blockcontent">两次搜索的间隔时间不得少于 12 秒</div></body>
+        </html>
+      `) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
+      name: 'SearchCooldownError',
+      retryAfterMs: 12_000,
+    })
+  })
+
+  it('uses a bounded fallback when the search cooldown has no duration', async () => {
+    const crawler = new WebCrawler(createConfig(), {})
+    vi.spyOn(crawler, 'fetch').mockResolvedValue(
+      load(`
+        <html>
+          <title>搜索</title>
+          <body><div class="blockcontent">两次搜索的间隔时间过短</div></body>
+        </html>
+      `) as unknown as Buffer,
+    )
+
+    await expect(crawler.search('测试', 'title')).rejects.toMatchObject({
+      name: 'SearchCooldownError',
+      retryAfterMs: 10_000,
     })
   })
 })

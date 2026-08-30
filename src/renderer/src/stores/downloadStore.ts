@@ -23,15 +23,24 @@ interface DownloadState {
   setInitializationError(error: unknown): void
   downloadEpub(bookId: string, title: string, cover?: string, volumeName?: string): void
   downloadImages(bookId: string, title: string, cover?: string, volumeName?: string): void
+  downloadBatch(inputs: EnqueueDownloadInput[]): void
   cancelTask(id: string): void
+  cancelBatch(id: string): void
   retryTask(id: string): void
+  retryBatch(id: string): void
   removeTask(id: string): void
   clearCompleted(): Promise<void>
   clearHistory(): Promise<void>
 }
 
 function cloneTasks(tasks: DownloadTask[]): DownloadTask[] {
-  return tasks.map((task) => ({ ...task }))
+  return tasks.map((task) => ({
+    ...task,
+    ...(task.completedVersion === undefined
+      ? {}
+      : { completedVersion: { ...task.completedVersion } }),
+    artifacts: task.artifacts.map(artifact => ({ ...artifact })),
+  }))
 }
 
 function showStorageWarning(previous: string | undefined, snapshot: DownloadSnapshot): void {
@@ -49,7 +58,7 @@ function showTransition(event: DownloadStateEvent): void {
   if (!task) return
 
   if (transition.to === 'pending') {
-    toast.info({ title: '已加入下载队列', message: `${task.title} 将按顺序下载。` })
+    toast.success({ title: '已加入下载队列', message: `${task.title} 将按顺序下载` })
   } else if (transition.to === 'completed') {
     if (task.warning) {
       toast.warning({ title: '下载完成，但有提醒', message: task.warning })
@@ -69,6 +78,51 @@ async function runCommand(operation: () => Promise<DownloadSnapshot>): Promise<v
   try {
     const snapshot = await operation()
     useDownloadStore.getState().applySnapshot(snapshot)
+  } catch (error) {
+    toast.error(getUserFeedback(error, 'download'))
+  }
+}
+
+async function runEnqueue(
+  operation: () => ReturnType<typeof api.enqueueDownload>,
+  title: string,
+): Promise<void> {
+  try {
+    const result = await operation()
+    useDownloadStore.getState().applySnapshot(result.snapshot)
+    if (result.status === 'duplicate') {
+      toast.info({
+        title: '任务已在下载中',
+        message: `${title} 的相同下载任务不会重复加入队列`,
+      })
+    }
+  } catch (error) {
+    toast.error(getUserFeedback(error, 'download'))
+  }
+}
+
+async function runBatchEnqueue(inputs: EnqueueDownloadInput[]): Promise<void> {
+  try {
+    const result = await api.enqueueDownloadBatch(inputs)
+    useDownloadStore.getState().applySnapshot(result.snapshot)
+    const accepted = result.acceptedTaskIds.length
+    const skipped = result.skippedDuplicates.length
+    if (accepted === 0) {
+      toast.info({
+        title: '任务已在下载中',
+        message: `已跳过 ${skipped} 项重复任务`,
+      })
+    } else if (skipped > 0) {
+      toast.success({
+        title: '下载批次已加入',
+        message: `已加入 ${accepted} 项，跳过 ${skipped} 项`,
+      })
+    } else {
+      toast.success({
+        title: '下载批次已加入',
+        message: `已加入 ${accepted} 项任务`,
+      })
+    }
   } catch (error) {
     toast.error(getUserFeedback(error, 'download'))
   }
@@ -157,7 +211,7 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
       type: volumeName ? 'epub_volume' : 'epub_full',
       ...(volumeName === undefined ? {} : { volume: volumeName }),
     }
-    void runCommand(() => api.enqueueDownload(input))
+    void runEnqueue(() => api.enqueueDownload(input), title)
   },
 
   downloadImages: (bookId, title, cover, volumeName) => {
@@ -168,11 +222,15 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
       type: 'images',
       ...(volumeName === undefined ? {} : { volume: volumeName }),
     }
-    void runCommand(() => api.enqueueDownload(input))
+    void runEnqueue(() => api.enqueueDownload(input), title)
   },
 
+  downloadBatch: (inputs) => { void runBatchEnqueue(inputs) },
+
   cancelTask: (id) => { void runCommand(() => api.cancelDownload(id)) },
+  cancelBatch: (id) => { void runCommand(() => api.cancelDownloadBatch(id)) },
   retryTask: (id) => { void runCommand(() => api.retryDownload(id)) },
+  retryBatch: (id) => { void runCommand(() => api.retryDownloadBatch(id)) },
   removeTask: (id) => { void runCommand(() => api.removeDownload(id)) },
   clearCompleted: () => runCommand(() => api.clearDownloadHistory('completed')),
   clearHistory: () => {

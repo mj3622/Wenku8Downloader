@@ -1,6 +1,6 @@
 {
   "name": "wenku8-downloader",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "轻小说文库桌面下载器",
   "author": "Zhiwei Li",
   "main": "./out/main/index.js",
@@ -42,8 +42,9 @@
     "mac": {
       "category": "public.app-category.utilities",
       "minimumSystemVersion": "13.0",
+      "identity": null,
       "hardenedRuntime": true,
-      "notarize": true,
+      "notarize": false,
       "target": [
         {
           "target": "dmg",
@@ -56,6 +57,7 @@
       "artifactName": "Wenku8Downloader-${version}-macOS-${arch}.${ext}"
     },
     "win": {
+      "signExecutable": false,
       "target": [
         {
           "target": "portable",

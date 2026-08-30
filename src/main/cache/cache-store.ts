@@ -30,8 +30,10 @@ export interface CacheAddress {
   sourceKey: string
 }
 
+export type SharedCacheNamespace = 'discovery' | 'catalog' | 'bookshelf'
+
 export interface SharedCacheAddress {
-  namespace: 'discovery'
+  namespace: SharedCacheNamespace
   sourceKey: string
 }
 
@@ -287,19 +289,19 @@ export class CacheStore {
       try {
         const envelope = JSON.parse(await readFile(targetPath, 'utf8')) as unknown
         if (!isRecord(envelope) || envelope.schemaVersion !== CACHE_SCHEMA_VERSION) {
-          await this.removeCorrupt([targetPath], 'discovery')
+          await this.removeCorrupt([targetPath], address.namespace)
           return null
         }
         const parsed = parse(envelope.value)
         if (parsed === null) {
-          await this.removeCorrupt([targetPath], 'discovery')
+          await this.removeCorrupt([targetPath], address.namespace)
           return null
         }
         await this.touch(targetPath)
         return parsed
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-          await this.removeCorrupt([targetPath], 'discovery')
+          await this.removeCorrupt([targetPath], address.namespace)
         }
         return null
       }
@@ -618,7 +620,9 @@ export class CacheStore {
 
   private resolveSharedAddress(address: SharedCacheAddress): string | null {
     if (
-      address.namespace !== 'discovery'
+      (address.namespace !== 'discovery'
+        && address.namespace !== 'catalog'
+        && address.namespace !== 'bookshelf')
       || !address.sourceKey
       || address.sourceKey.length > 2_048
     ) return null
@@ -1126,7 +1130,7 @@ export class CacheStore {
     }
   }
 
-  private async removeCorrupt(paths: string[], kind: CacheEntryKind | 'discovery'): Promise<void> {
+  private async removeCorrupt(paths: string[], kind: CacheEntryKind | SharedCacheNamespace): Promise<void> {
     await Promise.all(paths.map(path => this.removePath(path).catch(() => undefined)))
     await this.refreshUsage()
     logger.warn('cache.corrupt', '已忽略并清理损坏缓存', { cacheType: kind })

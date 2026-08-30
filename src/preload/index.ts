@@ -7,8 +7,12 @@ import type {
 } from '../shared/config-types'
 import type {
   CookieProgress,
+  AppApi,
   BookLoadOptions,
+  BookshelfApi,
   CacheApi,
+  CatalogApi,
+  CatalogQuery,
   DiscoveryApi,
   DownloadApi,
   DownloadHistoryScope,
@@ -18,6 +22,7 @@ import type {
   OpenFolderTarget,
   RankingType,
   RendererErrorReport,
+  SearchApi,
   VolumeCoverSnapshot,
 } from '../shared/ipc-types'
 
@@ -36,16 +41,26 @@ const downloadApi: DownloadApi = {
   getDownloadSnapshot: () => ipcRenderer.invoke('download:get-snapshot'),
   enqueueDownload: (input: EnqueueDownloadInput) =>
     ipcRenderer.invoke('download:enqueue', input),
+  enqueueDownloadBatch: (inputs: EnqueueDownloadInput[]) =>
+    ipcRenderer.invoke('download:enqueue-batch', { inputs }),
   cancelDownload: (taskId: string) =>
     ipcRenderer.invoke('download:cancel', { taskId }),
+  cancelDownloadBatch: (batchId: string) =>
+    ipcRenderer.invoke('download:cancel-batch', { batchId }),
   retryDownload: (taskId: string) =>
     ipcRenderer.invoke('download:retry', { taskId }),
+  retryDownloadBatch: (batchId: string) =>
+    ipcRenderer.invoke('download:retry-batch', { batchId }),
   removeDownload: (taskId: string) =>
     ipcRenderer.invoke('download:remove', { taskId }),
   clearDownloadHistory: (scope: DownloadHistoryScope) =>
     ipcRenderer.invoke('download:clear-history', { scope }),
   importLegacyDownloadHistory: (tasks: unknown[]) =>
     ipcRenderer.invoke('download:import-legacy-history', { tasks }),
+  openDownloadArtifact: (taskId: string, artifactId: string) =>
+    ipcRenderer.invoke('download:artifact-open', { taskId, artifactId }),
+  revealDownloadArtifact: (taskId: string, artifactId: string) =>
+    ipcRenderer.invoke('download:artifact-reveal', { taskId, artifactId }),
   onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, event: DownloadStateEvent) => callback(event)
     ipcRenderer.on('download:state-changed', listener)
@@ -57,6 +72,12 @@ const cacheApi: CacheApi = {
   clearCache: () => ipcRenderer.invoke('cache:clear'),
 }
 
+const catalogApi: CatalogApi = {
+  getCatalog: (query: CatalogQuery, refresh = false) => (
+    ipcRenderer.invoke('catalog:get', { query, refresh })
+  ),
+}
+
 const discoveryApi: DiscoveryApi = {
   getDiscoveryHome: (refresh = false) => (
     ipcRenderer.invoke('discovery:get-home', { refresh })
@@ -64,18 +85,38 @@ const discoveryApi: DiscoveryApi = {
   getRanking: (type: RankingType, page: number, refresh = false) => (
     ipcRenderer.invoke('discovery:get-ranking', { type, page, refresh })
   ),
+  getAnnualRanking: (year: number, refresh = false) => (
+    ipcRenderer.invoke('discovery:get-annual-ranking', { year, refresh })
+  ),
+}
+
+const appApi: AppApi = {
+  getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+  checkForUpdates: (refresh = false) => ipcRenderer.invoke('app:check-update', { refresh }),
+}
+
+const searchApi: SearchApi = {
+  searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
+  searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
+}
+
+const bookshelfApi: BookshelfApi = {
+  getBookshelf: (refresh = false) => ipcRenderer.invoke('bookshelf:get', { refresh }),
+  addBookToBookshelf: (bookId: string) => ipcRenderer.invoke('bookshelf:add', { bookId }),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
 
+  ...appApi,
   ...configApi,
   ...downloadApi,
   ...cacheApi,
+  ...catalogApi,
   ...discoveryApi,
+  ...searchApi,
+  ...bookshelfApi,
   autoGetCookie: (operationId: string) => ipcRenderer.invoke('cookie:auto', { operationId }),
-  searchAuthor: (query: string) => ipcRenderer.invoke('search:author', { query }),
-  searchTitle: (query: string) => ipcRenderer.invoke('search:title', { query }),
   getBook: (bookId: string, options?: BookLoadOptions) => ipcRenderer.invoke('book:get', {
     bookId,
     ...(options?.revalidate === undefined ? {} : { revalidate: options.revalidate }),

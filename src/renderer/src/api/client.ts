@@ -5,8 +5,13 @@ import type {
 } from '../../../shared/config-types'
 import type {
   CookieProgress,
+  AnnualRankingPage,
+  AppInfo,
   BookLoadOptions,
+  BookshelfPage,
   CacheClearResult,
+  CatalogPage,
+  CatalogQuery,
   DiscoveryHome,
   DownloadHistoryScope,
   DownloadStateEvent,
@@ -15,8 +20,11 @@ import type {
   OpenFolderTarget,
   RankingPage,
   RankingType,
+  UpdateCheckResult,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
+export type { BookInfo } from '../../../shared/book-types'
+export type { SearchResult } from '../../../shared/ipc-types'
 import {
   toUserFacingError,
   type FeedbackContext,
@@ -34,6 +42,12 @@ async function invoke<T>(
 }
 
 export const api = {
+  // 应用
+  getAppInfo: (): Promise<AppInfo> => invoke('app-info', () => window.electronAPI.getAppInfo()),
+  checkForUpdates: (refresh = false): Promise<UpdateCheckResult> => (
+    invoke('update-check', () => window.electronAPI.checkForUpdates(refresh))
+  ),
+
   // 配置
   getConfig: (context: FeedbackContext = 'config-load') =>
     invoke(context, () => window.electronAPI.getConfig()),
@@ -57,12 +71,20 @@ export const api = {
   searchAuthor: (q: string) => invoke('search', () => window.electronAPI.searchAuthor(q)),
   searchTitle: (q: string) => invoke('search', () => window.electronAPI.searchTitle(q)),
 
+  // 找书
+  getCatalog: (query: CatalogQuery, refresh = false): Promise<CatalogPage> => (
+    invoke('catalog', () => window.electronAPI.getCatalog(query, refresh))
+  ),
+
   // 发现
   getDiscoveryHome: (refresh = false): Promise<DiscoveryHome> => (
     invoke('discovery', () => window.electronAPI.getDiscoveryHome(refresh))
   ),
   getRanking: (type: RankingType, page: number, refresh = false): Promise<RankingPage> => (
     invoke('discovery', () => window.electronAPI.getRanking(type, page, refresh))
+  ),
+  getAnnualRanking: (year: number, refresh = false): Promise<AnnualRankingPage> => (
+    invoke('discovery', () => window.electronAPI.getAnnualRanking(year, refresh))
   ),
 
   // 书籍
@@ -73,21 +95,39 @@ export const api = {
   getVolumeCovers: (id: string, volumes: string[]): Promise<VolumeCoverSnapshot> =>
     invoke('book', () => window.electronAPI.getVolumeCovers(id, volumes)),
 
+  // 书架
+  getBookshelf: (refresh = false): Promise<BookshelfPage> => (
+    invoke('bookshelf', () => window.electronAPI.getBookshelf(refresh))
+  ),
+  addBookToBookshelf: (bookId: string): Promise<BookshelfPage> => (
+    invoke('bookshelf-add', () => window.electronAPI.addBookToBookshelf(bookId))
+  ),
+
   // 下载
   getDownloadSnapshot: () =>
     invoke('download', () => window.electronAPI.getDownloadSnapshot()),
   enqueueDownload: (input: EnqueueDownloadInput) =>
     invoke('download', () => window.electronAPI.enqueueDownload(input)),
+  enqueueDownloadBatch: (inputs: EnqueueDownloadInput[]) =>
+    invoke('download', () => window.electronAPI.enqueueDownloadBatch(inputs)),
   cancelDownload: (taskId: string) =>
     invoke('download', () => window.electronAPI.cancelDownload(taskId)),
+  cancelDownloadBatch: (batchId: string) =>
+    invoke('download', () => window.electronAPI.cancelDownloadBatch(batchId)),
   retryDownload: (taskId: string) =>
     invoke('download', () => window.electronAPI.retryDownload(taskId)),
+  retryDownloadBatch: (batchId: string) =>
+    invoke('download', () => window.electronAPI.retryDownloadBatch(batchId)),
   removeDownload: (taskId: string) =>
     invoke('download', () => window.electronAPI.removeDownload(taskId)),
   clearDownloadHistory: (scope: DownloadHistoryScope) =>
     invoke('download', () => window.electronAPI.clearDownloadHistory(scope)),
   importLegacyDownloadHistory: (tasks: unknown[]) =>
     invoke('download', () => window.electronAPI.importLegacyDownloadHistory(tasks)),
+  openDownloadArtifact: (taskId: string, artifactId: string) =>
+    invoke('download-artifact', () => window.electronAPI.openDownloadArtifact(taskId, artifactId)),
+  revealDownloadArtifact: (taskId: string, artifactId: string) =>
+    invoke('download-artifact', () => window.electronAPI.revealDownloadArtifact(taskId, artifactId)),
   onDownloadStateChanged: (callback: (event: DownloadStateEvent) => void) =>
     window.electronAPI.onDownloadStateChanged(callback),
 
@@ -106,25 +146,6 @@ export const api = {
     invoke('select-folder', () => window.electronAPI.selectFolder()),
   openExternal: (url: string) =>
     invoke('open-external', () => window.electronAPI.openExternal(url)),
-}
-
-export type SearchResult = {
-  title: string
-  cover: string
-  id: string
-  author?: string
-  status?: string
-  updateTime?: string
-  wordCount?: string
-  isAnimated?: boolean
-  tags?: string
-  desc?: string
-}
-
-export type BookInfo = {
-  book_id: string
-  basic_info: Record<string, string>
-  volumes: Record<string, { name: string; link: string }[]>
 }
 
 export default api

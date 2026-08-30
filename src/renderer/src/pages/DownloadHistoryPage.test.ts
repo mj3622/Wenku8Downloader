@@ -10,6 +10,8 @@ import { api } from '../api/client'
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   openFolder: vi.fn(),
+  openDownloadArtifact: vi.fn(),
+  revealDownloadArtifact: vi.fn(),
   useDownloadStore: vi.fn(),
 }))
 
@@ -21,6 +23,8 @@ vi.mock('../api/client', () => ({
   api: {
     getConfig: mocks.getConfig,
     openFolder: mocks.openFolder,
+    openDownloadArtifact: mocks.openDownloadArtifact,
+    revealDownloadArtifact: mocks.revealDownloadArtifact,
   },
 }))
 
@@ -129,7 +133,7 @@ describe('DownloadHistoryPage', () => {
     await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
 
     const searchLink = container.querySelector<HTMLAnchorElement>('a[href="#/search"]')
-    expect(searchLink?.textContent).toContain('检索作品')
+    expect(searchLink?.textContent).toContain('前往找书')
   })
 
   it('formats existing task titles with the current download setting', async () => {
@@ -169,6 +173,91 @@ describe('DownloadHistoryPage', () => {
     })
     expect(container.textContent).toContain('败北女角太多了！')
     expect(container.textContent).not.toContain('败犬女主太多了！')
+  })
+
+  it('opens exact artifacts and falls back when a saved target is unavailable', async () => {
+    const actions = {
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+    }
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [
+        {
+          id: 'dl-artifact-file',
+          bookId: '3057',
+          title: '测试 EPUB',
+          type: 'epub_full',
+          status: 'completed',
+          progress: 100,
+          createdAt: Date.now(),
+          artifacts: [{
+            id: 'primary',
+            name: '3057_测试作品.epub',
+            kind: 'file',
+            available: true,
+          }, {
+            id: 'illustrations',
+            name: '3057_测试作品插图',
+            kind: 'directory',
+            available: true,
+          }],
+        },
+        {
+          id: 'dl-artifact-missing',
+          bookId: '3058',
+          title: '测试插图',
+          type: 'images',
+          status: 'completed',
+          progress: 100,
+          createdAt: Date.now(),
+          artifacts: [{
+            id: 'primary',
+            name: '3058_测试插图',
+            kind: 'directory',
+            available: false,
+          }],
+        },
+      ],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      ...actions,
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+    const open = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 3057_测试作品.epub"]',
+    )
+    const reveal = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="在文件夹中显示 3057_测试作品.epub"]',
+    )
+    await act(async () => {
+      open?.click()
+      reveal?.click()
+    })
+
+    expect(mocks.openDownloadArtifact).toHaveBeenCalledWith('dl-artifact-file', 'primary')
+    expect(mocks.revealDownloadArtifact).toHaveBeenCalledWith('dl-artifact-file', 'primary')
+    const openSecond = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 3057_测试作品插图"]',
+    )
+    await act(async () => openSecond?.click())
+    expect(mocks.openDownloadArtifact).toHaveBeenCalledWith(
+      'dl-artifact-file',
+      'illustrations',
+    )
+    expect(container.textContent).toContain('文件已移动或删除')
+    const fallback = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="打开 测试插图 的下载目录"]',
+    )
+    await act(async () => fallback?.click())
+    expect(mocks.openFolder).toHaveBeenCalledWith('pics')
   })
 
   it('places history clearing actions in the page header', async () => {
@@ -384,7 +473,7 @@ describe('DownloadHistoryPage', () => {
       mountedRoot?.render(createElement(DownloadHistoryPage))
     })
     const openButton = container.querySelector<HTMLButtonElement>(
-      'button[title="打开所在文件夹"]',
+      'button[title="打开下载目录"]',
     )
     expect(openButton).not.toBeNull()
 
@@ -563,5 +652,110 @@ describe('DownloadHistoryPage', () => {
     expect(retryButtons).toHaveLength(2)
     await act(async () => retryButtons[1].click())
     expect(retryTask).toHaveBeenCalledWith('interrupted-task')
+  })
+
+  it('groups completed batch tasks with equal-weight progress and collapsed details', async () => {
+    const actions = {
+      removeTask: vi.fn(),
+      clearCompleted: vi.fn(),
+      clearHistory: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      retryBatch: vi.fn(),
+      cancelBatch: vi.fn(),
+    }
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: ['第一卷', '第二卷'].map((volume, index) => ({
+        id: `batch-completed-${index}`,
+        batchId: 'batch-completed',
+        bookId: '3057',
+        title: '批次测试作品',
+        type: 'epub_volume' as const,
+        volume,
+        status: 'completed' as const,
+        progress: 100,
+        createdAt: 1000 + index,
+        updatedAt: 2000 + index,
+        artifacts: index === 0 ? [{
+          id: 'primary', name: `${volume}.epub`, kind: 'file' as const, available: true,
+        }] : [],
+      })),
+      initialized: true,
+      loading: false,
+      error: undefined,
+      ...actions,
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+
+    expect(container.textContent).toContain('批次测试作品')
+    expect(container.textContent).toContain('分卷 EPUB · 2 卷')
+    expect(container.textContent).toContain('100%')
+    expect(container.textContent).not.toContain('第一卷')
+
+    const details = [...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('详情'))
+    await act(async () => details?.click())
+    expect(container.textContent).toContain('第一卷')
+    expect(container.textContent).toContain('第二卷')
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="打开 第一卷.epub"]')?.click()
+      container?.querySelector<HTMLButtonElement>('button[aria-label="在文件夹中显示 第一卷.epub"]')?.click()
+      container?.querySelector<HTMLButtonElement>('button[aria-label="打开 第二卷 的下载目录"]')?.click()
+    })
+    expect(mocks.openDownloadArtifact).toHaveBeenCalledWith('batch-completed-0', 'primary')
+    expect(mocks.revealDownloadArtifact).toHaveBeenCalledWith('batch-completed-0', 'primary')
+    expect(mocks.openFolder).toHaveBeenCalledWith('novels')
+  })
+
+  it('auto-expands problem batches and preserves group and item controls', async () => {
+    const cancelBatch = vi.fn()
+    const retryBatch = vi.fn()
+    const cancelTask = vi.fn()
+    const retryTask = vi.fn()
+    mocks.useDownloadStore.mockReturnValue({
+      tasks: [{
+        id: 'batch-failed', batchId: 'problem-batch', bookId: '3057', title: '问题批次',
+        type: 'epub_volume', volume: '失败卷', status: 'failed', progress: 25,
+        error: 'Error: IPC failed', createdAt: 1, updatedAt: 2, artifacts: [],
+      }, {
+        id: 'batch-active', batchId: 'problem-batch', bookId: '3057', title: '问题批次',
+        type: 'epub_volume', volume: '下载卷', status: 'downloading', progress: 75,
+        phase: '正在下载正文', createdAt: 1, updatedAt: 2, artifacts: [],
+      }],
+      initialized: true,
+      loading: false,
+      error: undefined,
+      removeTask: vi.fn(), clearCompleted: vi.fn(), clearHistory: vi.fn(),
+      retryTask, cancelTask, retryBatch, cancelBatch,
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mountedRoot = createRoot(container)
+
+    await act(async () => mountedRoot?.render(createElement(DownloadHistoryPage)))
+
+    expect(container.textContent).toContain('50%')
+    expect(container.textContent).toContain('已完成 0')
+    expect(container.textContent).toContain('进行中 1')
+    expect(container.textContent).toContain('失败 1')
+    expect(container.textContent).toContain('失败卷')
+    expect(container.textContent).toContain('下载未能完成，请检查网络和下载设置后重试。')
+    expect(container.textContent).not.toContain('IPC')
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="取消 问题批次 下载批次"]')?.click()
+      container?.querySelector<HTMLButtonElement>('button[aria-label="重试 问题批次 未完成下载"]')?.click()
+      container?.querySelector<HTMLButtonElement>('button[aria-label="取消 下载卷 下载"]')?.click()
+      container?.querySelector<HTMLButtonElement>('button[aria-label="重试 失败卷 下载"]')?.click()
+    })
+    expect(cancelBatch).toHaveBeenCalledWith('problem-batch')
+    expect(retryBatch).toHaveBeenCalledWith('problem-batch')
+    expect(cancelTask).toHaveBeenCalledWith('batch-active')
+    expect(retryTask).toHaveBeenCalledWith('batch-failed')
   })
 })

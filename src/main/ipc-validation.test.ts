@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   validateBookId,
+  validateAnnualRankingPayload,
+  validateCatalogPayload,
+  validateDownloadArtifactPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateDiscoveryRankingPayload,
   validateDiscoveryHomePayload,
+  validateDownloadBatchPayload,
   validateEnqueueDownloadInput,
+  validateEnqueueDownloadBatchPayload,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
@@ -58,6 +63,25 @@ describe('IPC validation', () => {
     expect(() => validateDownloadTaskId('legacy-1')).toThrow('下载任务')
   })
 
+  it('accepts only task and artifact identifiers for artifact actions', () => {
+    expect(validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+    })).toEqual({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+    })
+    expect(() => validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: '../secret',
+    })).toThrow('下载产物请求')
+    expect(() => validateDownloadArtifactPayload({
+      taskId: '550e8400-e29b-41d4-a716-446655440000',
+      artifactId: 'primary',
+      path: '/tmp/private',
+    })).toThrow('下载产物请求')
+  })
+
   it('validates and normalizes download enqueue input', () => {
     expect(validateEnqueueDownloadInput({
       bookId: '3057',
@@ -81,6 +105,29 @@ describe('IPC validation', () => {
       title: '测试作品',
       type: 'epub_volume',
     })).toThrow('分卷')
+  })
+
+  it('accepts 1 to 100 batch items and rejects renderer-controlled batch fields', () => {
+    const item = {
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }
+    expect(validateEnqueueDownloadBatchPayload({ inputs: [item] })).toEqual([item])
+    expect(validateEnqueueDownloadBatchPayload({
+      inputs: Array.from({ length: 100 }, () => item),
+    })).toHaveLength(100)
+    expect(() => validateEnqueueDownloadBatchPayload({ inputs: [] })).toThrow('1 到 100')
+    expect(() => validateEnqueueDownloadBatchPayload({
+      inputs: [{ ...item, batchId: '550e8400-e29b-41d4-a716-446655440000' }],
+    })).toThrow('批次任务格式')
+    expect(() => validateEnqueueDownloadBatchPayload({ inputs: [item], url: 'https://example.com' }))
+      .toThrow('批次')
+  })
+
+  it('accepts only a bounded batch ID for batch commands', () => {
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+    expect(validateDownloadBatchPayload({ batchId })).toEqual({ batchId })
+    expect(() => validateDownloadBatchPayload({ batchId, taskId: batchId }))
+      .toThrow('批次请求格式')
   })
 
   it('rejects malformed download enqueue fields', () => {
@@ -108,7 +155,6 @@ describe('IPC validation', () => {
       type: 'monthvisit',
       page: 3,
       refresh: true,
-      ignored: 'value',
     })).toEqual({ type: 'monthvisit', page: 3, refresh: true })
 
     expect(validateDiscoveryRankingPayload({ type: 'allvisit', page: 1 }))
@@ -119,7 +165,59 @@ describe('IPC validation', () => {
     expect(validateDiscoveryHomePayload({})).toEqual({ refresh: false })
     expect(validateDiscoveryHomePayload({ refresh: true })).toEqual({ refresh: true })
     expect(() => validateDiscoveryHomePayload({ refresh: 'yes' })).toThrow('发现页')
+    expect(() => validateDiscoveryHomePayload({ refresh: true, url: 'https://example.com' }))
+      .toThrow('发现页')
     expect(() => validateDiscoveryHomePayload(null)).toThrow('发现页')
+  })
+
+  it('accepts only configured annual ranking years and fields', () => {
+    expect(validateAnnualRankingPayload({ year: 2005 })).toEqual({ year: 2005, refresh: false })
+    expect(validateAnnualRankingPayload({ year: 2026, refresh: true }))
+      .toEqual({ year: 2026, refresh: true })
+    expect(() => validateAnnualRankingPayload({ year: 2004 })).toThrow('年度榜单')
+    expect(() => validateAnnualRankingPayload({ year: 2027 })).toThrow('年度榜单')
+    expect(() => validateAnnualRankingPayload({ year: 2026, next: 2025 })).toThrow('年度榜单')
+  })
+
+  it('validates catalog queries field by field and rejects unknown input', () => {
+    expect(validateCatalogPayload({
+      query: {
+        publisher: '10',
+        initial: 'A',
+        status: 'completed',
+        animation: 'all',
+        sort: 'lastupdate',
+        page: 2,
+      },
+      refresh: true,
+    })).toEqual({
+      query: {
+        publisher: '10',
+        initial: 'A',
+        status: 'completed',
+        animation: 'all',
+        sort: 'lastupdate',
+        page: 2,
+      },
+      refresh: true,
+    })
+
+    expect(() => validateCatalogPayload({
+      query: {
+        status: 'all', animation: 'all', sort: 'lastupdate', page: 1, url: 'file:///tmp',
+      },
+    })).toThrow('找书请求格式无效')
+    expect(() => validateCatalogPayload({
+      query: { status: 'all', animation: 'all', sort: 'lastupdate', page: 501 },
+    })).toThrow('找书页码无效')
+    expect(() => validateCatalogPayload({
+      query: { tag: '不存在', status: 'all', animation: 'all', sort: 'lastupdate', page: 1 },
+    })).toThrow('标签筛选无效')
+    expect(() => validateCatalogPayload({
+      query: {
+        tag: '校园', publisher: '1', status: 'all', animation: 'all', sort: 'lastupdate', page: 1,
+      },
+    })).toThrow('标签不能与出版社或首字母同时筛选')
   })
 
   it.each([
@@ -128,6 +226,7 @@ describe('IPC validation', () => {
     { type: 'allvisit', page: 1.5 },
     { type: 'allvisit', page: 10_001 },
     { type: 'allvisit', page: 1, refresh: 'yes' },
+    { type: 'allvisit', page: 1, ignored: true },
     null,
   ])('rejects malformed discovery ranking payloads %#', (input) => {
     expect(() => validateDiscoveryRankingPayload(input)).toThrow('榜单')

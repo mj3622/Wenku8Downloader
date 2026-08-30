@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DownloadTask } from '../../shared/ipc-types'
 
 const logMocks = vi.hoisted(() => ({ error: vi.fn() }))
 
@@ -21,6 +20,7 @@ import {
   DownloadTaskStore,
   normalizeStoredDownloadTask,
   resolveDownloadTaskPath,
+  type PersistedDownloadTask,
 } from '../download-task-store'
 
 const tempRoots: string[] = []
@@ -33,7 +33,7 @@ async function createTempPath(): Promise<string> {
   return filePath
 }
 
-function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
+function task(overrides: Partial<PersistedDownloadTask> = {}): PersistedDownloadTask {
   return {
     id: '123e4567-e89b-42d3-a456-426614174000',
     bookId: '100',
@@ -44,6 +44,8 @@ function task(overrides: Partial<DownloadTask> = {}): DownloadTask {
     phase: '下载完成',
     createdAt: 1000,
     updatedAt: 2000,
+    artifacts: [],
+    downloadRoot: '/downloads',
     ...overrides,
   }
 }
@@ -74,7 +76,19 @@ describe('resolveDownloadTaskPath', () => {
 describe('DownloadTaskStore', () => {
   it('round-trips a versioned download snapshot atomically', async () => {
     const filePath = await createTempPath()
-    const completedTask = task()
+    const completedTask = task({
+      batchId: '223e4567-e89b-42d3-a456-426614174000',
+      completedVersion: {
+        updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
+      },
+      artifacts: [{
+        id: 'primary',
+        name: 'book.epub',
+        kind: 'file',
+        path: '/downloads/novels/book.epub',
+        rootPath: '/downloads',
+      }],
+    })
     const store = new DownloadTaskStore(filePath)
 
     store.save({ revision: 3, tasks: [completedTask], legacyImportCompleted: true })
@@ -98,6 +112,70 @@ describe('DownloadTaskStore', () => {
     })
   })
 
+  it('migrates a v1 state in place without backing up or dropping tasks', async () => {
+    const filePath = await createTempPath()
+    const legacyTask = task()
+    const v1Task: Record<string, unknown> = { ...legacyTask }
+    delete v1Task.artifacts
+    delete v1Task.downloadRoot
+    const migratedTask = { ...legacyTask, downloadRoot: '' }
+    writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 1,
+      revision: 7,
+      tasks: [v1Task],
+      legacyImportCompleted: true,
+    }))
+
+    const store = new DownloadTaskStore(filePath)
+    const migrated = store.load()
+    expect(migrated).toEqual({
+      revision: 7,
+      tasks: [migratedTask],
+      legacyImportCompleted: true,
+    })
+    expect(existsSync(filePath)).toBe(true)
+    expect(readdirSync(dirname(filePath)).some(name => name.includes('.invalid-'))).toBe(false)
+    store.save(migrated)
+    expect(JSON.parse(readFileSync(filePath, 'utf-8')).schemaVersion)
+      .toBe(DOWNLOAD_TASK_SCHEMA_VERSION)
+  })
+
+  it('migrates v2 artifacts without inventing completed versions or batches', async () => {
+    const filePath = await createTempPath()
+    const legacyTask = task({
+      artifacts: [{
+        id: 'primary', name: 'book.epub', kind: 'file',
+        path: '/downloads/novels/book.epub', rootPath: '/downloads',
+      }],
+    })
+    writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 2,
+      revision: 2,
+      tasks: [legacyTask],
+      legacyImportCompleted: true,
+    }))
+
+    expect(new DownloadTaskStore(filePath).load().tasks[0]).toEqual(legacyTask)
+  })
+
+  it('migrates v3 completed versions while leaving batch IDs empty', async () => {
+    const filePath = await createTempPath()
+    const legacyTask = task({
+      completedVersion: {
+        updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
+      },
+    })
+    writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 3,
+      revision: 3,
+      tasks: [legacyTask],
+      legacyImportCompleted: true,
+    }))
+
+    expect(new DownloadTaskStore(filePath).load().tasks[0]).toEqual(legacyTask)
+    expect(new DownloadTaskStore(filePath).load().tasks[0].batchId).toBeUndefined()
+  })
+
   it('backs up invalid JSON and returns an empty state', async () => {
     const filePath = await createTempPath()
     writeFileSync(filePath, '{invalid', { flag: 'w' })
@@ -117,6 +195,36 @@ describe('DownloadTaskStore', () => {
       schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
       revision: 0,
       tasks: [task({ bookId: '../invalid' })],
+      legacyImportCompleted: false,
+    },
+    {
+      schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
+      revision: 0,
+      tasks: [task({ batchId: 'renderer-controlled' })],
+      legacyImportCompleted: false,
+    },
+    {
+      schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
+      revision: 0,
+      tasks: [task({
+        completedVersion: {
+          updatedAt: ' 2026-08-29 ', latestChapter: '第一章', status: '连载',
+        },
+      })],
+      legacyImportCompleted: false,
+    },
+    {
+      schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
+      revision: 0,
+      tasks: [task({
+        artifacts: [{
+          id: 'primary',
+          name: 'book.epub',
+          kind: 'file',
+          path: '/outside/book.epub',
+          rootPath: '/downloads',
+        }],
+      })],
       legacyImportCompleted: false,
     },
     {
@@ -178,6 +286,8 @@ describe('normalizeStoredDownloadTask', () => {
       phase: '下载已中断',
       createdAt: 1234,
       updatedAt: 1234,
+      artifacts: [],
+      downloadRoot: '',
     })
   })
 
@@ -186,7 +296,7 @@ describe('normalizeStoredDownloadTask', () => {
     expect(values
       .map((value) => normalizeStoredDownloadTask(value, 'legacy'))
       .filter(Boolean)).toEqual([
-      task({ id: 'dl-1720000000000-2' }),
+      task({ id: 'dl-1720000000000-2', downloadRoot: '' }),
     ])
   })
 })

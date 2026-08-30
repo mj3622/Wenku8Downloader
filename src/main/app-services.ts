@@ -1,4 +1,4 @@
-import { app, session, type Session } from 'electron'
+import { app, net, session, type Session } from 'electron'
 import { Book } from './book'
 import { BookService } from './book-service'
 import { ConfigService } from './config/config-service'
@@ -12,7 +12,10 @@ import {
   type DownloadExecutorBook,
 } from './download-executor'
 import { DownloadManager } from './download-manager'
-import { sharedDownloadRateLimiter } from './download-rate-limiter'
+import {
+  sharedDownloadRateLimiter,
+  type WenkuRequestPriority,
+} from './download-rate-limiter'
 import { DownloadTaskStore, resolveDownloadTaskPath } from './download-task-store'
 import { resolveDownloadRoot, selectVolumeCoverUrl } from './downloader'
 import { configureLogger, logger } from './logging/logger'
@@ -29,12 +32,24 @@ import { DiscoveryCacheRepository } from './discovery-cache-repository'
 import { DiscoveryService } from './discovery-service'
 import { WenkuDiscoverySource } from './discovery-source'
 import { ElectronCloudflareChallengeSolver } from './cloudflare-challenge'
+import { SearchService } from './search-service'
+import { CatalogCacheRepository } from './catalog-cache-repository'
+import { CatalogService } from './catalog-service'
+import { WenkuCatalogSource } from './catalog-source'
+import { BookshelfCacheRepository } from './bookshelf-cache-repository'
+import { BookshelfService } from './bookshelf-service'
+import { WenkuBookshelfSource } from './bookshelf-source'
+import { UpdateCheckService } from './update-check-service'
 
 export interface AppServices {
   networkSession: Session
   config: ConfigService
   crawler: WebCrawler
+  search: SearchService
+  catalog: CatalogService
   discovery: DiscoveryService
+  bookshelf: BookshelfService
+  updates: UpdateCheckService
   books: BookService
   downloads: DownloadManager
   initializeCache(): Promise<void>
@@ -55,6 +70,7 @@ function createDownloadBookView(
     baseChapterUrl: book.baseChapterUrl,
     volumes: book.volumes,
     pictureUrls: book.pictureUrls,
+    versionFields: book.versionFields,
     basicInfo: book.basicInfo,
     getFormattedTitle: (format) => book.getFormattedTitle(format),
     getChapterImageUrls: (volumeName, signal) => (
@@ -85,11 +101,25 @@ export function createAppServices(): AppServices {
   const cloudflareChallenge = new ElectronCloudflareChallengeSolver({
     networkSession: wenkuSession,
   })
+  const createControlFactory = (
+    priority: WenkuRequestPriority,
+    onThrottleWait?: (waitMs: number) => void,
+  ) => (
+    (kind, url) => sharedDownloadRateLimiter.createRequestControl(
+      kind,
+      url,
+      {
+        priority,
+        ...(onThrottleWait ? { onThrottleWait } : {}),
+      },
+    )
+  ) satisfies CrawlerRequestControlFactory
   const crawler = new WebCrawler(
     config,
     undefined,
     cloudflareChallenge,
     wenkuSession,
+    createControlFactory('interactive'),
   )
   const environment = {
     isPackaged: app.isPackaged,
@@ -104,22 +134,21 @@ export function createAppServices(): AppServices {
   const bookCache = new BookCacheRepository(cacheStore)
   const assetCache = new DownloadAssetCache(cacheStore)
   const discovery = new DiscoveryService({
-    source: new WenkuDiscoverySource(crawler),
+    source: new WenkuDiscoverySource(crawler, createControlFactory('background')),
+    refreshSource: new WenkuDiscoverySource(crawler, createControlFactory('interactive')),
     cache: new DiscoveryCacheRepository(cacheStore),
   })
-  const createControlFactory = (onThrottleWait?: (waitMs: number) => void) => (
-    (kind, url) => sharedDownloadRateLimiter.createRequestControl(
-      kind,
-      url,
-      onThrottleWait ? { onThrottleWait } : {},
-    )
-  ) satisfies CrawlerRequestControlFactory
+  const search = new SearchService(crawler)
+  const catalog = new CatalogService({
+    source: new WenkuCatalogSource(crawler, createControlFactory('interactive')),
+    cache: new CatalogCacheRepository(cacheStore),
+  })
   const books = new BookService({
     fetchPage: (bookId, signal, onThrottleWait) => Book.fetchPage(
       bookId,
       crawler,
       signal,
-      createControlFactory(onThrottleWait),
+      createControlFactory('interactive', onThrottleWait),
     ),
     buildFromPage: (
       bookId,
@@ -135,16 +164,20 @@ export function createAppServices(): AppServices {
       version,
       legacyImportGenerationKey,
       signal,
-      createControlFactory(onThrottleWait),
+      createControlFactory('interactive', onThrottleWait),
       bookCache,
     ),
     restore: (snapshot) => Book.fromSnapshot(
       snapshot,
       crawler,
-      createControlFactory(),
+      createControlFactory('interactive'),
       bookCache,
     ),
   }, bookCache)
+  const currentDownloadRoot = (): string => resolveDownloadRoot(
+    config.getDownloadSnapshot(),
+    environment,
+  )
   const executor = createDownloadExecutor({
     config,
     crawler,
@@ -164,14 +197,22 @@ export function createAppServices(): AppServices {
   const downloads = new DownloadManager({
     store: new DownloadTaskStore(taskPath),
     executor,
+    getDownloadRoot: currentDownloadRoot,
+  })
+  const bookshelf = new BookshelfService({
+    source: new WenkuBookshelfSource(crawler, createControlFactory('background')),
+    refreshSource: new WenkuBookshelfSource(crawler, createControlFactory('interactive')),
+    mutationSource: new WenkuBookshelfSource(crawler, createControlFactory('interactive')),
+    cache: new BookshelfCacheRepository(cacheStore),
+    getCredentialRevision: () => config.getCredentialRevision(),
+    getDownloadSnapshot: () => downloads.getSnapshot(),
+  })
+  const updates = new UpdateCheckService({
+    request: (url, init) => net.fetch(url, init),
+    getCurrentVersion: () => app.getVersion(),
   })
   let stopCentralMaintenance: (() => void) | undefined
   let legacyMaintenanceTimer: ReturnType<typeof setInterval> | undefined
-
-  const currentDownloadRoot = (): string => resolveDownloadRoot(
-    config.getDownloadSnapshot(),
-    environment,
-  )
 
   const initializeCache = async (): Promise<void> => {
     try {
@@ -204,7 +245,10 @@ export function createAppServices(): AppServices {
 
   const clearCache = async (): Promise<CacheClearResult> => {
     books.clearMemory()
+    search.clearMemory()
+    catalog.clearMemory()
     discovery.clearMemory()
+    bookshelf.clearMemory()
     try {
       const result = await cacheStore.clear()
       await clearLegacyDownloadCache(currentDownloadRoot())
@@ -247,7 +291,11 @@ export function createAppServices(): AppServices {
     networkSession: wenkuSession,
     config,
     crawler,
+    search,
+    catalog,
     discovery,
+    bookshelf,
+    updates,
     books,
     downloads,
     initializeCache,

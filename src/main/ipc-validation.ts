@@ -1,7 +1,22 @@
 import {
+  ANNUAL_RANKING_MAX_YEAR,
+  ANNUAL_RANKING_MIN_YEAR,
+  CATALOG_ANIMATIONS,
+  CATALOG_INITIALS,
+  CATALOG_PUBLISHER_OPTIONS,
+  CATALOG_SORTS,
+  CATALOG_STATUSES,
+  CATALOG_TAGS,
   DOWNLOAD_TASK_TYPES,
   OPEN_FOLDER_TARGETS,
   RANKING_TYPES,
+  type CatalogAnimation,
+  type CatalogInitial,
+  type CatalogPublisher,
+  type CatalogQuery,
+  type CatalogSort,
+  type CatalogStatus,
+  type CatalogTag,
   type DownloadHistoryScope,
   type DownloadTaskType,
   type EnqueueDownloadInput,
@@ -17,6 +32,9 @@ const MAX_RENDERER_SOURCE = 4 * 1024
 const MAX_RENDERER_REPORT = 64 * 1024
 const MAX_VOLUME_COVER_REQUESTS = 500
 const MAX_RANKING_PAGE = 10_000
+const MAX_CATALOG_PAGE = 500
+const MAX_DOWNLOAD_BATCH_SIZE = 100
+const CATALOG_PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
 const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
 
@@ -45,6 +63,9 @@ export function validateDiscoveryRankingPayload(value: unknown): {
     throw new Error('榜单请求格式无效')
   }
   const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'type' && key !== 'page' && key !== 'refresh')) {
+    throw new Error('榜单请求格式无效')
+  }
   if (
     typeof record.type !== 'string'
     || !RANKING_TYPES.includes(record.type as RankingType)
@@ -72,11 +93,104 @@ export function validateDiscoveryHomePayload(value: unknown): { refresh: boolean
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('发现页请求格式无效')
   }
-  const refresh = (value as Record<string, unknown>).refresh
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'refresh')) {
+    throw new Error('发现页请求格式无效')
+  }
+  const refresh = record.refresh
   if (refresh !== undefined && typeof refresh !== 'boolean') {
     throw new Error('发现页刷新参数无效')
   }
   return { refresh: refresh === true }
+}
+
+export function validateAnnualRankingPayload(value: unknown): {
+  year: number
+  refresh: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('年度榜单请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'year' && key !== 'refresh')
+    || !Number.isSafeInteger(record.year)
+    || (record.year as number) < ANNUAL_RANKING_MIN_YEAR
+    || (record.year as number) > ANNUAL_RANKING_MAX_YEAR
+    || (record.refresh !== undefined && typeof record.refresh !== 'boolean')) {
+    throw new Error('年度榜单请求格式无效')
+  }
+  return { year: record.year as number, refresh: record.refresh === true }
+}
+
+export function validateCatalogPayload(value: unknown): {
+  query: CatalogQuery
+  refresh: boolean
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('找书请求格式无效')
+  }
+  const payload = value as Record<string, unknown>
+  if (Object.keys(payload).some(key => key !== 'query' && key !== 'refresh')) {
+    throw new Error('找书请求格式无效')
+  }
+  if (!payload.query || typeof payload.query !== 'object' || Array.isArray(payload.query)) {
+    throw new Error('找书请求格式无效')
+  }
+  if (payload.refresh !== undefined && typeof payload.refresh !== 'boolean') {
+    throw new Error('找书刷新参数无效')
+  }
+  const record = payload.query as Record<string, unknown>
+  const allowedKeys = new Set(['publisher', 'initial', 'tag', 'status', 'animation', 'sort', 'page'])
+  if (Object.keys(record).some(key => !allowedKeys.has(key))) {
+    throw new Error('找书请求格式无效')
+  }
+  if (record.publisher !== undefined
+    && (typeof record.publisher !== 'string' || !CATALOG_PUBLISHERS.has(record.publisher))) {
+    throw new Error('出版社筛选无效')
+  }
+  if (record.initial !== undefined
+    && (typeof record.initial !== 'string' || !CATALOG_INITIALS.includes(record.initial as CatalogInitial))) {
+    throw new Error('首字母筛选无效')
+  }
+  if (record.tag !== undefined
+    && (typeof record.tag !== 'string' || !CATALOG_TAGS.includes(record.tag as CatalogTag))) {
+    throw new Error('标签筛选无效')
+  }
+  if (typeof record.status !== 'string'
+    || !CATALOG_STATUSES.includes(record.status as CatalogStatus)) {
+    throw new Error('连载状态无效')
+  }
+  if (typeof record.animation !== 'string'
+    || !CATALOG_ANIMATIONS.includes(record.animation as CatalogAnimation)) {
+    throw new Error('动画化筛选无效')
+  }
+  if (typeof record.sort !== 'string'
+    || !CATALOG_SORTS.includes(record.sort as CatalogSort)) {
+    throw new Error('排序方式无效')
+  }
+  if (!Number.isSafeInteger(record.page)
+    || (record.page as number) < 1
+    || (record.page as number) > MAX_CATALOG_PAGE) {
+    throw new Error('找书页码无效')
+  }
+  if (record.tag !== undefined && (record.publisher !== undefined || record.initial !== undefined)) {
+    throw new Error('标签不能与出版社或首字母同时筛选')
+  }
+  if ((record.publisher !== undefined || record.initial !== undefined) && record.sort === 'allvisit') {
+    throw new Error('出版社或首字母筛选仅支持按更新排序')
+  }
+  return {
+    query: {
+      ...(record.publisher === undefined ? {} : { publisher: record.publisher as CatalogPublisher }),
+      ...(record.initial === undefined ? {} : { initial: record.initial as CatalogInitial }),
+      ...(record.tag === undefined ? {} : { tag: record.tag as CatalogTag }),
+      status: record.status as CatalogStatus,
+      animation: record.animation as CatalogAnimation,
+      sort: record.sort as CatalogSort,
+      page: record.page as number,
+    },
+    refresh: payload.refresh === true,
+  }
 }
 
 export function validateExternalUrl(value: unknown): string {
@@ -148,6 +262,38 @@ export function validateDownloadTaskId(value: unknown): string {
   return value
 }
 
+export const validateDownloadBatchId = validateDownloadTaskId
+
+export function validateDownloadBatchPayload(value: unknown): { batchId: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载批次请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'batchId')) {
+    throw new Error('下载批次请求格式无效')
+  }
+  return { batchId: validateDownloadBatchId(record.batchId) }
+}
+
+export function validateDownloadArtifactPayload(value: unknown): {
+  taskId: string
+  artifactId: string
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载产物请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).some(key => key !== 'taskId' && key !== 'artifactId')
+    || typeof record.artifactId !== 'string'
+    || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(record.artifactId)
+  ) throw new Error('下载产物请求格式无效')
+  return {
+    taskId: validateDownloadTaskId(record.taskId),
+    artifactId: record.artifactId,
+  }
+}
+
 function validateBoundedString(
   value: unknown,
   label: string,
@@ -206,6 +352,27 @@ export function validateEnqueueDownloadInput(value: unknown): EnqueueDownloadInp
     type,
     ...(volume === undefined ? {} : { volume }),
   }
+}
+
+export function validateEnqueueDownloadBatchPayload(value: unknown): EnqueueDownloadInput[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载批次请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'inputs')
+    || !Array.isArray(record.inputs)
+    || record.inputs.length < 1
+    || record.inputs.length > MAX_DOWNLOAD_BATCH_SIZE) {
+    throw new Error('每个下载批次需要包含 1 到 100 项任务')
+  }
+  const allowedKeys = new Set(['bookId', 'title', 'cover', 'type', 'volume'])
+  return record.inputs.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+      || Object.keys(item).some(key => !allowedKeys.has(key))) {
+      throw new Error('下载批次任务格式无效')
+    }
+    return validateEnqueueDownloadInput(item)
+  })
 }
 
 export function validateDownloadHistoryScope(value: unknown): DownloadHistoryScope {

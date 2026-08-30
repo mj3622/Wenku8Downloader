@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="轻小说文库下载器是一款面向 macOS 与 Windows 的开源桌面工具，支持作品发现、精准检索、EPUB 导出与插图整理"
+      content="轻小说文库下载器是一款面向 macOS 与 Windows 的开源桌面工具，支持作品发现、分类找书、原站书架、下载管理、EPUB 导出与插图整理"
     />
     <meta name="theme-color" content="#ffffff" />
+    <meta name="app-version" content="__APP_VERSION__" />
     <link rel="icon" type="image/png" href="assets/favicon.png" />
     <link rel="stylesheet" href="styles.css" />
     <title>轻小说文库下载器｜把喜欢的轻小说打包带走</title>
@@ -45,8 +46,9 @@
           href="https://github.com/mj3622/Wenku8Downloader/releases"
           target="_blank"
           rel="noreferrer"
+          data-download-primary
         >
-          下载桌面版
+          <span data-download-primary-label>下载桌面版</span>
           <span aria-hidden="true">↗</span>
         </a>
       </div>
@@ -55,10 +57,10 @@
     <main id="main-content">
       <section id="top" class="hero">
         <div class="page-shell hero-copy">
-          <p class="eyebrow">Wenku8 Downloader 2.1</p>
+          <p class="eyebrow">Wenku8 Downloader __APP_VERSION__</p>
           <h1>把喜欢的轻小说<br />打包带走</h1>
           <p class="hero-summary">
-            从发现、检索到 EPUB 导出，在一个安静、清晰的桌面工具里完成
+            从发现、找书、书架同步到 EPUB 导出，在一个安静、清晰的桌面工具里完成
           </p>
           <div class="hero-actions">
             <a
@@ -66,8 +68,9 @@
               href="https://github.com/mj3622/Wenku8Downloader/releases"
               target="_blank"
               rel="noreferrer"
+              data-download-primary
             >
-              获取最新版本
+              <span data-download-primary-label>获取最新版本</span>
               <span aria-hidden="true">↗</span>
             </a>
             <a
@@ -79,6 +82,18 @@
               在 GitHub 查看
             </a>
           </div>
+          <details id="download-choices" class="download-choices">
+            <summary>选择其他系统或架构</summary>
+            <div class="download-choice-list">
+              <a href="__MAC_ARM64_URL__" data-download="macArm64">macOS · Apple 芯片</a>
+              <a href="__MAC_X64_URL__" data-download="macX64">macOS · Intel 芯片</a>
+              <a href="__WINDOWS_X64_URL__" data-download="windowsX64">Windows · x64 便携版</a>
+              <a href="https://github.com/mj3622/Wenku8Downloader/releases" data-download="releases">所有 Releases</a>
+            </div>
+          </details>
+          <p class="download-guidance">
+            所有发布包均未签名，请只从本项目 Releases 下载。macOS 首次启动请在 Finder 中右键选择“打开”；Windows 若提示未知发布者，请核对来源后选择“更多信息”→“仍要运行”
+          </p>
           <p class="hero-meta">适用于 macOS 13 及更高版本、Windows x64</p>
         </div>
 
@@ -107,8 +122,8 @@
           <ul aria-label="产品特性">
             <li>开源免费</li>
             <li>本地优先</li>
-            <li>macOS</li>
-            <li>Windows</li>
+            <li>macOS / Windows</li>
+            <li>未签名发布</li>
           </ul>
         </div>
       </section>
@@ -155,7 +170,7 @@
                 data-showcase-tab="search"
               >
                 <span>02</span>
-                快速检索
+                搜索作品
               </button>
               <button
                 id="showcase-tab-export"
@@ -167,7 +182,19 @@
                 data-showcase-tab="export"
               >
                 <span>03</span>
-                整理导出
+                作品详情
+              </button>
+              <button
+                id="showcase-tab-bookshelf"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="showcase-panel-bookshelf"
+                tabindex="-1"
+                data-showcase-tab="bookshelf"
+              >
+                <span>04</span>
+                原站书架
               </button>
             </div>
 
@@ -189,7 +216,7 @@
                   />
                 </div>
                 <div class="showcase-copy">
-                  <p class="showcase-index">01 / 03</p>
+                  <p class="showcase-index">01 / 04</p>
                   <h3>在封面和榜单之间，遇见下一本想读的书</h3>
                   <p>热门排行、新书推荐和关注榜集中呈现，不必在多个网页之间反复翻找</p>
                   <a href="#capabilities">了解发现功能 <span aria-hidden="true">↓</span></a>
@@ -208,17 +235,17 @@
                 <div class="showcase-media">
                   <img
                     src="assets/search-results.webp"
-                    alt="按书名搜索作品并展示封面、作者和状态的结果页"
+                    alt="使用异世界咖啡厅搜索作品的书名搜索结果页"
                     width="1600"
                     height="1024"
                     loading="lazy"
                   />
                 </div>
                 <div class="showcase-copy">
-                  <p class="showcase-index">02 / 03</p>
-                  <h3>记得书名、作者或编号，就能快速定位作品</h3>
-                  <p>三种检索方式覆盖常见找书场景，结果直接呈现封面、状态与更新时间</p>
-                  <a href="#capabilities">了解检索功能 <span aria-hidden="true">↓</span></a>
+                  <p class="showcase-index">02 / 04</p>
+                  <h3>记得书名，就能快速定位想找的作品</h3>
+                  <p>以“异世界咖啡厅”为例展示书名搜索，也支持作者、编号和分类浏览</p>
+                  <a href="#capabilities">了解找书功能 <span aria-hidden="true">↓</span></a>
                 </div>
               </article>
 
@@ -234,17 +261,43 @@
                 <div class="showcase-media">
                   <img
                     src="assets/book-detail.webp"
-                    alt="作品详情页中的整本、分卷与插图下载选项"
+                    alt="异世界咖啡厅作品详情页中的加入书架、作品标签与下载选项"
                     width="1600"
                     height="1024"
                     loading="lazy"
                   />
                 </div>
                 <div class="showcase-copy">
-                  <p class="showcase-index">03 / 03</p>
-                  <h3>整本、分卷或插图，按自己的方式收藏</h3>
-                  <p>章节、目录、封面与插图自动整理，导出后即可放进常用阅读器</p>
-                  <a href="#capabilities">了解导出功能 <span aria-hidden="true">↓</span></a>
+                  <p class="showcase-index">03 / 04</p>
+                  <h3>查看详情、同步书架，再按自己的方式收藏</h3>
+                  <p>继续使用“异世界咖啡厅”展示详情，可以加入书架，再选择整本、分卷或插图下载</p>
+                  <a href="#capabilities">了解书架与导出功能 <span aria-hidden="true">↓</span></a>
+                </div>
+              </article>
+
+              <article
+                id="showcase-panel-bookshelf"
+                class="showcase-panel"
+                role="tabpanel"
+                aria-labelledby="showcase-tab-bookshelf"
+                aria-hidden="true"
+                data-showcase-panel="bookshelf"
+                data-active="false"
+              >
+                <div class="showcase-media">
+                  <img
+                    src="assets/bookshelf.webp"
+                    alt="原站书架页面展示收藏作品、最新章节、书签和本地状态"
+                    width="1600"
+                    height="1024"
+                    loading="lazy"
+                  />
+                </div>
+                <div class="showcase-copy">
+                  <p class="showcase-index">04 / 04</p>
+                  <h3>同步原站书架，集中查看作品状态</h3>
+                  <p>读取收藏、最新章节与书签，对比本地下载版本，并在发现更新时保留提醒</p>
+                  <a href="#capabilities">了解书架功能 <span aria-hidden="true">↓</span></a>
                 </div>
               </article>
             </div>
@@ -268,27 +321,37 @@
             <article>
               <span>发现</span>
               <h3>热门与新书排行</h3>
-              <p>从首页推荐与多维榜单中浏览近期值得关注的作品</p>
+              <p>从首页推荐、完整排行榜与年度专题中浏览值得关注的作品</p>
             </article>
             <article>
-              <span>检索</span>
-              <h3>三种查找方式</h3>
-              <p>支持按书名、作者或作品编号检索，减少无效翻页</p>
+              <span>找书</span>
+              <h3>浏览与精准检索</h3>
+              <p>按分类和标签浏览，或通过书名、作者与作品编号快速定位</p>
+            </article>
+            <article>
+              <span>书架</span>
+              <h3>同步与更新提醒</h3>
+              <p>读取原站收藏和最新章节，对比本地版本并提示可下载更新</p>
             </article>
             <article>
               <span>导出</span>
-              <h3>完整 EPUB</h3>
-              <p>保留目录、封面和正文插图，支持整本合并或分卷导出</p>
-            </article>
-            <article>
-              <span>收藏</span>
-              <h3>单独整理插图</h3>
-              <p>按分卷保存封面、彩插与正文插画，方便独立归档</p>
+              <h3>EPUB 与插图</h3>
+              <p>支持整本、分卷和插图下载，保留目录、封面、彩插与正文插画</p>
             </article>
             <article>
               <span>任务</span>
-              <h3>下载进度管理</h3>
-              <p>集中查看进行中、失败和已完成任务，支持取消与重试</p>
+              <h3>批次与产物管理</h3>
+              <p>集中查看批次、版本和进度，支持取消、重试与快速打开产物</p>
+            </article>
+            <article>
+              <span>网络</span>
+              <h3>缓存与节制访问</h3>
+              <p>统一管理请求间隔、冷却与缓存，减少重复访问并保留可用结果</p>
+            </article>
+            <article>
+              <span>更新</span>
+              <h3>检查正式版本</h3>
+              <p>在应用内查询 GitHub 最新正式版本，需要时直接打开发布页</p>
             </article>
             <article>
               <span>路径</span>
@@ -333,7 +396,7 @@
               <p class="section-label">打开应用之后</p>
               <h2>三步收进<br />自己的书架</h2>
             </div>
-            <p>登录数据源账号并设置保存路径后，就可以开始整理自己的离线书库</p>
+            <p>登录数据源账号并设置保存路径后，就可以从发现、找书或原站书架开始整理离线书库</p>
           </div>
 
           <ol class="steps-list">
@@ -341,7 +404,7 @@
               <span>01</span>
               <div>
                 <h3>找到作品</h3>
-                <p>从发现页浏览，或直接按书名、作者和编号检索</p>
+                <p>从发现页和年度榜单浏览，按分类筛选，或直接通过书名、作者和编号检索</p>
               </div>
             </li>
             <li>
@@ -376,7 +439,11 @@
             </details>
             <details>
               <summary>支持哪些系统？<span aria-hidden="true">+</span></summary>
-              <p>当前提供 macOS Apple Silicon、macOS Intel 和 Windows x64 版本，macOS 需要 13 Ventura 或更高版本</p>
+              <p>提供 macOS Apple Silicon、macOS Intel 和 Windows x64 版本，macOS 需要 13 Ventura 或更高版本</p>
+            </details>
+            <details>
+              <summary>为什么安装时会提示未知开发者？<span aria-hidden="true">+</span></summary>
+              <p>项目所有正式发布包均保持未签名。请只从本项目 Releases 下载；macOS 首次启动可在 Finder 中右键选择“打开”，Windows 可在确认来源后选择“更多信息”→“仍要运行”</p>
             </details>
             <details>
               <summary>账号和下载记录会上传吗？<span aria-hidden="true">+</span></summary>
@@ -401,8 +468,9 @@
               href="https://github.com/mj3622/Wenku8Downloader/releases"
               target="_blank"
               rel="noreferrer"
+              data-download-primary
             >
-              前往下载
+              <span data-download-primary-label>前往下载</span>
               <span aria-hidden="true">↗</span>
             </a>
             <a

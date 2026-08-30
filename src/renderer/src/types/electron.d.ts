@@ -1,21 +1,24 @@
 import type { ConfigApi } from '../../../shared/config-types'
+import type { BookInfo } from '../../../shared/book-types'
 import type {
   CookieProgress,
+  AppApi,
   BookLoadOptions,
+  BookshelfApi,
   CacheApi,
+  CatalogApi,
   DiscoveryApi,
   DownloadApi,
   LogStats,
   OpenFolderTarget,
   RendererErrorReport,
+  SearchApi,
   VolumeCoverSnapshot,
 } from '../../../shared/ipc-types'
 
-export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, DiscoveryApi {
+export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, CatalogApi, DiscoveryApi, SearchApi, BookshelfApi, AppApi {
   platform: NodeJS.Platform
   autoGetCookie: (operationId: string) => Promise<{ status: string; message: string }>
-  searchAuthor: (query: string) => Promise<{ results: SearchResult[] }>
-  searchTitle: (query: string) => Promise<{ results: SearchResult[] }>
   getBook: (bookId: string, options?: BookLoadOptions) => Promise<BookInfo>
   getBookImages: (bookId: string) => Promise<{ images: Record<string, string> }>
   getVolumeCovers: (bookId: string, volumes: string[]) => Promise<VolumeCoverSnapshot>
@@ -26,25 +29,6 @@ export interface ElectronAPI extends ConfigApi, DownloadApi, CacheApi, Discovery
   reportRendererError: (report: RendererErrorReport) => void
   selectFolder: () => Promise<string | null>
   openExternal: (url: string) => Promise<void>
-}
-
-interface SearchResult {
-  title: string
-  cover: string
-  id: string
-  author?: string
-  status?: string
-  updateTime?: string
-  wordCount?: string
-  isAnimated?: boolean
-  tags?: string
-  desc?: string
-}
-
-interface BookInfo {
-  book_id: string
-  basic_info: Record<string, string>
-  volumes: Record<string, { name: string; link: string }[]>
 }
 
 declare global {

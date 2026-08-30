@@ -1,10 +1,13 @@
 import type { Book } from './book'
+import { basename } from 'path'
 import type { DownloadAssetCache } from './cache/download-asset-cache'
 import type { ConfigService } from './config/config-service'
 import type { CrawlerRequestControlFactory } from './crawler'
 import {
   Downloader,
   NoUsableDownloadContentError,
+  buildBookKey,
+  buildVolumeKey,
   selectVolumeCoverUrl,
   resolveDownloadRoot,
   type DownloaderBook,
@@ -22,7 +25,13 @@ import {
   sharedDownloadRateLimiter,
 } from './download-rate-limiter'
 import { logger } from './logging/logger'
-import type { DownloadTask } from '../shared/ipc-types'
+import type { DownloadTaskCore } from '../shared/ipc-types'
+import type { BookVersionFields } from '../shared/book-types'
+import {
+  createDownloadArtifactRecord,
+  type DownloadArtifactRecord,
+} from './download-artifacts'
+import { resolveWithin } from './path-safety'
 
 export interface DownloadExecutionContext {
   signal: AbortSignal
@@ -32,16 +41,24 @@ export interface DownloadExecutionContext {
 
 export interface DownloadExecutionResult {
   warnings: string[]
+  artifacts: DownloadArtifactRecord[]
+  versionFields: BookVersionFields
+}
+
+export interface DownloadExecutionTask extends DownloadTaskCore {
+  downloadRoot?: string
 }
 
 export interface DownloadExecutor {
   execute(
-    task: DownloadTask,
+    task: DownloadExecutionTask,
     context: DownloadExecutionContext,
   ): Promise<DownloadExecutionResult>
 }
 
-export type DownloadExecutorBook = DownloaderBook & Pick<Book, 'pictureUrls'>
+export type DownloadExecutorBook = DownloaderBook & Pick<Book, 'pictureUrls'> & {
+  versionFields: BookVersionFields
+}
 
 export interface DownloadRunner {
   setOnProgress(callback: (progress: DownloadProgress) => void): void
@@ -79,6 +96,7 @@ interface DownloadExecutorDependencies {
     runtimeConfig: DownloadRuntimeConfig,
     options: DownloaderOptions,
   ) => DownloadRunner
+  createArtifactRecord?: typeof createDownloadArtifactRecord
 }
 
 const GENERIC_DOWNLOAD_ERROR = '下载未能完成，请检查网络和下载设置后重试。'
@@ -142,6 +160,7 @@ export function createDownloadExecutor(
 ): DownloadExecutor {
   const createRunner = dependencies.createDownloader
     ?? ((crawler, runtimeConfig, options) => new Downloader(crawler, runtimeConfig, options))
+  const createArtifactRecord = dependencies.createArtifactRecord ?? createDownloadArtifactRecord
   const rateLimiter = dependencies.rateLimiter ?? sharedDownloadRateLimiter
 
   return {
@@ -164,7 +183,8 @@ export function createDownloadExecutor(
       const downloadConfig = dependencies.config.getDownloadSnapshot()
       const runtimeConfig: DownloadRuntimeConfig = {
         ...downloadConfig,
-        rootPath: resolveDownloadRoot(downloadConfig, dependencies.environment),
+        rootPath: task.downloadRoot
+          || resolveDownloadRoot(downloadConfig, dependencies.environment),
       }
       const cacheTaskGuard = dependencies.assetCache?.captureTaskGuard()
       const book = await dependencies.loadBook(
@@ -199,7 +219,30 @@ export function createDownloadExecutor(
             throw new Error(`未找到卷: ${task.volume}`)
           }
           await downloader.downloadNovel(book, task.type === 'epub_volume' ? task.volume : undefined)
-          return { warnings: downloader.getWarnings() }
+          const bookTitle = book.getFormattedTitle(runtimeConfig.fullTitle)
+          const bookKey = buildBookKey(bookTitle, book.bookId)
+          const outputPath = task.type === 'epub_volume'
+            ? resolveWithin(
+                runtimeConfig.rootPath,
+                'novels',
+                bookKey,
+                `${buildVolumeKey(
+                  task.volume!,
+                  Object.keys(book.volumes).indexOf(task.volume!),
+                )}.epub`,
+              )
+            : resolveWithin(runtimeConfig.rootPath, 'novels', `${bookKey}.epub`)
+          return {
+            warnings: downloader.getWarnings(),
+            versionFields: { ...book.versionFields },
+            artifacts: [await createArtifactRecord({
+              id: 'primary',
+              name: basename(outputPath),
+              kind: 'file',
+              path: outputPath,
+              rootPath: runtimeConfig.rootPath,
+            })],
+          }
         }
 
         if (task.volume) {
@@ -224,7 +267,23 @@ export function createDownloadExecutor(
             book.legacyImportGenerationKey,
             volumeIndex,
           )
-          return { warnings: downloader.getWarnings() }
+          const outputPath = resolveWithin(
+            runtimeConfig.rootPath,
+            'pics',
+            buildBookKey(book.basicInfo['标题'], book.bookId),
+            buildVolumeKey(task.volume, volumeIndex),
+          )
+          return {
+            warnings: downloader.getWarnings(),
+            versionFields: { ...book.versionFields },
+            artifacts: [await createArtifactRecord({
+              id: 'primary',
+              name: basename(outputPath),
+              kind: 'directory',
+              path: outputPath,
+              rootPath: runtimeConfig.rootPath,
+            })],
+          }
         }
 
         const volumes = Object.keys(book.pictureUrls)
@@ -295,7 +354,22 @@ export function createDownloadExecutor(
           if (firstIllustrationError !== undefined) throw firstIllustrationError
           throw new NoUsableDownloadContentError('该作品没有可保存的插图')
         }
-        return { warnings: [...downloader.getWarnings(), ...warnings] }
+        const outputPath = resolveWithin(
+          runtimeConfig.rootPath,
+          'pics',
+          buildBookKey(book.basicInfo['标题'], book.bookId),
+        )
+        return {
+          warnings: [...downloader.getWarnings(), ...warnings],
+          versionFields: { ...book.versionFields },
+          artifacts: [await createArtifactRecord({
+            id: 'primary',
+            name: basename(outputPath),
+            kind: 'directory',
+            path: outputPath,
+            rootPath: runtimeConfig.rootPath,
+          })],
+        }
       } finally {
         await cacheContext?.lease.release()
       }

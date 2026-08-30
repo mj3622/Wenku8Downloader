@@ -12,6 +12,7 @@ import {
 } from '../../../shared/ipc-types'
 import DiscoveryBookTile from '../components/DiscoveryBookTile'
 import Pagination from '../components/Pagination'
+import Select from '../components/Select'
 import StatusAlert from '../components/StatusAlert'
 import { rankingCacheKey, useDiscoveryStore } from '../stores/discoveryStore'
 
@@ -99,17 +100,17 @@ export default function RankingPage() {
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-apple-heading">{title}</h1>
         <div className="flex items-center gap-2">
-          <label htmlFor="ranking-type" className="sr-only">榜单类型</label>
-          <select
+          <label id="ranking-type-label" htmlFor="ranking-type" className="sr-only">榜单类型</label>
+          <Select
             id="ranking-type"
             value={type}
-            onChange={(event) => navigate(`/discover/ranking/${event.target.value}?page=1`)}
-            className="h-9 rounded-lg border border-apple-border-input bg-white px-3 text-[13px] font-medium text-apple-body focus:border-apple-accent/30 focus:outline-none focus:ring-2 focus:ring-apple-accent/15"
-          >
-            {RANKING_OPTIONS.map((option) => (
-              <option key={option.type} value={option.type}>{option.label}</option>
-            ))}
-          </select>
+            onChange={nextType => navigate(`/discover/ranking/${nextType}?page=1`)}
+            options={RANKING_OPTIONS.map(option => ({ value: option.type, label: option.label }))}
+            ariaLabelledBy="ranking-type-label"
+            className="w-40"
+            size="compact"
+            align="end"
+          />
           <button
             type="button"
             aria-label="刷新当前排行榜"

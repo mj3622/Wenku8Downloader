@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio'
 import { describe, expect, it } from 'vitest'
 import {
   coverUrlForBook,
+  parseAnnualRankingPage,
   parseDiscoveryHome,
   parseRankingPage,
 } from '../discovery-parser'
@@ -80,5 +81,41 @@ describe('discovery parser', () => {
     ).books).toEqual([])
     expect(() => parseRankingPage(cheerio.load('<div>blocked</div>'), 'dayvisit', 1))
       .toThrow('排行榜')
+  })
+
+  it('parses both annual ranking categories while preserving unavailable works', () => {
+    const page = parseAnnualRankingPage(loadFixture('annual-ranking.html'), 2026)
+
+    expect(page.categories.bunko).toEqual([
+      {
+        rank: 1,
+        title: '作品甲',
+        bookId: '3057',
+        cover: 'https://img.wenku8.com/image/3/3057/3057s.jpg',
+      },
+      { rank: 2, title: '原站已下架作品' },
+    ])
+    expect(page.categories.tankobon).toEqual([
+      expect.objectContaining({ rank: 1, title: '作品乙', bookId: '2767' }),
+      expect.objectContaining({ rank: 2, title: '作品乙 ZERO', bookId: '2767' }),
+      { rank: 3, title: '外部资料作品' },
+    ])
+  })
+
+  it('rejects missing categories and exact duplicate annual works', () => {
+    expect(() => parseAnnualRankingPage(cheerio.load(`
+      <table class="grid"><caption>2026 文库部门</caption><tr><th><div>
+        <div><a href="/book/1.htm">重复作品</a></div>
+        <div><a href="/book/1.htm">重复作品</a></div>
+      </div></th></tr></table>
+      <table class="grid"><caption>2026 单行本部门</caption><tr><th><div>
+        <div><a href="/book/2.htm">作品乙</a></div>
+      </div></th></tr></table>
+    `), 2026)).toThrow('重复作品')
+    expect(() => parseAnnualRankingPage(cheerio.load(`
+      <table class="grid"><caption>2026 文库部门</caption><tr><th><div>
+        <div><a href="/book/1.htm">作品甲</a></div>
+      </div></th></tr></table>
+    `), 2026)).toThrow('年度榜单结构')
   })
 })

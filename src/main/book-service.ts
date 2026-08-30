@@ -234,7 +234,7 @@ export class BookService {
         ...cachedSnapshot,
         checkedAt: now,
         version: candidateVersion,
-        basicInfo: { ...page.basicInfo },
+        basicInfo: { ...page.basicInfo, '标签': [...page.basicInfo['标签']] },
       }
       const book = this.source.restore(refreshedSnapshot)
       await this.repository.saveSnapshot(refreshedSnapshot, guard)

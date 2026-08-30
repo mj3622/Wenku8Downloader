@@ -25,6 +25,7 @@ type Scheduler = (callback: () => void, delayMs: number) => unknown
 type RequestSleep = (delayMs: number, signal?: AbortSignal) => Promise<void>
 
 export type DownloadRequestKind = CrawlerRequestKind
+export type WenkuRequestPriority = 'interactive' | 'download' | 'background'
 
 export interface DownloadResponseObservation {
   status: number
@@ -47,25 +48,41 @@ export interface DownloadRateLimiterOptions {
 
 type CapacityRelease = () => void
 
-type CapacityWaiter = {
+type RequestWaiter = {
   kind: DownloadRequestKind
+  origin: string
+  priority: WenkuRequestPriority
+  enqueuedAt: number
+  sequence: number
+  onThrottleWait?: (waitMs: number) => void
   resolve(release: CapacityRelease): void
+  reject(error: unknown): void
   cleanup(): void
 }
 
 type RequestSlot = {
+  origin: string
   delayMs: number
   nextAllowedAt: number
   blockedUntil: number
-  queue: Promise<void>
   inFlight: Record<DownloadRequestKind, number>
-  capacityWaiters: CapacityWaiter[]
+  waiters: RequestWaiter[]
+  draining: boolean
+  wakeController?: AbortController
 }
 
 export interface DownloadRequestControlOptions {
+  priority?: WenkuRequestPriority
   onResponseObserved?: () => void
   onThrottleWait?: (waitMs: number) => void
 }
+
+const REQUEST_PRIORITY_SCORE: Readonly<Record<WenkuRequestPriority, number>> = {
+  interactive: 2,
+  download: 1,
+  background: 0,
+}
+const PRIORITY_AGING_MS = 5_000
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -90,34 +107,16 @@ function requestOrigin(kind: DownloadRequestKind, url: string): string {
   }
 }
 
-async function waitForQueue(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
-  throwIfDownloadCancelled(signal)
-  if (!signal) {
-    await previous
-    return
+function isWenkuOrigin(origin: string): boolean {
+  try {
+    const hostname = new URL(origin).hostname
+    return hostname === 'wenku8.net'
+      || hostname.endsWith('.wenku8.net')
+      || hostname === 'wenku8.com'
+      || hostname.endsWith('.wenku8.com')
+  } catch {
+    return false
   }
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-    const onAbort = (): void => {
-      cleanup()
-      reject(new DownloadCancelledError())
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    if (signal.aborted) {
-      onAbort()
-      return
-    }
-    previous.then(
-      () => {
-        cleanup()
-        resolve()
-      },
-      (error: unknown) => {
-        cleanup()
-        reject(error)
-      },
-    )
-  })
 }
 
 export class DownloadRateLimiter {
@@ -130,6 +129,8 @@ export class DownloadRateLimiter {
   private readonly now: () => number
   private readonly random: () => number
   private readonly sleep: RequestSleep
+  private waiterSequence = 0
+  private wenkuBlockedUntil = 0
 
   constructor(optionsOrSchedule: DownloadRateLimiterOptions | Scheduler = {}) {
     const options = typeof optionsOrSchedule === 'function'
@@ -153,13 +154,15 @@ export class DownloadRateLimiter {
     const key = this.slotKey(kind, url)
     let slot = this.slots.get(key)
     if (!slot) {
+      const origin = requestOrigin(kind, url)
       slot = {
+        origin,
         delayMs: this.speed.delayMs,
         nextAllowedAt: 0,
         blockedUntil: 0,
-        queue: Promise.resolve(),
         inFlight: { document: 0, image: 0 },
-        capacityWaiters: [],
+        waiters: [],
+        draining: false,
       }
       this.slots.set(key, slot)
     }
@@ -221,7 +224,7 @@ export class DownloadRateLimiter {
       }
     }
     if (this.speedTier !== previousTier) {
-      for (const slot of this.slots.values()) this.drainCapacity(slot)
+      for (const slot of this.slots.values()) void this.drainWaiters(slot)
     }
   }
 
@@ -249,49 +252,121 @@ export class DownloadRateLimiter {
       if (released) return
       released = true
       slot.inFlight[kind] = Math.max(0, slot.inFlight[kind] - 1)
-      this.drainCapacity(slot)
+      void this.drainWaiters(slot)
     }
   }
 
-  private drainCapacity(slot: RequestSlot): void {
-    while (slot.capacityWaiters.length > 0) {
-      const waiterIndex = slot.capacityWaiters.findIndex((waiter) => (
-        this.canStart(slot, waiter.kind)
-      ))
-      if (waiterIndex < 0) return
-      const [waiter] = slot.capacityWaiters.splice(waiterIndex, 1)
-      waiter.cleanup()
-      slot.inFlight[waiter.kind]++
-      waiter.resolve(this.createCapacityRelease(slot, waiter.kind))
+  private nextWaiterIndex(slot: RequestSlot): number {
+    const now = this.now()
+    let waiterIndex = -1
+    let bestScore = Number.NEGATIVE_INFINITY
+    let bestSequence = Number.POSITIVE_INFINITY
+    for (let index = 0; index < slot.waiters.length; index++) {
+      const waiter = slot.waiters[index]
+      if (!this.canStart(slot, waiter.kind)) continue
+      const ageBoost = Math.floor(Math.max(0, now - waiter.enqueuedAt) / PRIORITY_AGING_MS)
+      const score = REQUEST_PRIORITY_SCORE[waiter.priority] + ageBoost
+      if (score > bestScore || (score === bestScore && waiter.sequence < bestSequence)) {
+        waiterIndex = index
+        bestScore = score
+        bestSequence = waiter.sequence
+      }
+    }
+    return waiterIndex
+  }
+
+  private async drainWaiters(slot: RequestSlot): Promise<void> {
+    if (slot.draining) return
+    slot.draining = true
+    try {
+      while (slot.waiters.length > 0) {
+        if (this.nextWaiterIndex(slot) < 0) return
+        const now = this.now()
+        const sharedBlockedUntil = isWenkuOrigin(slot.origin) ? this.wenkuBlockedUntil : 0
+        const throttleWaitMs = Math.max(0, slot.blockedUntil - now, sharedBlockedUntil - now)
+        const spacingWaitMs = Math.max(0, slot.nextAllowedAt - now)
+        const waitMs = Math.max(throttleWaitMs, spacingWaitMs)
+        if (waitMs > 0) {
+          if (throttleWaitMs >= spacingWaitMs) {
+            for (const waiter of slot.waiters) waiter.onThrottleWait?.(waitMs)
+          }
+          const wakeController = new AbortController()
+          slot.wakeController = wakeController
+          try {
+            await this.sleep(waitMs, wakeController.signal)
+          } catch (error) {
+            if (!wakeController.signal.aborted) throw error
+          } finally {
+            if (slot.wakeController === wakeController) slot.wakeController = undefined
+          }
+          continue
+        }
+
+        const waiterIndex = this.nextWaiterIndex(slot)
+        if (waiterIndex < 0) return
+        const [waiter] = slot.waiters.splice(waiterIndex, 1)
+        waiter.cleanup()
+        slot.inFlight[waiter.kind]++
+        slot.delayMs = Math.max(slot.delayMs, this.speed.delayMs)
+        slot.nextAllowedAt = this.now() + slot.delayMs
+        const actualWaitMs = Math.max(0, this.now() - waiter.enqueuedAt)
+        if (actualWaitMs > 0) {
+          logger.debug('network.wenku.request.waited', 'Wenku8 请求完成调度等待', {
+            kind: waiter.kind,
+            origin: waiter.origin,
+            priority: waiter.priority,
+            waitMs: actualWaitMs,
+          })
+        }
+        waiter.resolve(this.createCapacityRelease(slot, waiter.kind))
+      }
+    } catch (error) {
+      const waiters = slot.waiters.splice(0)
+      for (const waiter of waiters) {
+        waiter.cleanup()
+        waiter.reject(error)
+      }
+    } finally {
+      slot.draining = false
+      if (slot.waiters.length > 0 && this.nextWaiterIndex(slot) >= 0) {
+        void this.drainWaiters(slot)
+      }
     }
   }
 
-  private acquireCapacity(
+  private enqueueWaiter(
     slot: RequestSlot,
     kind: DownloadRequestKind,
+    origin: string,
     signal?: AbortSignal,
+    priority: WenkuRequestPriority = 'download',
+    onThrottleWait?: (waitMs: number) => void,
   ): Promise<CapacityRelease> {
     throwIfDownloadCancelled(signal)
-    if (this.canStart(slot, kind) && slot.capacityWaiters.length === 0) {
-      slot.inFlight[kind]++
-      return Promise.resolve(this.createCapacityRelease(slot, kind))
-    }
 
     return new Promise<CapacityRelease>((resolve, reject) => {
       const onAbort = (): void => {
-        const index = slot.capacityWaiters.indexOf(waiter)
-        if (index >= 0) slot.capacityWaiters.splice(index, 1)
+        const index = slot.waiters.indexOf(waiter)
+        if (index >= 0) slot.waiters.splice(index, 1)
         waiter.cleanup()
         reject(new DownloadCancelledError())
+        if (slot.waiters.length === 0) slot.wakeController?.abort()
       }
-      const waiter: CapacityWaiter = {
+      const waiter: RequestWaiter = {
         kind,
+        origin,
+        priority,
+        enqueuedAt: this.now(),
+        sequence: ++this.waiterSequence,
+        onThrottleWait,
         resolve,
+        reject,
         cleanup: () => signal?.removeEventListener('abort', onAbort),
       }
-      slot.capacityWaiters.push(waiter)
+      slot.waiters.push(waiter)
       signal?.addEventListener('abort', onAbort, { once: true })
       if (signal?.aborted) onAbort()
+      else void this.drainWaiters(slot)
     })
   }
 
@@ -300,36 +375,17 @@ export class DownloadRateLimiter {
     url: string,
     signal?: AbortSignal,
     onThrottleWait?: (waitMs: number) => void,
+    priority: WenkuRequestPriority = 'download',
   ): Promise<CapacityRelease> {
     const slot = this.getSlot(kind, url)
-    const releaseCapacity = await this.acquireCapacity(slot, kind, signal)
-    const previous = slot.queue
-    let release!: () => void
-    const current = new Promise<void>((resolve) => { release = resolve })
-    slot.queue = previous.then(() => current, () => current)
-
-    try {
-      await waitForQueue(previous, signal)
-      while (true) {
-        const now = this.now()
-        const throttleWaitMs = Math.max(0, slot.blockedUntil - now)
-        const spacingWaitMs = Math.max(0, slot.nextAllowedAt - now)
-        const waitMs = Math.max(throttleWaitMs, spacingWaitMs)
-        if (waitMs <= 0) break
-        if (throttleWaitMs > 0 && throttleWaitMs >= spacingWaitMs) {
-          onThrottleWait?.(waitMs)
-        }
-        await this.sleep(waitMs, signal)
-      }
-      slot.delayMs = Math.max(slot.delayMs, this.speed.delayMs)
-      slot.nextAllowedAt = this.now() + slot.delayMs
-      return releaseCapacity
-    } catch (error) {
-      releaseCapacity()
-      throw error
-    } finally {
-      release()
-    }
+    return this.enqueueWaiter(
+      slot,
+      kind,
+      requestOrigin(kind, url),
+      signal,
+      priority,
+      onThrottleWait,
+    )
   }
 
   createRequestControl(
@@ -345,6 +401,7 @@ export class DownloadRateLimiter {
           url,
           signal,
           options.onThrottleWait,
+          options.priority,
         )
       },
       afterAttempt: () => {
@@ -353,7 +410,7 @@ export class DownloadRateLimiter {
       },
       onResponse: (info) => {
         options.onResponseObserved?.()
-        const state = this.recordResponse(kind, url, info)
+        const state = this.recordResponse(kind, url, info, options.priority)
         if (info.status === 429 && state.cooldownMs !== undefined) {
           options.onThrottleWait?.(state.cooldownMs)
         }
@@ -366,6 +423,7 @@ export class DownloadRateLimiter {
     kind: DownloadRequestKind,
     url: string,
     observation: DownloadResponseObservation,
+    priority: WenkuRequestPriority = 'download',
   ): { cooldownMs?: number; nextDelayMs: number } {
     const slot = this.getSlot(kind, url)
     const latencyMs = Math.max(0, Math.round(observation.latencyMs))
@@ -396,27 +454,31 @@ export class DownloadRateLimiter {
         )
 
     let cooldownMs: number | undefined
+    const retryAfterMs = observation.retryAfterMs !== undefined
+      && Number.isFinite(observation.retryAfterMs)
+      ? Math.max(0, Math.round(observation.retryAfterMs))
+      : 0
     if (observation.status === 429) {
       slot.delayMs = clamp(
         Math.max(slot.delayMs * 2, this.speed.delayMs),
         this.speed.delayMs,
         MAX_REQUEST_DELAY_MS,
       )
-      const retryAfterMs = observation.retryAfterMs !== undefined
-        && Number.isFinite(observation.retryAfterMs)
-        ? Math.max(0, Math.round(observation.retryAfterMs))
-        : 0
       cooldownMs = Math.max(this.speed.delayMs * 5, retryAfterMs)
       slot.blockedUntil = Math.max(slot.blockedUntil, this.now() + cooldownMs)
     } else if (observation.status === 503) {
-      cooldownMs = this.speed.delayMs * 3
+      cooldownMs = Math.max(this.speed.delayMs * 3, retryAfterMs)
       slot.blockedUntil = Math.max(slot.blockedUntil, this.now() + cooldownMs)
+    }
+    if (cooldownMs !== undefined && isWenkuOrigin(slot.origin)) {
+      this.wenkuBlockedUntil = Math.max(this.wenkuBlockedUntil, this.now() + cooldownMs)
     }
 
     if (cooldownMs !== undefined) {
-      logger.warn('download.request.throttled', '下载请求已进入自适应等待', {
+      logger.warn('network.wenku.request.throttled', 'Wenku8 请求已进入自适应等待', {
         kind,
         origin: requestOrigin(kind, url),
+        priority,
         status: observation.status,
         latencyMs,
         nextDelayMs: slot.delayMs,
