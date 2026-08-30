@@ -68,6 +68,7 @@ function createDownloadBookView(
     baseChapterUrl: book.baseChapterUrl,
     volumes: book.volumes,
     pictureUrls: book.pictureUrls,
+    versionFields: book.versionFields,
     basicInfo: book.basicInfo,
     getFormattedTitle: (format) => book.getFormattedTitle(format),
     getChapterImageUrls: (volumeName, signal) => (

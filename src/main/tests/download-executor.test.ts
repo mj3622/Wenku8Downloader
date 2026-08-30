@@ -51,6 +51,11 @@ function book(overrides: Partial<DownloadExecutorBook> = {}): DownloadExecutorBo
     getFormattedTitle: () => '测试作品',
     getChapterImageUrls: vi.fn(async () => ['https://example.com/1.jpg']),
     getCoverContent: vi.fn(async () => Buffer.from('cover')),
+    versionFields: {
+      updatedAt: '2026-08-29',
+      latestChapter: '第一章',
+      status: '连载',
+    },
     ...overrides,
     generationKey: overrides.generationKey ?? CACHE_KEY,
     legacyImportGenerationKey: overrides.legacyImportGenerationKey ?? CACHE_KEY,
@@ -127,6 +132,7 @@ describe('createDownloadExecutor', () => {
       onVolumeCover,
     })).resolves.toEqual({
       warnings: [],
+      versionFields: book().versionFields,
       artifacts: [{
         id: 'primary',
         name: '100_测试作品.epub',
@@ -310,6 +316,7 @@ describe('createDownloadExecutor', () => {
         '封面未能下载，正文内容仍已保存。',
         '“第二卷”没有可保存的插图。',
       ],
+      versionFields: book().versionFields,
       artifacts: [{
         id: 'primary',
         name: '100_测试作品',

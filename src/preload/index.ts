@@ -40,10 +40,16 @@ const downloadApi: DownloadApi = {
   getDownloadSnapshot: () => ipcRenderer.invoke('download:get-snapshot'),
   enqueueDownload: (input: EnqueueDownloadInput) =>
     ipcRenderer.invoke('download:enqueue', input),
+  enqueueDownloadBatch: (inputs: EnqueueDownloadInput[]) =>
+    ipcRenderer.invoke('download:enqueue-batch', { inputs }),
   cancelDownload: (taskId: string) =>
     ipcRenderer.invoke('download:cancel', { taskId }),
+  cancelDownloadBatch: (batchId: string) =>
+    ipcRenderer.invoke('download:cancel-batch', { batchId }),
   retryDownload: (taskId: string) =>
     ipcRenderer.invoke('download:retry', { taskId }),
+  retryDownloadBatch: (batchId: string) =>
+    ipcRenderer.invoke('download:retry-batch', { batchId }),
   removeDownload: (taskId: string) =>
     ipcRenderer.invoke('download:remove', { taskId }),
   clearDownloadHistory: (scope: DownloadHistoryScope) =>

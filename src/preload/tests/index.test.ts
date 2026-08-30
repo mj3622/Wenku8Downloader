@@ -73,6 +73,23 @@ describe('preload download boundary', () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'download:enqueue', input)
   })
 
+  it('forwards atomic batch commands through fixed channels', async () => {
+    const inputs: EnqueueDownloadInput[] = [{
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }]
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+
+    await exposedApi.enqueueDownloadBatch(inputs)
+    await exposedApi.cancelDownloadBatch(batchId)
+    await exposedApi.retryDownloadBatch(batchId)
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['download:enqueue-batch', { inputs }],
+      ['download:cancel-batch', { batchId }],
+      ['download:retry-batch', { batchId }],
+    ])
+  })
+
   it('requests log statistics through the fixed channel', async () => {
     const result = { totalSizeBytes: 2048 }
     mocks.invoke.mockResolvedValue(result)

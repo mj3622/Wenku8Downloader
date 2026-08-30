@@ -15,7 +15,7 @@ describe('parseBookshelfPage', () => {
         author: '林间笔记',
         latestChapter: '第十二章 晚风',
         bookmark: '第三章',
-        updatedAt: '26-08-20',
+        updatedAt: '2026-08-20',
       },
       {
         bookId: '202',

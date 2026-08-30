@@ -10,6 +10,7 @@ import {
 import {
   CATALOG_PUBLISHER_OPTIONS,
   CATALOG_TAGS,
+  type EnqueueDownloadInput,
 } from '../../../shared/ipc-types'
 import { useBookStore } from '../stores/bookStore'
 import { useDownloadStore } from '../stores/downloadStore'
@@ -51,7 +52,7 @@ export default function BookDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { book, loading, error, fetchBook, clear } = useBookStore()
-  const { downloadEpub, downloadImages } = useDownloadStore()
+  const { downloadEpub, downloadImages, downloadBatch } = useDownloadStore()
   const [dlTab, setDlTab] = useState<DownloadTab>('full')
   const warnedEmptyBooks = useRef(new Set<string>())
 
@@ -99,14 +100,15 @@ export default function BookDetailPage() {
       toast.warning({ title: '尚未选择分卷', message: '请至少选择一个要下载的分卷。' })
       return
     }
-    volumes.forEach((volumeName) => {
-      const cover = book.basic_info['cover'] ?? undefined
-      if (type === 'pictures') {
-        downloadImages(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
-      } else {
-        downloadEpub(book.book_id, book.basic_info['标题'] ?? '', cover, volumeName)
-      }
-    })
+    const cover = book.basic_info['cover'] ?? undefined
+    const inputs: EnqueueDownloadInput[] = volumes.map(volumeName => ({
+      bookId: book.book_id,
+      title: book.basic_info['标题'],
+      ...(cover === undefined ? {} : { cover }),
+      type: type === 'pictures' ? 'images' : 'epub_volume',
+      volume: volumeName,
+    }))
+    downloadBatch(inputs)
     navigate('/download')
   }
 

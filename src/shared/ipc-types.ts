@@ -236,6 +236,8 @@ export interface DownloadTaskCore {
   warning?: string
   createdAt: number
   updatedAt: number
+  batchId?: string
+  completedVersion?: import('./book-types').BookVersionFields
 }
 
 export interface DownloadTask extends DownloadTaskCore {
@@ -274,13 +276,30 @@ export interface EnqueueDownloadResult {
   snapshot: DownloadSnapshot
 }
 
+export interface SkippedDownloadDuplicate {
+  taskId: string
+  bookId: string
+  type: DownloadTaskType
+  volume?: string
+}
+
+export interface EnqueueDownloadBatchResult {
+  batchId: string | null
+  acceptedTaskIds: string[]
+  skippedDuplicates: SkippedDownloadDuplicate[]
+  snapshot: DownloadSnapshot
+}
+
 export type DownloadHistoryScope = 'completed' | 'terminal'
 
 export interface DownloadApi {
   getDownloadSnapshot(): Promise<DownloadSnapshot>
   enqueueDownload(input: EnqueueDownloadInput): Promise<EnqueueDownloadResult>
+  enqueueDownloadBatch(inputs: EnqueueDownloadInput[]): Promise<EnqueueDownloadBatchResult>
   cancelDownload(taskId: string): Promise<DownloadSnapshot>
+  cancelDownloadBatch(batchId: string): Promise<DownloadSnapshot>
   retryDownload(taskId: string): Promise<DownloadSnapshot>
+  retryDownloadBatch(batchId: string): Promise<DownloadSnapshot>
   removeDownload(taskId: string): Promise<DownloadSnapshot>
   clearDownloadHistory(scope: DownloadHistoryScope): Promise<DownloadSnapshot>
   importLegacyDownloadHistory(tasks: unknown[]): Promise<DownloadSnapshot>

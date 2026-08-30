@@ -8,6 +8,7 @@ import type {
   DownloadTaskCore,
   DownloadTaskStatus,
   DownloadTransition,
+  EnqueueDownloadBatchResult,
   EnqueueDownloadResult,
   EnqueueDownloadInput,
 } from '../shared/ipc-types'
@@ -57,6 +58,9 @@ const PROGRESS_PUBLISH_INTERVAL_MS = 500
 function clonePersistedTask(task: PersistedDownloadTask): PersistedDownloadTask {
   return {
     ...task,
+    ...(task.completedVersion === undefined
+      ? {}
+      : { completedVersion: { ...task.completedVersion } }),
     artifacts: task.artifacts.map(artifact => ({ ...artifact })),
   }
 }
@@ -74,7 +78,14 @@ function freezeSnapshot(snapshot: DownloadSnapshot): DownloadSnapshot {
   const tasks = snapshot.tasks.map((task) => {
     const artifacts = task.artifacts.map(artifact => Object.freeze({ ...artifact }))
     Object.freeze(artifacts)
-    return Object.freeze({ ...task, artifacts })
+    const completedVersion = task.completedVersion
+      ? Object.freeze({ ...task.completedVersion })
+      : undefined
+    return Object.freeze({
+      ...task,
+      ...(completedVersion === undefined ? {} : { completedVersion }),
+      artifacts,
+    })
   })
   Object.freeze(tasks)
   return Object.freeze({ ...snapshot, tasks }) as DownloadSnapshot
@@ -128,6 +139,7 @@ export class DownloadManager {
     store: DownloadTaskPersistence
     executor: DownloadExecutor
     createId?: () => string
+    createBatchId?: () => string
     getDownloadRoot?: () => string
     now?: () => number
   }) {}
@@ -138,6 +150,10 @@ export class DownloadManager {
 
   private get createId(): () => string {
     return this.options.createId ?? randomUUID
+  }
+
+  private get createBatchId(): () => string {
+    return this.options.createBatchId ?? randomUUID
   }
 
   private get downloadRoot(): string {
@@ -199,22 +215,7 @@ export class DownloadManager {
         snapshot: this.getSnapshot(),
       }
     }
-    const timestamp = this.now()
-    const task: PersistedDownloadTask = {
-      id: this.createId(),
-      bookId: input.bookId,
-      title: input.title,
-      ...(input.cover === undefined ? {} : { cover: input.cover }),
-      type: input.type,
-      ...(input.volume === undefined ? {} : { volume: input.volume }),
-      status: 'pending',
-      progress: 0,
-      phase: '等待下载...',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      artifacts: [],
-      downloadRoot: this.downloadRoot,
-    }
+    const task = this.createPendingTask(input)
     const next = this.nextState([task, ...this.state.tasks])
     this.commitRequired(next)
     this.queue.push(task.id)
@@ -223,6 +224,62 @@ export class DownloadManager {
     return {
       status: 'enqueued',
       taskId: task.id,
+      snapshot: this.getSnapshot(),
+    }
+  }
+
+  enqueueBatch(inputs: EnqueueDownloadInput[]): EnqueueDownloadBatchResult {
+    this.ensureAccepting()
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 100) {
+      throw new Error('每个下载批次需要包含 1 到 100 项任务')
+    }
+
+    const activeByKey = new Map<string, { id: string }>()
+    for (const task of this.state.tasks) {
+      if (ACTIVE_STATUSES.has(task.status)) activeByKey.set(downloadTaskKey(task), task)
+    }
+    const accepted: Array<{ input: EnqueueDownloadInput; taskId: string }> = []
+    const skippedDuplicates: EnqueueDownloadBatchResult['skippedDuplicates'] = []
+    for (const input of inputs) {
+      const key = downloadTaskKey(input)
+      const duplicate = activeByKey.get(key)
+      if (duplicate) {
+        skippedDuplicates.push({
+          taskId: duplicate.id,
+          bookId: input.bookId,
+          type: input.type,
+          ...(input.volume === undefined ? {} : { volume: input.volume }),
+        })
+        continue
+      }
+      const taskId = this.createId()
+      accepted.push({ input, taskId })
+      activeByKey.set(key, { id: taskId })
+    }
+
+    if (accepted.length === 0) {
+      return {
+        batchId: null,
+        acceptedTaskIds: [],
+        skippedDuplicates,
+        snapshot: this.getSnapshot(),
+      }
+    }
+
+    const batchId = this.createBatchId()
+    const timestamp = this.now()
+    const tasks = accepted.map(({ input, taskId }) => (
+      this.createPendingTask(input, batchId, timestamp, taskId)
+    ))
+    const next = this.nextState([...tasks, ...this.state.tasks])
+    this.commitRequired(next)
+    this.queue.push(...tasks.map(task => task.id))
+    this.publish()
+    void this.drain()
+    return {
+      batchId,
+      acceptedTaskIds: tasks.map(task => task.id),
+      skippedDuplicates,
       snapshot: this.getSnapshot(),
     }
   }
@@ -255,6 +312,36 @@ export class DownloadManager {
     return this.getSnapshot()
   }
 
+  cancelBatch(batchId: string): DownloadSnapshot {
+    const batch = this.state.tasks.filter(task => task.batchId === batchId)
+    if (batch.length === 0) throw new Error('下载批次不存在，请刷新页面后重试')
+    const timestamp = this.now()
+    const abortTaskIds = new Set<string>()
+    let changed = false
+    const tasks = this.state.tasks.map((task) => {
+      if (task.batchId !== batchId) return task
+      if (task.status === 'pending') {
+        changed = true
+        const queueIndex = this.queue.indexOf(task.id)
+        if (queueIndex >= 0) this.queue.splice(queueIndex, 1)
+        return { ...task, status: 'cancelled' as const, phase: '已取消', updatedAt: timestamp }
+      }
+      if (task.status === 'downloading') {
+        changed = true
+        abortTaskIds.add(task.id)
+        return { ...task, status: 'cancelling' as const, phase: '正在取消...', updatedAt: timestamp }
+      }
+      return task
+    })
+    if (!changed) return this.getSnapshot()
+    this.commitRequired(this.nextState(tasks))
+    this.publish()
+    if (this.active && abortTaskIds.has(this.active.taskId) && !this.active.controller.signal.aborted) {
+      this.active.controller.abort()
+    }
+    return this.getSnapshot()
+  }
+
   retry(taskId: string): DownloadSnapshot {
     this.ensureAccepting()
     const task = this.requireTask(taskId)
@@ -263,16 +350,12 @@ export class DownloadManager {
     }
     if (this.findActiveDuplicate(task)) return this.getSnapshot()
     const retried: PersistedDownloadTask = {
-      id: task.id,
-      bookId: task.bookId,
-      title: task.title,
-      ...(task.cover === undefined ? {} : { cover: task.cover }),
-      type: task.type,
-      ...(task.volume === undefined ? {} : { volume: task.volume }),
+      ...task,
       status: 'pending',
       progress: 0,
       phase: '等待下载...',
-      createdAt: task.createdAt,
+      error: undefined,
+      warning: undefined,
       updatedAt: this.now(),
       artifacts: [],
       downloadRoot: this.downloadRoot,
@@ -281,6 +364,41 @@ export class DownloadManager {
     this.commitRequired(next)
     this.queue.push(taskId)
     this.publish({ taskId, from: task.status, to: 'pending' })
+    void this.drain()
+    return this.getSnapshot()
+  }
+
+  retryBatch(batchId: string): DownloadSnapshot {
+    this.ensureAccepting()
+    const batch = this.state.tasks.filter(task => task.batchId === batchId)
+    if (batch.length === 0) throw new Error('下载批次不存在，请刷新页面后重试')
+    const activeKeys = new Set(
+      this.state.tasks.filter(task => ACTIVE_STATUSES.has(task.status)).map(downloadTaskKey),
+    )
+    const retryIds: string[] = []
+    const timestamp = this.now()
+    const tasks = this.state.tasks.map((task) => {
+      if (task.batchId !== batchId || !RETRYABLE_STATUSES.has(task.status)) return task
+      const key = downloadTaskKey(task)
+      if (activeKeys.has(key)) return task
+      activeKeys.add(key)
+      retryIds.push(task.id)
+      return {
+        ...task,
+        status: 'pending' as const,
+        progress: 0,
+        phase: '等待下载...',
+        error: undefined,
+        warning: undefined,
+        updatedAt: timestamp,
+        artifacts: [],
+        downloadRoot: this.downloadRoot,
+      }
+    })
+    if (retryIds.length === 0) return this.getSnapshot()
+    this.commitRequired(this.nextState(tasks))
+    this.queue.push(...retryIds)
+    this.publish()
     void this.drain()
     return this.getSnapshot()
   }
@@ -408,6 +526,30 @@ export class DownloadManager {
 
   private ensureAccepting(): void {
     if (!this.accepting) throw new Error('下载管理器正在关闭')
+  }
+
+  private createPendingTask(
+    input: EnqueueDownloadInput,
+    batchId?: string,
+    timestamp = this.now(),
+    taskId = this.createId(),
+  ): PersistedDownloadTask {
+    return {
+      id: taskId,
+      bookId: input.bookId,
+      title: input.title,
+      ...(input.cover === undefined ? {} : { cover: input.cover }),
+      type: input.type,
+      ...(input.volume === undefined ? {} : { volume: input.volume }),
+      ...(batchId === undefined ? {} : { batchId }),
+      status: 'pending',
+      progress: 0,
+      phase: '等待下载...',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      artifacts: [],
+      downloadRoot: this.downloadRoot,
+    }
   }
 
   private requireTask(taskId: string): PersistedDownloadTask {
@@ -602,6 +744,7 @@ export class DownloadManager {
       phase: warning ? '下载完成，但有部分内容缺失' : '下载完成',
       error: undefined,
       warning,
+      completedVersion: { ...result.versionFields },
       artifacts: result.artifacts.map(artifact => ({ ...artifact })),
       updatedAt: this.now(),
     }, { taskId, from: task.status, to: 'completed' })

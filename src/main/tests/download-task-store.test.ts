@@ -77,6 +77,10 @@ describe('DownloadTaskStore', () => {
   it('round-trips a versioned download snapshot atomically', async () => {
     const filePath = await createTempPath()
     const completedTask = task({
+      batchId: '223e4567-e89b-42d3-a456-426614174000',
+      completedVersion: {
+        updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
+      },
       artifacts: [{
         id: 'primary',
         name: 'book.epub',
@@ -136,6 +140,42 @@ describe('DownloadTaskStore', () => {
       .toBe(DOWNLOAD_TASK_SCHEMA_VERSION)
   })
 
+  it('migrates v2 artifacts without inventing completed versions or batches', async () => {
+    const filePath = await createTempPath()
+    const legacyTask = task({
+      artifacts: [{
+        id: 'primary', name: 'book.epub', kind: 'file',
+        path: '/downloads/novels/book.epub', rootPath: '/downloads',
+      }],
+    })
+    writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 2,
+      revision: 2,
+      tasks: [legacyTask],
+      legacyImportCompleted: true,
+    }))
+
+    expect(new DownloadTaskStore(filePath).load().tasks[0]).toEqual(legacyTask)
+  })
+
+  it('migrates v3 completed versions while leaving batch IDs empty', async () => {
+    const filePath = await createTempPath()
+    const legacyTask = task({
+      completedVersion: {
+        updatedAt: '2026-08-29', latestChapter: '第一章', status: '连载',
+      },
+    })
+    writeFileSync(filePath, JSON.stringify({
+      schemaVersion: 3,
+      revision: 3,
+      tasks: [legacyTask],
+      legacyImportCompleted: true,
+    }))
+
+    expect(new DownloadTaskStore(filePath).load().tasks[0]).toEqual(legacyTask)
+    expect(new DownloadTaskStore(filePath).load().tasks[0].batchId).toBeUndefined()
+  })
+
   it('backs up invalid JSON and returns an empty state', async () => {
     const filePath = await createTempPath()
     writeFileSync(filePath, '{invalid', { flag: 'w' })
@@ -155,6 +195,22 @@ describe('DownloadTaskStore', () => {
       schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
       revision: 0,
       tasks: [task({ bookId: '../invalid' })],
+      legacyImportCompleted: false,
+    },
+    {
+      schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
+      revision: 0,
+      tasks: [task({ batchId: 'renderer-controlled' })],
+      legacyImportCompleted: false,
+    },
+    {
+      schemaVersion: DOWNLOAD_TASK_SCHEMA_VERSION,
+      revision: 0,
+      tasks: [task({
+        completedVersion: {
+          updatedAt: ' 2026-08-29 ', latestChapter: '第一章', status: '连载',
+        },
+      })],
       legacyImportCompleted: false,
     },
     {

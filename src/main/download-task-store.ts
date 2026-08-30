@@ -6,6 +6,7 @@ import {
   type DownloadTaskCore,
   type DownloadTaskStatus,
 } from '../shared/ipc-types'
+import type { BookVersionFields } from '../shared/book-types'
 import {
   normalizeDownloadArtifactRecord,
   type DownloadArtifactRecord,
@@ -17,7 +18,9 @@ import {
   validateEnqueueDownloadInput,
 } from './ipc-validation'
 
-export const DOWNLOAD_TASK_SCHEMA_VERSION = 2
+export const DOWNLOAD_TASK_SCHEMA_VERSION = 4
+
+type DownloadTaskSchemaVersion = 1 | 2 | 3 | 4
 
 export interface PersistedDownloadTask extends DownloadTaskCore {
   artifacts: DownloadArtifactRecord[]
@@ -60,7 +63,7 @@ function optionalBoundedString(value: unknown, maxLength: number): string | null
   return normalized
 }
 
-function normalizeDownloadRoot(value: unknown, schemaVersion: 1 | 2): string | null {
+function normalizeDownloadRoot(value: unknown, schemaVersion: DownloadTaskSchemaVersion): string | null {
   if (schemaVersion === 1) return ''
   if (value === '') return ''
   if (
@@ -71,6 +74,19 @@ function normalizeDownloadRoot(value: unknown, schemaVersion: 1 | 2): string | n
     || resolve(value) !== value
   ) return null
   return value
+}
+
+function normalizeCompletedVersion(value: unknown): BookVersionFields | null | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value)) return null
+  const result: BookVersionFields = { updatedAt: '', latestChapter: '', status: '' }
+  for (const key of ['updatedAt', 'latestChapter', 'status'] as const) {
+    if (typeof value[key] !== 'string' || value[key].length > 2_048) return null
+    const normalized = value[key].replace(/\s+/g, ' ').trim()
+    if (normalized !== value[key]) return null
+    result[key] = normalized
+  }
+  return result
 }
 
 export function resolveDownloadTaskPath(input: {
@@ -87,7 +103,7 @@ export function resolveDownloadTaskPath(input: {
 export function normalizeStoredDownloadTask(
   value: unknown,
   mode: 'current' | 'legacy',
-  schemaVersion: 1 | 2 = DOWNLOAD_TASK_SCHEMA_VERSION,
+  schemaVersion: DownloadTaskSchemaVersion = DOWNLOAD_TASK_SCHEMA_VERSION,
 ): PersistedDownloadTask | null {
   if (!isRecord(value)) return null
 
@@ -128,12 +144,26 @@ export function normalizeStoredDownloadTask(
     : normalizeDownloadRoot(value.downloadRoot, schemaVersion)
   if (downloadRoot === null) return null
   let artifacts: DownloadArtifactRecord[] = []
-  if (mode === 'current' && schemaVersion === DOWNLOAD_TASK_SCHEMA_VERSION) {
+  if (mode === 'current' && schemaVersion >= 2) {
     if (!Array.isArray(value.artifacts) || value.artifacts.length > 50) return null
     const parsed = value.artifacts.map(normalizeDownloadArtifactRecord)
     if (parsed.some(artifact => artifact === null)) return null
     artifacts = parsed as DownloadArtifactRecord[]
     if (new Set(artifacts.map(artifact => artifact.id)).size !== artifacts.length) return null
+  }
+
+  const completedVersion = mode === 'current' && schemaVersion >= 3
+    ? normalizeCompletedVersion(value.completedVersion)
+    : undefined
+  if (completedVersion === null) return null
+
+  let batchId: string | undefined
+  if (mode === 'current' && schemaVersion >= 4 && value.batchId !== undefined) {
+    try {
+      batchId = validateDownloadTaskId(value.batchId)
+    } catch {
+      return null
+    }
   }
 
   return {
@@ -146,6 +176,8 @@ export function normalizeStoredDownloadTask(
     ...(warning === undefined ? {} : { warning }),
     createdAt,
     updatedAt,
+    ...(batchId === undefined ? {} : { batchId }),
+    ...(completedVersion === undefined ? {} : { completedVersion }),
     artifacts,
     downloadRoot,
   }
@@ -160,7 +192,10 @@ export class DownloadTaskStore {
     try {
       const document = JSON.parse(readFileSync(this.filePath, 'utf-8')) as unknown
       if (!isRecord(document)) throw new Error('下载任务文件格式无效')
-      if (document.schemaVersion !== 1 && document.schemaVersion !== DOWNLOAD_TASK_SCHEMA_VERSION) {
+      if (document.schemaVersion !== 1
+        && document.schemaVersion !== 2
+        && document.schemaVersion !== 3
+        && document.schemaVersion !== DOWNLOAD_TASK_SCHEMA_VERSION) {
         throw new Error('下载任务文件版本不支持')
       }
       if (
@@ -172,7 +207,7 @@ export class DownloadTaskStore {
         throw new Error('下载任务文件格式无效')
       }
 
-      const schemaVersion = document.schemaVersion as 1 | 2
+      const schemaVersion = document.schemaVersion as DownloadTaskSchemaVersion
       const tasks = document.tasks.map((value) => (
         normalizeStoredDownloadTask(value, 'current', schemaVersion)
       ))

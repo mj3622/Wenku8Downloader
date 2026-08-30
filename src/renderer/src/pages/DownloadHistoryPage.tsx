@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
+  IconChevronDown,
+  IconChevronRight,
   IconDownload,
   IconExternalLink,
   IconFolderOpen,
@@ -52,6 +54,8 @@ export default function DownloadHistoryPage() {
     clearHistory,
     retryTask,
     cancelTask,
+    retryBatch,
+    cancelBatch,
   } = useDownloadStore()
   const {
     snapshot: configSnapshot,
@@ -89,9 +93,22 @@ export default function DownloadHistoryPage() {
     }
   }
 
-  const activeTasks = tasks.filter((task) => ACTIVE_DOWNLOAD_STATUSES.includes(task.status))
-  const retryable = tasks.filter((task) => RETRYABLE_DOWNLOAD_STATUSES.includes(task.status))
-  const completed = tasks.filter((t) => t.status === 'completed')
+  const batches = Array.from(tasks.reduce((groups, task) => {
+    if (!task.batchId) return groups
+    const current = groups.get(task.batchId) ?? []
+    current.push(task)
+    groups.set(task.batchId, current)
+    return groups
+  }, new Map<string, DownloadTask[]>()).entries()).sort((left, right) => (
+    Math.max(...right[1].map(task => task.createdAt))
+      - Math.max(...left[1].map(task => task.createdAt))
+  ))
+  const standaloneTasks = tasks.filter(task => !task.batchId)
+  const activeTasks = standaloneTasks.filter((task) => ACTIVE_DOWNLOAD_STATUSES.includes(task.status))
+  const retryable = standaloneTasks.filter((task) => RETRYABLE_DOWNLOAD_STATUSES.includes(task.status))
+  const completed = standaloneTasks.filter((t) => t.status === 'completed')
+  const allCompleted = tasks.filter(task => task.status === 'completed')
+  const allRetryable = tasks.filter(task => RETRYABLE_DOWNLOAD_STATUSES.includes(task.status))
   const visibleCompleted = completed.slice(0, visibleCompletedCount)
 
   const handleClearCompleted = async () => {
@@ -161,7 +178,7 @@ export default function DownloadHistoryPage() {
     <div>
       <DownloadHistoryHeader actions={(
         <div className="flex flex-wrap justify-end gap-2">
-          {completed.length > 0 && (
+          {allCompleted.length > 0 && (
             <button
               onClick={handleClearCompleted}
               disabled={clearingScope !== null}
@@ -172,7 +189,7 @@ export default function DownloadHistoryPage() {
               {clearingScope === 'completed' ? '正在清空…' : '清空已完成'}
             </button>
           )}
-          {(completed.length > 0 || retryable.length > 0) && (
+          {(allCompleted.length > 0 || allRetryable.length > 0) && (
             <button
               onClick={handleClearHistory}
               disabled={clearingScope !== null}
@@ -185,6 +202,32 @@ export default function DownloadHistoryPage() {
           )}
         </div>
       )} />
+
+      {batches.length > 0 && (
+        <section className="mb-5" aria-labelledby="download-batches-heading">
+          <h2 id="download-batches-heading" className="mb-3 flex items-center gap-1.5 text-[13px] font-semibold text-apple-heading">
+            批次任务
+            <span className="text-[12px] font-normal text-apple-secondary">· {batches.length} 组</span>
+          </h2>
+          <div className="space-y-2">
+            {batches.map(([batchId, batchTasks]) => (
+              <DownloadBatchGroup
+                key={batchId}
+                batchId={batchId}
+                tasks={batchTasks}
+                titleFormat={titleFormat}
+                onCancelBatch={cancelBatch}
+                onRetryBatch={retryBatch}
+                onCancelTask={cancelTask}
+                onRetryTask={retryTask}
+                onRemoveTask={removeTask}
+                onArtifactAction={handleArtifactAction}
+                onOpenFolder={handleOpenFolder}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 进行中 */}
       {activeTasks.length > 0 && (
@@ -392,6 +435,240 @@ export default function DownloadHistoryPage() {
         </section>
       )}
 
+    </div>
+  )
+}
+
+function downloadTypeLabel(task: DownloadTask): string {
+  if (task.type === 'images') return '插图下载'
+  if (task.type === 'epub_volume') return '分卷 EPUB'
+  return '整本 EPUB'
+}
+
+function DownloadBatchGroup({
+  batchId,
+  tasks,
+  titleFormat,
+  onCancelBatch,
+  onRetryBatch,
+  onCancelTask,
+  onRetryTask,
+  onRemoveTask,
+  onArtifactAction,
+  onOpenFolder,
+}: {
+  batchId: string
+  tasks: DownloadTask[]
+  titleFormat: TitleFormat
+  onCancelBatch: (id: string) => void
+  onRetryBatch: (id: string) => void
+  onCancelTask: (id: string) => void
+  onRetryTask: (id: string) => void
+  onRemoveTask: (id: string) => void
+  onArtifactAction: (
+    taskId: string,
+    artifact: DownloadArtifact,
+    action: 'open' | 'reveal',
+  ) => Promise<void>
+  onOpenFolder: (folder: DownloadFolder) => Promise<void>
+}) {
+  const completedCount = tasks.filter(task => task.status === 'completed').length
+  const activeCount = tasks.filter(task => ACTIVE_DOWNLOAD_STATUSES.includes(task.status)).length
+  const failedCount = tasks.filter(task => task.status === 'failed').length
+  const cancelledCount = tasks.filter(task => task.status === 'cancelled' || task.status === 'interrupted').length
+  const retryableCount = tasks.filter(task => RETRYABLE_DOWNLOAD_STATUSES.includes(task.status)).length
+  const progress = Math.round(tasks.reduce((sum, task) => sum + task.progress, 0) / tasks.length)
+  const hasProblem = failedCount > 0 || cancelledCount > 0
+  const allCompleted = completedCount === tasks.length
+  const [expanded, setExpanded] = useState(() => hasProblem)
+
+  useEffect(() => {
+    if (hasProblem) setExpanded(true)
+  }, [hasProblem])
+
+  const first = tasks[0]
+  const displayTitle = formatBookTitle(first.title, titleFormat)
+
+  return (
+    <div className={`overflow-hidden rounded-xl border bg-apple-card ${hasProblem ? 'border-amber-200' : 'border-apple-border-subtle'}`}>
+      <div className="p-4">
+        <div className="flex flex-wrap items-start gap-3">
+          {first.cover && (
+            <BookCover
+              src={first.cover}
+              title={displayTitle}
+              className="h-14 w-10 rounded-md"
+              decorative
+              showFailureText={false}
+            />
+          )}
+          <div className="min-w-[220px] flex-1">
+            <div className="break-words text-[14px] font-semibold leading-5 text-apple-heading">
+              {displayTitle}
+            </div>
+            <div className="mt-0.5 text-[12px] text-apple-secondary">
+              {downloadTypeLabel(first)} · {tasks.length} 卷
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-apple-bg">
+                <div
+                  className={`download-progress h-full origin-left rounded-full ${hasProblem ? 'bg-amber-500' : allCompleted ? 'bg-emerald-500' : 'bg-apple-accent'}`}
+                  style={{ transform: `scaleX(${progress / 100})` }}
+                />
+              </div>
+              <span className="text-[11px] font-medium tabular-nums text-apple-secondary">{progress}%</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-apple-secondary">
+              <span>已完成 {completedCount}</span>
+              <span>进行中 {activeCount}</span>
+              <span>失败 {failedCount}</span>
+              <span>已取消 {cancelledCount}</span>
+            </div>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+            {activeCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onCancelBatch(batchId)}
+                aria-label={`取消 ${displayTitle} 下载批次`}
+                className="motion-pressable rounded-lg border border-apple-border-input px-3 py-1.5 text-[11px] font-medium text-apple-secondary hover:bg-apple-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+              >
+                取消整组
+              </button>
+            )}
+            {retryableCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onRetryBatch(batchId)}
+                aria-label={`重试 ${displayTitle} 未完成下载`}
+                className="motion-pressable inline-flex items-center gap-1 rounded-lg bg-apple-accent-light px-3 py-1.5 text-[11px] font-medium text-apple-accent hover:bg-apple-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+              >
+                <IconRefresh aria-hidden="true" size={13} stroke={1.8} />
+                重试未完成项
+              </button>
+            )}
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(value => !value)}
+              className="motion-pressable inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] text-apple-secondary hover:bg-apple-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+            >
+              {expanded
+                ? <IconChevronDown aria-hidden="true" size={14} stroke={1.8} />
+                : <IconChevronRight aria-hidden="true" size={14} stroke={1.8} />}
+              {expanded ? '收起' : '详情'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="divide-y divide-apple-border-subtle border-t border-apple-border-subtle">
+          {tasks.map(task => {
+            const availableArtifacts = task.artifacts.filter(artifact => artifact.available)
+            const unavailableArtifactCount = task.artifacts.length - availableArtifacts.length
+            return (
+              <div key={task.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                <div className="min-w-[180px] flex-1">
+                  <div className="break-words text-[12px] font-medium leading-5 text-apple-heading">
+                    {task.volume || '整本'}
+                  </div>
+                  <div className="text-[11px] text-apple-secondary">
+                    {task.status === 'completed'
+                      ? '已完成'
+                      : task.status === 'failed'
+                        ? '下载失败'
+                        : task.status === 'cancelled'
+                          ? '已取消'
+                          : task.status === 'interrupted'
+                            ? '已中断'
+                            : task.phase || '等待下载'}
+                    {' · '}{task.progress}%
+                  </div>
+                  {task.status === 'failed' && (
+                    <p className="mt-0.5 text-[11px] leading-4 text-red-600">
+                      {getUserFeedback(task.error, 'download').message}
+                    </p>
+                  )}
+                  {task.warning && (
+                    <p className="mt-0.5 text-[11px] leading-4 text-amber-600">
+                      {getUserFeedback(task.warning, 'download-warning').message}
+                    </p>
+                  )}
+                  {unavailableArtifactCount > 0 && (
+                    <p className="mt-0.5 text-[11px] leading-4 text-apple-tertiary">文件已移动或删除</p>
+                  )}
+                </div>
+                <div className="ml-auto flex items-center gap-1">
+                  {availableArtifacts.map(artifact => (
+                    <span key={artifact.id} className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void onArtifactAction(task.id, artifact, 'open')}
+                        aria-label={`打开 ${artifact.name}`}
+                        className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                      >
+                        <IconExternalLink aria-hidden="true" size={15} stroke={1.8} />
+                      </button>
+                      {artifact.kind === 'file' && (
+                        <button
+                          type="button"
+                          onClick={() => void onArtifactAction(task.id, artifact, 'reveal')}
+                          aria-label={`在文件夹中显示 ${artifact.name}`}
+                          className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                        >
+                          <IconFolderOpen aria-hidden="true" size={15} stroke={1.8} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {task.status === 'completed' && availableArtifacts.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void onOpenFolder(task.type === 'images' ? 'pics' : 'novels')}
+                      aria-label={`打开 ${task.volume || task.title} 的下载目录`}
+                      className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-apple-accent-light hover:text-apple-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apple-accent/25"
+                    >
+                      <IconFolderOpen aria-hidden="true" size={15} stroke={1.8} />
+                    </button>
+                  )}
+                  {ACTIVE_DOWNLOAD_STATUSES.includes(task.status) && (
+                    <button
+                      type="button"
+                      disabled={task.status === 'cancelling'}
+                      onClick={() => onCancelTask(task.id)}
+                      aria-label={`取消 ${task.volume || task.title} 下载`}
+                      className="motion-pressable rounded-lg px-3 py-1.5 text-[11px] text-apple-secondary hover:bg-apple-bg disabled:opacity-50"
+                    >
+                      {task.status === 'cancelling' ? '正在取消' : '取消'}
+                    </button>
+                  )}
+                  {RETRYABLE_DOWNLOAD_STATUSES.includes(task.status) && (
+                    <button
+                      type="button"
+                      onClick={() => onRetryTask(task.id)}
+                      aria-label={`重试 ${task.volume || task.title} 下载`}
+                      className="motion-pressable rounded-lg bg-apple-accent-light px-3 py-1.5 text-[11px] font-medium text-apple-accent"
+                    >
+                      重试
+                    </button>
+                  )}
+                  {(task.status === 'completed' || RETRYABLE_DOWNLOAD_STATUSES.includes(task.status)) && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveTask(task.id)}
+                      aria-label={`删除 ${task.volume || task.title} 下载记录`}
+                      className="motion-pressable flex h-8 w-8 items-center justify-center rounded-lg text-apple-tertiary hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+                    >
+                      <IconTrash aria-hidden="true" size={15} stroke={1.8} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

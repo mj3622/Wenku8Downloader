@@ -13,7 +13,7 @@ const ENTRY = {
   author: '林间笔记',
   latestChapter: '第十二章',
   bookmark: null,
-  updatedAt: '26-08-20',
+  updatedAt: '2026-08-20',
 }
 
 function downloads(tasks: DownloadSnapshot['tasks'] = []): DownloadSnapshot {
@@ -134,6 +134,56 @@ describe('BookshelfService', () => {
 
     await expect(service.getPage()).resolves.toMatchObject({
       entries: [expect.objectContaining({ localState: 'partial', updateAvailable: false })],
+    })
+  })
+
+  it('compares the newest stable completed full EPUB with the remote bookshelf version', async () => {
+    const baseTask = {
+      id: 'task-full', bookId: '101', title: '星海图书馆', type: 'epub_full' as const,
+      status: 'completed' as const, progress: 100, createdAt: 1, updatedAt: 2, artifacts: [],
+    }
+    const current = setup({
+      snapshot: downloads([
+        {
+          ...baseTask,
+          completedVersion: {
+            updatedAt: '2026-08-20', latestChapter: '第十二章', status: '连载',
+          },
+        },
+        { ...baseTask, id: 'task-newer-unstable', updatedAt: 3 },
+      ]),
+    })
+    await expect(current.service.getPage()).resolves.toMatchObject({
+      entries: [expect.objectContaining({
+        localState: 'current',
+        updateAvailable: false,
+        localCompletedVersion: expect.objectContaining({ updatedAt: '2026-08-20' }),
+      })],
+    })
+
+    const outdated = setup({
+      snapshot: downloads([{
+        ...baseTask,
+        completedVersion: {
+          updatedAt: '2026-08-01', latestChapter: '第十一章', status: '连载',
+        },
+      }]),
+    })
+    await expect(outdated.service.getPage()).resolves.toMatchObject({
+      entries: [expect.objectContaining({ localState: 'update', updateAvailable: true })],
+    })
+  })
+
+  it('reports unknown when either side has no stable comparable version', async () => {
+    const snapshot = downloads([{
+      id: 'task-full', bookId: '101', title: '星海图书馆', type: 'epub_full',
+      status: 'completed', progress: 100, createdAt: 1, updatedAt: 2, artifacts: [],
+      completedVersion: { updatedAt: '', latestChapter: '', status: '' },
+    }])
+    const { service } = setup({ snapshot })
+
+    await expect(service.getPage()).resolves.toMatchObject({
+      entries: [expect.objectContaining({ localState: 'unknown', updateAvailable: false })],
     })
   })
 })

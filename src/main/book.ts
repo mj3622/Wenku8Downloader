@@ -121,6 +121,10 @@ export class Book {
     return this.version.generationKey
   }
 
+  get versionFields(): BookVersionFields {
+    return { ...this.version.fields }
+  }
+
   static async create(
     bookId: string,
     crawler: WebCrawler,

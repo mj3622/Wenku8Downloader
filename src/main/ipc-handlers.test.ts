@@ -32,8 +32,11 @@ const mocks = vi.hoisted(() => {
       legacyImportCompleted: false,
     })),
     enqueueDownload: vi.fn(),
+    enqueueDownloadBatch: vi.fn(),
     cancelDownload: vi.fn(),
+    cancelDownloadBatch: vi.fn(),
     retryDownload: vi.fn(),
+    retryDownloadBatch: vi.fn(),
     removeDownload: vi.fn(),
     clearDownloadHistory: vi.fn(),
     importLegacyDownloadHistory: vi.fn(),
@@ -124,6 +127,7 @@ function createBookFixture() {
     generationKey: 'a'.repeat(64),
     legacyImportGenerationKey: 'a'.repeat(64),
     baseChapterUrl: 'https://www.wenku8.net/novel/3/3057/',
+    versionFields: { updatedAt: '', latestChapter: '', status: '' },
     basicInfo: {
       '标题': '测试作品',
       '作者': '测试作者',
@@ -205,8 +209,11 @@ function createServices(
     downloads: {
       getSnapshot: mocks.getDownloadSnapshot,
       enqueue: mocks.enqueueDownload,
+      enqueueBatch: mocks.enqueueDownloadBatch,
       cancel: mocks.cancelDownload,
+      cancelBatch: mocks.cancelDownloadBatch,
       retry: mocks.retryDownload,
+      retryBatch: mocks.retryDownloadBatch,
       remove: mocks.removeDownload,
       clearHistory: mocks.clearDownloadHistory,
       importLegacyHistory: mocks.importLegacyDownloadHistory,
@@ -531,6 +538,26 @@ describe('registerIpcHandlers application operations', () => {
       refresh: false,
       url: 'https://example.com/',
     })).rejects.toThrow('请求参数格式无效')
+  })
+
+  it('validates batch inputs and forwards only main-generated batch operations', async () => {
+    const item = {
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+
+    await invoke('download:enqueue-batch', {}, { inputs: [item] })
+    await invoke('download:cancel-batch', {}, { batchId })
+    await invoke('download:retry-batch', {}, { batchId })
+
+    expect(mocks.enqueueDownloadBatch).toHaveBeenCalledWith([item])
+    expect(mocks.cancelDownloadBatch).toHaveBeenCalledWith(batchId)
+    expect(mocks.retryDownloadBatch).toHaveBeenCalledWith(batchId)
+    await expect(invoke('download:enqueue-batch', {}, {
+      inputs: [{ ...item, batchId }],
+    })).rejects.toThrow('批次任务格式')
+    await expect(invoke('download:cancel-batch', {}, { batchId, taskId: batchId }))
+      .rejects.toThrow('批次请求格式')
   })
 
   it('validates and forwards catalog requests without logging arbitrary fields', async () => {

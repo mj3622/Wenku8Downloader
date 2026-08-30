@@ -18,7 +18,7 @@ const ENTRY = {
   author: '林间笔记',
   latestChapter: '第十二章 晚风与远方的灯火'.repeat(2),
   bookmark: '第三章',
-  updatedAt: '26-08-20',
+  updatedAt: '2026-08-20',
   localState: 'update' as const,
   updateAvailable: true,
 }

@@ -7,8 +7,11 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   enqueueDownload: vi.fn(),
+  enqueueDownloadBatch: vi.fn(),
   cancelDownload: vi.fn(),
+  cancelDownloadBatch: vi.fn(),
   retryDownload: vi.fn(),
+  retryDownloadBatch: vi.fn(),
   removeDownload: vi.fn(),
   clearDownloadHistory: vi.fn(),
 }))
@@ -16,8 +19,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../api/client', () => ({
   api: {
     enqueueDownload: mocks.enqueueDownload,
+    enqueueDownloadBatch: mocks.enqueueDownloadBatch,
     cancelDownload: mocks.cancelDownload,
+    cancelDownloadBatch: mocks.cancelDownloadBatch,
     retryDownload: mocks.retryDownload,
+    retryDownloadBatch: mocks.retryDownloadBatch,
     removeDownload: mocks.removeDownload,
     clearDownloadHistory: mocks.clearDownloadHistory,
   },
@@ -211,23 +217,65 @@ describe('downloadStore commands', () => {
     expect(useDownloadStore.getState().tasks).toEqual([active])
   })
 
+  it.each([
+    {
+      acceptedTaskIds: ['task-1', 'task-2'],
+      skippedDuplicates: [],
+      expected: { tone: 'success', message: '已加入 2 项任务' },
+    },
+    {
+      acceptedTaskIds: ['task-1'],
+      skippedDuplicates: [{ taskId: 'old', bookId: '100', type: 'epub_volume' as const }],
+      expected: { tone: 'success', message: '已加入 1 项，跳过 1 项' },
+    },
+    {
+      acceptedTaskIds: [],
+      skippedDuplicates: [{ taskId: 'old', bookId: '100', type: 'epub_volume' as const }],
+      expected: { tone: 'info', message: '已跳过 1 项重复任务' },
+    },
+  ])('summarizes batch enqueue results without per-item toasts', async ({
+    acceptedTaskIds, skippedDuplicates, expected,
+  }) => {
+    mocks.enqueueDownloadBatch.mockResolvedValue({
+      batchId: acceptedTaskIds.length > 0 ? 'batch-1' : null,
+      acceptedTaskIds,
+      skippedDuplicates,
+      snapshot: snapshot(1),
+    })
+    const inputs = [{
+      bookId: '100', title: '测试作品', type: 'epub_volume' as const, volume: '第一卷',
+    }]
+
+    useDownloadStore.getState().downloadBatch(inputs)
+
+    await vi.waitFor(() => expect(useToastStore.getState().items).toHaveLength(1))
+    expect(mocks.enqueueDownloadBatch).toHaveBeenCalledWith(inputs)
+    expect(useToastStore.getState().items[0]).toMatchObject(expected)
+  })
+
   it('forwards task and history commands', async () => {
     const response = snapshot(2)
     mocks.cancelDownload.mockResolvedValue(response)
+    mocks.cancelDownloadBatch.mockResolvedValue(response)
     mocks.retryDownload.mockResolvedValue(response)
+    mocks.retryDownloadBatch.mockResolvedValue(response)
     mocks.removeDownload.mockResolvedValue(response)
     mocks.clearDownloadHistory.mockResolvedValue(response)
 
     const store = useDownloadStore.getState()
     store.cancelTask('task-1')
+    store.cancelBatch('batch-1')
     store.retryTask('task-2')
+    store.retryBatch('batch-2')
     store.removeTask('task-3')
     store.clearCompleted()
     store.clearHistory()
 
     await vi.waitFor(() => expect(mocks.clearDownloadHistory).toHaveBeenCalledTimes(2))
     expect(mocks.cancelDownload).toHaveBeenCalledWith('task-1')
+    expect(mocks.cancelDownloadBatch).toHaveBeenCalledWith('batch-1')
     expect(mocks.retryDownload).toHaveBeenCalledWith('task-2')
+    expect(mocks.retryDownloadBatch).toHaveBeenCalledWith('batch-2')
     expect(mocks.removeDownload).toHaveBeenCalledWith('task-3')
     expect(mocks.clearDownloadHistory.mock.calls).toEqual([['completed'], ['terminal']])
   })

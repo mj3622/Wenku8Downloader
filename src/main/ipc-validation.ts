@@ -31,6 +31,7 @@ const MAX_RENDERER_REPORT = 64 * 1024
 const MAX_VOLUME_COVER_REQUESTS = 500
 const MAX_RANKING_PAGE = 10_000
 const MAX_CATALOG_PAGE = 500
+const MAX_DOWNLOAD_BATCH_SIZE = 100
 const CATALOG_PUBLISHERS = new Set<string>(CATALOG_PUBLISHER_OPTIONS.map(option => option.value))
 const UUID_TASK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LEGACY_TASK_ID = /^dl-\d{1,16}-\d{1,10}$/
@@ -234,6 +235,19 @@ export function validateDownloadTaskId(value: unknown): string {
   return value
 }
 
+export const validateDownloadBatchId = validateDownloadTaskId
+
+export function validateDownloadBatchPayload(value: unknown): { batchId: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载批次请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'batchId')) {
+    throw new Error('下载批次请求格式无效')
+  }
+  return { batchId: validateDownloadBatchId(record.batchId) }
+}
+
 export function validateDownloadArtifactPayload(value: unknown): {
   taskId: string
   artifactId: string
@@ -311,6 +325,27 @@ export function validateEnqueueDownloadInput(value: unknown): EnqueueDownloadInp
     type,
     ...(volume === undefined ? {} : { volume }),
   }
+}
+
+export function validateEnqueueDownloadBatchPayload(value: unknown): EnqueueDownloadInput[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('下载批次请求格式无效')
+  }
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'inputs')
+    || !Array.isArray(record.inputs)
+    || record.inputs.length < 1
+    || record.inputs.length > MAX_DOWNLOAD_BATCH_SIZE) {
+    throw new Error('每个下载批次需要包含 1 到 100 项任务')
+  }
+  const allowedKeys = new Set(['bookId', 'title', 'cover', 'type', 'volume'])
+  return record.inputs.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+      || Object.keys(item).some(key => !allowedKeys.has(key))) {
+      throw new Error('下载批次任务格式无效')
+    }
+    return validateEnqueueDownloadInput(item)
+  })
 }
 
 export function validateDownloadHistoryScope(value: unknown): DownloadHistoryScope {

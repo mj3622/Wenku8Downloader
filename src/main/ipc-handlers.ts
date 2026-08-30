@@ -16,11 +16,13 @@ import {
   validateBookId,
   validateCatalogPayload,
   validateDownloadArtifactPayload,
+  validateDownloadBatchPayload,
   validateDiscoveryHomePayload,
   validateDiscoveryRankingPayload,
   validateDownloadHistoryScope,
   validateDownloadTaskId,
   validateEnqueueDownloadInput,
+  validateEnqueueDownloadBatchPayload,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
@@ -82,8 +84,11 @@ export interface IpcServices {
     DownloadManager,
     | 'getSnapshot'
     | 'enqueue'
+    | 'enqueueBatch'
     | 'cancel'
+    | 'cancelBatch'
     | 'retry'
+    | 'retryBatch'
     | 'remove'
     | 'clearHistory'
     | 'importLegacyHistory'
@@ -389,6 +394,29 @@ export function registerIpcHandlers(services: IpcServices): void {
       return services.downloads.enqueue(input)
     })
   })
+
+  ipcMain.handle('download:enqueue-batch', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.enqueue-batch', context, () => {
+      const inputs = validateEnqueueDownloadBatchPayload(rawPayload)
+      context.taskCount = inputs.length
+      return services.downloads.enqueueBatch(inputs)
+    })
+  })
+
+  for (const [channel, eventName, command] of [
+    ['download:cancel-batch', 'download.cancel-batch', services.downloads.cancelBatch],
+    ['download:retry-batch', 'download.retry-batch', services.downloads.retryBatch],
+  ] as const) {
+    ipcMain.handle(channel, (_event, rawPayload: unknown) => {
+      const context: LogContext = {}
+      return runLoggedOperation(eventName, context, () => {
+        const { batchId } = validateDownloadBatchPayload(rawPayload)
+        context.batchId = batchId
+        return command.call(services.downloads, batchId)
+      })
+    })
+  }
 
   for (const [channel, eventName, command] of [
     ['download:cancel', 'download.cancel', services.downloads.cancel],

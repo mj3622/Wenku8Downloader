@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
   downloadEpub: vi.fn(),
   downloadImages: vi.fn(),
+  downloadBatch: vi.fn(),
   getVolumeCovers: vi.fn(),
   openExternal: vi.fn(),
 }))
@@ -37,6 +38,7 @@ vi.mock('../../stores/downloadStore', () => ({
   useDownloadStore: () => ({
     downloadEpub: mocks.downloadEpub,
     downloadImages: mocks.downloadImages,
+    downloadBatch: mocks.downloadBatch,
   }),
 }))
 
@@ -230,9 +232,16 @@ describe('BookDetailPage', () => {
     })
 
     expect(mocks.getVolumeCovers).not.toHaveBeenCalled()
-    expect(mocks.downloadEpub.mock.calls).toEqual([
-      ['3057', '测试作品', 'https://example.com/book.jpg', '第一卷'],
-      ['3057', '测试作品', 'https://example.com/book.jpg', '第二卷'],
+    expect(mocks.downloadBatch).toHaveBeenCalledTimes(1)
+    expect(mocks.downloadBatch).toHaveBeenCalledWith([
+      {
+        bookId: '3057', title: '测试作品', cover: 'https://example.com/book.jpg',
+        type: 'epub_volume', volume: '第一卷',
+      },
+      {
+        bookId: '3057', title: '测试作品', cover: 'https://example.com/book.jpg',
+        type: 'epub_volume', volume: '第二卷',
+      },
     ])
     expect(container.textContent).toContain('下载页')
   })

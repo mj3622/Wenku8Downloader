@@ -7,7 +7,9 @@ import {
   validateDownloadTaskId,
   validateDiscoveryRankingPayload,
   validateDiscoveryHomePayload,
+  validateDownloadBatchPayload,
   validateEnqueueDownloadInput,
+  validateEnqueueDownloadBatchPayload,
   validateExternalUrl,
   validateLoginOperationId,
   validateOpenFolder,
@@ -102,6 +104,29 @@ describe('IPC validation', () => {
       title: '测试作品',
       type: 'epub_volume',
     })).toThrow('分卷')
+  })
+
+  it('accepts 1 to 100 batch items and rejects renderer-controlled batch fields', () => {
+    const item = {
+      bookId: '3057', title: '测试作品', type: 'epub_volume', volume: '第一卷',
+    }
+    expect(validateEnqueueDownloadBatchPayload({ inputs: [item] })).toEqual([item])
+    expect(validateEnqueueDownloadBatchPayload({
+      inputs: Array.from({ length: 100 }, () => item),
+    })).toHaveLength(100)
+    expect(() => validateEnqueueDownloadBatchPayload({ inputs: [] })).toThrow('1 到 100')
+    expect(() => validateEnqueueDownloadBatchPayload({
+      inputs: [{ ...item, batchId: '550e8400-e29b-41d4-a716-446655440000' }],
+    })).toThrow('批次任务格式')
+    expect(() => validateEnqueueDownloadBatchPayload({ inputs: [item], url: 'https://example.com' }))
+      .toThrow('批次')
+  })
+
+  it('accepts only a bounded batch ID for batch commands', () => {
+    const batchId = '550e8400-e29b-41d4-a716-446655440000'
+    expect(validateDownloadBatchPayload({ batchId })).toEqual({ batchId })
+    expect(() => validateDownloadBatchPayload({ batchId, taskId: batchId }))
+      .toThrow('批次请求格式')
   })
 
   it('rejects malformed download enqueue fields', () => {

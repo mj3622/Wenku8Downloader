@@ -6,6 +6,7 @@ import type {
 import type { CacheWriteGuard } from './cache/cache-store'
 import type { CachedBookshelf } from './bookshelf-cache-repository'
 import type { RemoteBookshelfEntry } from './bookshelf-parser'
+import { createBookVersion } from './book-cache-model'
 
 const FRESH_MS = 10 * 60 * 1_000
 const STALE_FALLBACK_MS = 24 * 60 * 60 * 1_000
@@ -37,12 +38,43 @@ function cloneRemote(value: CachedBookshelf): CachedBookshelf {
 function mergeEntry(entry: RemoteBookshelfEntry, downloads: DownloadSnapshot): BookshelfEntry {
   const completed = downloads.tasks
     .filter(task => task.bookId === entry.bookId && task.status === 'completed')
-  const hasFull = completed.some(task => task.type === 'epub_full')
+  const fullTasks = completed
+    .filter(task => task.type === 'epub_full')
+    .sort((left, right) => right.updatedAt - left.updatedAt)
   const hasPartial = completed.some(task => task.type === 'epub_volume' || task.type === 'images')
+  const stableFullTask = fullTasks.find(task => (
+    task.completedVersion
+      ? createBookVersion(task.completedVersion, task.updatedAt).stable
+      : false
+  ))
+  const localCompletedVersion = stableFullTask?.completedVersion
+  const remoteVersion = createBookVersion({
+    updatedAt: entry.updatedAt ?? '',
+    latestChapter: entry.latestChapter ?? '',
+    status: '',
+  }, 0)
+  const localVersion = localCompletedVersion
+    ? createBookVersion({ ...localCompletedVersion, status: '' }, stableFullTask!.updatedAt)
+    : null
+  const comparable = Boolean(localVersion?.stable && remoteVersion.stable)
+  const updateAvailable = comparable
+    && localVersion!.generationKey !== remoteVersion.generationKey
+  const localState = localVersion
+    ? comparable
+      ? updateAvailable ? 'update' : 'current'
+      : 'unknown'
+    : fullTasks.length > 0
+      ? 'unknown'
+      : hasPartial
+        ? 'partial'
+        : 'none'
   return {
     ...entry,
-    localState: hasFull ? 'unknown' : hasPartial ? 'partial' : 'none',
-    updateAvailable: false,
+    localState,
+    ...(localCompletedVersion === undefined
+      ? {}
+      : { localCompletedVersion: { ...localCompletedVersion } }),
+    updateAvailable,
   }
 }
 

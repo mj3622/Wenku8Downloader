@@ -87,7 +87,8 @@ function setup(initial: PersistedDownloadState = {
     store,
     executor,
     ...options,
-    createId: () => `123e4567-e89b-42d3-a456-42661417400${nextId++}`,
+    createId: () => `123e4567-e89b-42d3-a456-${String(nextId++).padStart(12, '0')}`,
+    createBatchId: () => '223e4567-e89b-42d3-a456-426614174000',
     now: () => now++,
   })
   manager.initialize()
@@ -95,7 +96,15 @@ function setup(initial: PersistedDownloadState = {
 }
 
 function completedExecution(): DownloadExecutionResult {
-  return { warnings: [], artifacts: [] }
+  return {
+    warnings: [],
+    artifacts: [],
+    versionFields: {
+      updatedAt: '2026-08-29',
+      latestChapter: '第一章',
+      status: '连载',
+    },
+  }
 }
 
 function taskByBook(snapshot: DownloadSnapshot, bookId: string): DownloadTask {
@@ -168,6 +177,87 @@ describe('DownloadManager scheduling', () => {
     expect([firstVolume.status, secondVolume.status, epub.status])
       .toEqual(['enqueued', 'enqueued', 'enqueued'])
     expect(manager.getSnapshot().tasks).toHaveLength(3)
+  })
+
+  it('persists a 100-item batch atomically with one main-generated batch ID', () => {
+    const { manager, executor, saved } = setup()
+    executor.execute.mockReturnValue(new Promise(() => undefined))
+    const inputs = Array.from({ length: 100 }, (_, index) => input({
+      bookId: String(index + 1),
+      type: 'epub_volume',
+      volume: `第${index + 1}卷`,
+    }))
+
+    const result = manager.enqueueBatch(inputs)
+
+    expect(result.acceptedTaskIds).toHaveLength(100)
+    expect(result.skippedDuplicates).toEqual([])
+    expect(new Set(result.snapshot.tasks.map(task => task.batchId)))
+      .toEqual(new Set(['223e4567-e89b-42d3-a456-426614174000']))
+    expect(saved.some(state => state.tasks.length > 0 && state.tasks.length < 100)).toBe(false)
+    expect(saved[1].tasks.map(task => task.volume)).toEqual(inputs.map(item => item.volume))
+    expect(executor.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps accepted order while skipping active and within-batch duplicates', () => {
+    const { manager, executor } = setup()
+    executor.execute.mockReturnValue(new Promise(() => undefined))
+    const existing = manager.enqueue(input({ type: 'images', volume: '第一卷' }))
+
+    const result = manager.enqueueBatch([
+      input({ type: 'images', volume: '第一卷' }),
+      input({ type: 'images', volume: '第二卷' }),
+      input({ type: 'epub_volume', volume: '第三卷' }),
+      input({ type: 'images', volume: '第二卷' }),
+    ])
+
+    expect(result.acceptedTaskIds).toHaveLength(2)
+    expect(result.skippedDuplicates.map(item => item.taskId)).toEqual([
+      existing.taskId,
+      result.acceptedTaskIds[0],
+    ])
+    expect(result.snapshot.tasks.slice(0, 2).map(task => task.volume))
+      .toEqual(['第二卷', '第三卷'])
+  })
+
+  it('cancels only active tasks from the selected batch', () => {
+    const { manager, executor } = setup()
+    executor.execute.mockReturnValue(new Promise(() => undefined))
+    const batch = manager.enqueueBatch([
+      input({ bookId: '100', type: 'epub_volume', volume: '第一卷' }),
+      input({ bookId: '100', type: 'epub_volume', volume: '第二卷' }),
+    ])
+    manager.enqueue(input({ bookId: '200' }))
+
+    const snapshot = manager.cancelBatch(batch.batchId!)
+
+    expect(snapshot.tasks.filter(task => task.batchId === batch.batchId).map(task => task.status))
+      .toEqual(['cancelling', 'cancelled'])
+    expect(taskByBook(snapshot, '200').status).toBe('pending')
+  })
+
+  it('retries only retryable batch tasks and keeps active duplicates unchanged', () => {
+    const batchId = '223e4567-e89b-42d3-a456-426614174000'
+    const initial: PersistedDownloadState = {
+      revision: 1,
+      tasks: [
+        storedTask({ id: '123e4567-e89b-42d3-a456-426614174001', batchId, status: 'failed' }),
+        storedTask({
+          id: '123e4567-e89b-42d3-a456-426614174002', batchId, bookId: '200',
+          type: 'epub_volume', volume: '第二卷', status: 'cancelled',
+        }),
+      ],
+      legacyImportCompleted: true,
+    }
+    const { manager, executor } = setup(initial)
+    executor.execute.mockReturnValue(new Promise(() => undefined))
+    manager.enqueue(input({ bookId: '100' }))
+
+    const snapshot = manager.retryBatch(batchId)
+
+    expect(snapshot.tasks.find(task => task.id.endsWith('4001'))?.status).toBe('failed')
+    expect(snapshot.tasks.find(task => task.id.endsWith('4002'))?.status).toBe('pending')
+    expect(taskByBook(snapshot, '100').status).toBe('downloading')
   })
 
   it('executes queued tasks strictly in FIFO order', async () => {
@@ -364,6 +454,7 @@ describe('DownloadManager scheduling', () => {
 
     execution.resolve({
       warnings: [],
+      versionFields: completedExecution().versionFields,
       artifacts: [{
         id: 'primary',
         name: 'book.epub',
@@ -374,6 +465,8 @@ describe('DownloadManager scheduling', () => {
     })
 
     await vi.waitFor(() => expect(manager.getSnapshot().tasks[0].status).toBe('completed'))
+    expect(manager.getSnapshot().tasks[0].completedVersion)
+      .toEqual(completedExecution().versionFields)
     expect(saved.at(-1)?.tasks[0].artifacts[0]).toMatchObject({
       path: '/downloads/novels/book.epub',
       rootPath: '/downloads',
@@ -431,7 +524,15 @@ describe('DownloadManager recovery and persistence', () => {
   })
 
   it('converts persisted active tasks to interrupted and keeps terminal records', () => {
-    const active = storedTask({ status: 'downloading', progress: 30 })
+    const completedVersion = {
+      updatedAt: '2026-08-20', latestChapter: '第十二章', status: '连载',
+    }
+    const active = storedTask({
+      status: 'downloading',
+      progress: 30,
+      batchId: '223e4567-e89b-42d3-a456-426614174000',
+      completedVersion,
+    })
     const completed = storedTask({ id: 'dl-1720000000000-2' })
     const { manager, store } = setup({
       revision: 5,
@@ -440,10 +541,46 @@ describe('DownloadManager recovery and persistence', () => {
     })
 
     expect(manager.getSnapshot().tasks).toEqual([
-      expect.objectContaining({ id: active.id, status: 'interrupted', phase: '下载已中断' }),
+      expect.objectContaining({
+        id: active.id,
+        status: 'interrupted',
+        phase: '下载已中断',
+        batchId: active.batchId,
+        completedVersion,
+      }),
       expect.objectContaining({ id: completed.id, status: 'completed' }),
     ])
     expect(store.save).toHaveBeenCalledWith(expect.objectContaining({ revision: 6 }))
+  })
+
+  it('keeps a previous completed version when a retried task fails or is cancelled', async () => {
+    const completedVersion = {
+      updatedAt: '2026-08-20', latestChapter: '第十二章', status: '连载',
+    }
+    const failed = storedTask({ status: 'failed', completedVersion })
+    const failedSetup = setup({
+      revision: 1, tasks: [failed], legacyImportCompleted: true,
+    })
+    failedSetup.executor.execute.mockRejectedValue(new Error('network'))
+
+    failedSetup.manager.retry(failed.id)
+    await vi.waitFor(() => expect(failedSetup.manager.getSnapshot().tasks[0].status).toBe('failed'))
+    expect(failedSetup.manager.getSnapshot().tasks[0].completedVersion).toEqual(completedVersion)
+
+    const cancelled = storedTask({ status: 'cancelled', completedVersion })
+    const cancelledSetup = setup({
+      revision: 1, tasks: [cancelled], legacyImportCompleted: true,
+    })
+    cancelledSetup.executor.execute.mockImplementation((_task, context) => (
+      new Promise((_resolve, reject) => {
+        context.signal.addEventListener('abort', () => reject(new DownloadCancelledError()), { once: true })
+      })
+    ))
+
+    cancelledSetup.manager.retry(cancelled.id)
+    cancelledSetup.manager.cancel(cancelled.id)
+    await vi.waitFor(() => expect(cancelledSetup.manager.getSnapshot().tasks[0].status).toBe('cancelled'))
+    expect(cancelledSetup.manager.getSnapshot().tasks[0].completedVersion).toEqual(completedVersion)
   })
 
   it.each(['failed', 'cancelled', 'interrupted'] as const)(

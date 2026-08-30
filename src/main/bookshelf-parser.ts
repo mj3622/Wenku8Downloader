@@ -23,6 +23,13 @@ function optionalText(value: string): string | null {
   return normalized || null
 }
 
+function normalizedUpdateDate(value: string): string | null {
+  const normalized = optionalText(value)
+  if (!normalized) return null
+  const shortDate = normalized.match(/^(\d{2})-(\d{2})-(\d{2})$/)
+  return shortDate ? `20${shortDate[1]}-${shortDate[2]}-${shortDate[3]}` : normalized
+}
+
 function parseBookId(href: string | undefined): string | null {
   if (!href) return null
   try {
@@ -93,7 +100,7 @@ export function parseBookshelfPage(
         || '',
     )
     const latestChapter = optionalText(cells.eq(3).text())
-    const updatedAt = optionalText(cells.eq(5).text())
+    const updatedAt = normalizedUpdateDate(cells.eq(5).text())
     if ((latestChapter?.length ?? 0) > 500
       || (bookmark?.length ?? 0) > 500
       || (updatedAt?.length ?? 0) > 100) {

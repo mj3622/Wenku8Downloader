@@ -26,6 +26,7 @@ import {
 } from './download-rate-limiter'
 import { logger } from './logging/logger'
 import type { DownloadTaskCore } from '../shared/ipc-types'
+import type { BookVersionFields } from '../shared/book-types'
 import {
   createDownloadArtifactRecord,
   type DownloadArtifactRecord,
@@ -41,6 +42,7 @@ export interface DownloadExecutionContext {
 export interface DownloadExecutionResult {
   warnings: string[]
   artifacts: DownloadArtifactRecord[]
+  versionFields: BookVersionFields
 }
 
 export interface DownloadExecutionTask extends DownloadTaskCore {
@@ -54,7 +56,9 @@ export interface DownloadExecutor {
   ): Promise<DownloadExecutionResult>
 }
 
-export type DownloadExecutorBook = DownloaderBook & Pick<Book, 'pictureUrls'>
+export type DownloadExecutorBook = DownloaderBook & Pick<Book, 'pictureUrls'> & {
+  versionFields: BookVersionFields
+}
 
 export interface DownloadRunner {
   setOnProgress(callback: (progress: DownloadProgress) => void): void
@@ -230,6 +234,7 @@ export function createDownloadExecutor(
             : resolveWithin(runtimeConfig.rootPath, 'novels', `${bookKey}.epub`)
           return {
             warnings: downloader.getWarnings(),
+            versionFields: { ...book.versionFields },
             artifacts: [await createArtifactRecord({
               id: 'primary',
               name: basename(outputPath),
@@ -270,6 +275,7 @@ export function createDownloadExecutor(
           )
           return {
             warnings: downloader.getWarnings(),
+            versionFields: { ...book.versionFields },
             artifacts: [await createArtifactRecord({
               id: 'primary',
               name: basename(outputPath),
@@ -355,6 +361,7 @@ export function createDownloadExecutor(
         )
         return {
           warnings: [...downloader.getWarnings(), ...warnings],
+          versionFields: { ...book.versionFields },
           artifacts: [await createArtifactRecord({
             id: 'primary',
             name: basename(outputPath),
