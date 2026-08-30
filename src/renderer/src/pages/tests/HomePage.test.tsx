@@ -82,6 +82,8 @@ describe('HomePage', () => {
     expect(container.querySelector('#about-project-title')?.textContent).toBe('项目定位')
     expect(container.querySelector('#capabilities-title')?.textContent).toBe('核心能力')
     expect(container.querySelector('#principles-title')?.textContent).toBe('项目原则')
+    expect(container.textContent).toContain('原站书架')
+    expect(container.textContent).toContain('版本更新')
     expect(container.textContent).toContain('本地优先')
     expect(container.textContent).toContain('开源透明')
   })

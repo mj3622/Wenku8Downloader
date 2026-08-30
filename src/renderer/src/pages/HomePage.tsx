@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   IconArrowRight,
   IconBook2,
+  IconBooks,
   IconBrandGithub,
   IconCode,
   IconCompass,
@@ -26,12 +27,17 @@ const capabilities: Array<{ icon: Icon; title: string; description: string }> = 
   {
     icon: IconCompass,
     title: '发现与排行榜',
-    description: '以封面浏览首页推荐、热门内容和完整榜单。',
+    description: '以封面浏览首页推荐、热门排行、完整榜单和年度专题',
   },
   {
     icon: IconSearch,
-    title: '精准检索',
-    description: '按书名、作者或作品编号快速定位目标作品。',
+    title: '灵活找书',
+    description: '按分类与标签浏览，或通过书名、作者和作品编号快速定位',
+  },
+  {
+    icon: IconBooks,
+    title: '原站书架',
+    description: '同步收藏与最新章节，对比本地版本并提醒作品更新',
   },
   {
     icon: IconBook2,
@@ -41,7 +47,12 @@ const capabilities: Array<{ icon: Icon; title: string; description: string }> = 
   {
     icon: IconDownload,
     title: '下载管理',
-    description: '集中查看进度、历史与失败任务，支持取消和重试。',
+    description: '集中管理批次、进度、版本和产物，支持取消、重试与快速打开',
+  },
+  {
+    icon: IconRefresh,
+    title: '版本更新',
+    description: '从项目介绍页手动检查 GitHub 正式版本并打开发布页',
   },
 ]
 
@@ -109,7 +120,7 @@ export default function HomePage() {
               轻小说文库下载器
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-apple-body">
-              从轻小说文库发现、检索并整理喜欢的作品，将章节、封面和插图导出为适合阅读器的 EPUB 文件。
+              从轻小说文库发现、浏览并整理喜欢的作品，同步原站书架，再将章节、封面和插图导出为适合阅读器的 EPUB 文件
             </p>
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <Link
@@ -163,7 +174,7 @@ export default function HomePage() {
         <SectionTitle id="about-project-title">项目定位</SectionTitle>
         <div className="space-y-3 text-sm leading-6 text-apple-body">
           <p>
-            这是一款面向个人阅读整理的桌面工具，把找书、作品详情、下载任务和 EPUB 导出收拢到同一个简洁界面中。
+            这是一款面向个人阅读整理的桌面工具，把找书、原站书架、作品详情、下载任务和 EPUB 导出收拢到同一个简洁界面中
           </p>
           <p className="text-apple-secondary">
             本项目不提供内容或独立账号服务，使用时仍需遵守数据源站点规则及相关版权要求。
