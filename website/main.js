@@ -1,5 +1,7 @@
 /* global document, window, IntersectionObserver */
 
+import { selectPrimaryDownload } from './platform.js'
+
 const header = document.querySelector('[data-site-header]')
 const menuButton = document.querySelector('[data-menu-button]')
 const menuLabel = document.querySelector('[data-menu-label]')
@@ -8,6 +10,30 @@ const navigationLinks = navigation ? [...navigation.querySelectorAll('a')] : []
 const tabButtons = [...document.querySelectorAll('[data-showcase-tab]')]
 const tabPanels = [...document.querySelectorAll('[data-showcase-panel]')]
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+const downloadChoices = document.querySelector('[data-download="macArm64"]')?.closest('details')
+const downloadUrls = Object.fromEntries(
+  [...document.querySelectorAll('[data-download]')]
+    .map(link => [link.dataset.download, link.href]),
+)
+const primaryDownload = selectPrimaryDownload(window.navigator)
+document.querySelectorAll('[data-download-primary]').forEach((link) => {
+  const label = link.querySelector('[data-download-primary-label]')
+  if (label) label.textContent = primaryDownload.label
+  if (primaryDownload.assetKey) {
+    link.href = downloadUrls[primaryDownload.assetKey]
+    return
+  }
+  link.href = '#download-choices'
+  link.removeAttribute('target')
+  link.removeAttribute('rel')
+  link.addEventListener('click', (event) => {
+    event.preventDefault()
+    if (!downloadChoices) return
+    downloadChoices.open = true
+    downloadChoices.scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth', block: 'center' })
+    downloadChoices.querySelector('summary')?.focus({ preventScroll: true })
+  })
+})
 
 function updateHeader() {
   if (!header) return

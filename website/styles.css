@@ -280,6 +280,62 @@ img {
   font-size: 12px;
 }
 
+.download-choices {
+  position: relative;
+  width: fit-content;
+  margin: 14px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.download-choices summary {
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+
+.download-choices summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--blue) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.download-choice-list {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid #d8dde2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(19, 32, 46, 0.14);
+  transform: translateX(-50%);
+}
+
+.download-choice-list a {
+  display: block;
+  border-radius: 5px;
+  padding: 9px 10px;
+  color: var(--body);
+  text-align: left;
+}
+
+.download-choice-list a:hover,
+.download-choice-list a:focus-visible {
+  background: var(--canvas);
+  color: var(--ink);
+  outline: none;
+}
+
+.download-guidance {
+  max-width: 560px;
+  margin: 12px auto 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .hero-stage {
   margin-top: clamp(44px, 4vw, 58px);
   padding: 16px 16px 0;

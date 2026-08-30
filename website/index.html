@@ -8,6 +8,7 @@
       content="轻小说文库下载器是一款面向 macOS 与 Windows 的开源桌面工具，支持作品发现、精准检索、EPUB 导出与插图整理"
     />
     <meta name="theme-color" content="#ffffff" />
+    <meta name="app-version" content="__APP_VERSION__" />
     <link rel="icon" type="image/png" href="assets/favicon.png" />
     <link rel="stylesheet" href="styles.css" />
     <title>轻小说文库下载器｜把喜欢的轻小说打包带走</title>
@@ -45,8 +46,9 @@
           href="https://github.com/mj3622/Wenku8Downloader/releases"
           target="_blank"
           rel="noreferrer"
+          data-download-primary
         >
-          下载桌面版
+          <span data-download-primary-label>下载桌面版</span>
           <span aria-hidden="true">↗</span>
         </a>
       </div>
@@ -55,7 +57,7 @@
     <main id="main-content">
       <section id="top" class="hero">
         <div class="page-shell hero-copy">
-          <p class="eyebrow">Wenku8 Downloader 2.1</p>
+          <p class="eyebrow">Wenku8 Downloader __APP_VERSION__</p>
           <h1>把喜欢的轻小说<br />打包带走</h1>
           <p class="hero-summary">
             从发现、检索到 EPUB 导出，在一个安静、清晰的桌面工具里完成
@@ -66,8 +68,9 @@
               href="https://github.com/mj3622/Wenku8Downloader/releases"
               target="_blank"
               rel="noreferrer"
+              data-download-primary
             >
-              获取最新版本
+              <span data-download-primary-label>获取最新版本</span>
               <span aria-hidden="true">↗</span>
             </a>
             <a
@@ -79,6 +82,18 @@
               在 GitHub 查看
             </a>
           </div>
+          <details id="download-choices" class="download-choices">
+            <summary>选择其他系统或架构</summary>
+            <div class="download-choice-list">
+              <a href="__MAC_ARM64_URL__" data-download="macArm64">macOS · Apple 芯片</a>
+              <a href="__MAC_X64_URL__" data-download="macX64">macOS · Intel 芯片</a>
+              <a href="__WINDOWS_X64_URL__" data-download="windowsX64">Windows · x64 便携版</a>
+              <a href="https://github.com/mj3622/Wenku8Downloader/releases" data-download="releases">所有 Releases</a>
+            </div>
+          </details>
+          <p class="download-guidance">
+            macOS 需 13 Ventura 或更高版本；不确定芯片时请在“关于本机”中确认。Windows 提供免安装便携版，直链不可用时请前往 Releases
+          </p>
           <p class="hero-meta">适用于 macOS 13 及更高版本、Windows x64</p>
         </div>
 
@@ -401,8 +416,9 @@
               href="https://github.com/mj3622/Wenku8Downloader/releases"
               target="_blank"
               rel="noreferrer"
+              data-download-primary
             >
-              前往下载
+              <span data-download-primary-label>前往下载</span>
               <span aria-hidden="true">↗</span>
             </a>
             <a
