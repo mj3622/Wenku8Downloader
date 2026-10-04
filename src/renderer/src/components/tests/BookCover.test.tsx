@@ -31,6 +31,15 @@ afterEach(async () => {
 })
 
 describe('BookCover', () => {
+  it('does not append retry parameters to cached data URLs', async () => {
+    await act(async () => root.render(
+      <BookCover src="data:image/png;base64,aW1hZ2U=" title="测试作品" />,
+    ))
+    await act(async () => container.querySelector('img')?.dispatchEvent(new Event('error', { bubbles: true })))
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('封面暂不可用')
+  })
+
   it('keeps primary covers eager and allows long lists to opt into lazy loading', async () => {
     await act(async () => root.render(
       <BookCover src="https://example.com/cover.jpg" title="测试作品" />,

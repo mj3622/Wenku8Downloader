@@ -26,7 +26,7 @@ export default function BookCover({
   }, [src])
 
   const handleError = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    if (retries.current < 2 && src) {
+    if (retries.current < 2 && src && /^https?:\/\//i.test(src)) {
       retries.current += 1
       const separator = src.includes('?') ? '&' : '?'
       event.currentTarget.src = `${src}${separator}retry=${retries.current}`

@@ -295,6 +295,8 @@ export type DownloadHistoryScope = 'completed' | 'terminal'
 
 export interface DownloadApi {
   getDownloadSnapshot(): Promise<DownloadSnapshot>
+  /** Returns a local cached image as a data URL, or null when unavailable */
+  getDownloadCover(taskId: string): Promise<string | null>
   enqueueDownload(input: EnqueueDownloadInput): Promise<EnqueueDownloadResult>
   enqueueDownloadBatch(inputs: EnqueueDownloadInput[]): Promise<EnqueueDownloadBatchResult>
   cancelDownload(taskId: string): Promise<DownloadSnapshot>

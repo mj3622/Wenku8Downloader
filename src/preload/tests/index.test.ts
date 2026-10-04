@@ -48,6 +48,12 @@ beforeEach(() => {
 })
 
 describe('preload download boundary', () => {
+  it('reads a cached cover through a fixed task ID channel', async () => {
+    mocks.invoke.mockResolvedValue('data:image/png;base64,aW1hZ2U=')
+    await expect(exposedApi.getDownloadCover('task-123')).resolves.toBe('data:image/png;base64,aW1hZ2U=')
+    expect(mocks.invoke).toHaveBeenCalledWith('download:get-cover', { taskId: 'task-123' })
+  })
+
   it('forwards the login operation ID', async () => {
     const result = { status: 'ok', message: '登录成功' }
     mocks.invoke.mockResolvedValue(result)

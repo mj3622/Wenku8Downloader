@@ -24,7 +24,7 @@ import { formatTimeAgo } from '../utils/format'
 import { api } from '../api/client'
 import { toast } from '../stores/toastStore'
 import { getUserFeedback } from '../utils/userFeedback'
-import BookCover from '../components/BookCover'
+import DownloadCover from '../components/DownloadCover'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const COMPLETED_PAGE_SIZE = 100
@@ -246,8 +246,8 @@ export default function DownloadHistoryPage() {
             >
               <div className="flex items-center gap-3">
                 {task.cover && (
-                  <BookCover
-                    src={task.cover}
+                  <DownloadCover
+                    task={task}
                     title={formatBookTitle(task.title, titleFormat)}
                     className="w-10 h-14 rounded-md"
                     decorative
@@ -338,8 +338,8 @@ export default function DownloadHistoryPage() {
                 <div key={task.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
                 {task.cover && (
-                  <BookCover
-                    src={task.cover}
+                  <DownloadCover
+                    task={task}
                     title={formatBookTitle(task.title, titleFormat)}
                     className="w-9 h-12 rounded-md"
                     decorative
@@ -494,8 +494,8 @@ function DownloadBatchGroup({
       <div className="p-4">
         <div className="flex flex-wrap items-start gap-3">
           {first.cover && (
-            <BookCover
-              src={first.cover}
+            <DownloadCover
+              task={first}
               title={displayTitle}
               className="h-14 w-10 rounded-md"
               decorative
@@ -698,8 +698,8 @@ function RetryableTaskItem({
       <div className="flex items-center gap-3 p-4">
         <div className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
         {task.cover && (
-          <BookCover
-            src={task.cover}
+          <DownloadCover
+            task={task}
             title={displayTitle}
             className="w-10 h-14 rounded-md"
             decorative

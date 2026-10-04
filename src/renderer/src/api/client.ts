@@ -106,6 +106,8 @@ export const api = {
   // 下载
   getDownloadSnapshot: () =>
     invoke('download', () => window.electronAPI.getDownloadSnapshot()),
+  getDownloadCover: (taskId: string) =>
+    invoke('download', () => window.electronAPI.getDownloadCover(taskId)),
   enqueueDownload: (input: EnqueueDownloadInput) =>
     invoke('download', () => window.electronAPI.enqueueDownload(input)),
   enqueueDownloadBatch: (inputs: EnqueueDownloadInput[]) =>

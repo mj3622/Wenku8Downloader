@@ -39,6 +39,7 @@ const configApi: ConfigApi = {
 
 const downloadApi: DownloadApi = {
   getDownloadSnapshot: () => ipcRenderer.invoke('download:get-snapshot'),
+  getDownloadCover: (taskId) => ipcRenderer.invoke('download:get-cover', { taskId }),
   enqueueDownload: (input: EnqueueDownloadInput) =>
     ipcRenderer.invoke('download:enqueue', input),
   enqueueDownloadBatch: (inputs: EnqueueDownloadInput[]) =>

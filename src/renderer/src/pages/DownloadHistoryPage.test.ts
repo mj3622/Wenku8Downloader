@@ -9,6 +9,7 @@ import { api } from '../api/client'
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
+  getDownloadCover: vi.fn(async () => null),
   openFolder: vi.fn(),
   openDownloadArtifact: vi.fn(),
   revealDownloadArtifact: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../stores/downloadStore', () => ({
 vi.mock('../api/client', () => ({
   api: {
     getConfig: mocks.getConfig,
+    getDownloadCover: mocks.getDownloadCover,
     openFolder: mocks.openFolder,
     openDownloadArtifact: mocks.openDownloadArtifact,
     revealDownloadArtifact: mocks.revealDownloadArtifact,

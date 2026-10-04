@@ -83,6 +83,7 @@ export interface IpcServices {
   clearCache(): Promise<CacheClearResult>
   invalidateBookCache(): Promise<void>
   resolveVolumeCovers(bookId: string, volumes: string[]): Promise<Record<string, string>>
+  getDownloadCover(taskId: string): Promise<string | null>
   downloads: Pick<
     DownloadManager,
     | 'getSnapshot'
@@ -432,6 +433,19 @@ export function registerIpcHandlers(services: IpcServices): void {
     () => services.downloads.getSnapshot(),
     { logStart: false, logSuccess: false },
   ))
+
+  ipcMain.handle('download:get-cover', (_event, rawPayload: unknown) => {
+    const context: LogContext = {}
+    return runLoggedOperation('download.get-cover', context, () => {
+      const payload = requirePayload(rawPayload)
+      if (Object.keys(payload).some(key => key !== 'taskId')) {
+        throw new Error('请求参数格式无效')
+      }
+      const taskId = validateDownloadTaskId(payload.taskId)
+      context.taskId = taskId
+      return services.getDownloadCover(taskId)
+    }, { logStart: false, logSuccess: false })
+  })
 
   ipcMain.handle('download:enqueue', (_event, rawPayload: unknown) => {
     const context: LogContext = {}

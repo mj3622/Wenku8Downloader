@@ -12,6 +12,7 @@ import {
   type DownloadExecutorBook,
 } from './download-executor'
 import { DownloadManager } from './download-manager'
+import { loadDownloadCover } from './download-cover'
 import {
   sharedDownloadRateLimiter,
   type WenkuRequestPriority,
@@ -52,6 +53,7 @@ export interface AppServices {
   updates: UpdateCheckService
   books: BookService
   downloads: DownloadManager
+  getDownloadCover(taskId: string): Promise<string | null>
   initializeCache(): Promise<void>
   stopCacheMaintenance(): void
   clearCache(): Promise<CacheClearResult>
@@ -298,6 +300,11 @@ export function createAppServices(): AppServices {
     updates,
     books,
     downloads,
+    getDownloadCover: (taskId) => loadDownloadCover(
+      downloads.getSnapshot().tasks.find(task => task.id === taskId),
+      cacheStore,
+      bookCache,
+    ),
     initializeCache,
     stopCacheMaintenance,
     clearCache,

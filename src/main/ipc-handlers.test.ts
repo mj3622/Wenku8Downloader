@@ -224,6 +224,7 @@ function createServices(
     clearCache: vi.fn(async () => ({ deferred: false })),
     invalidateBookCache: vi.fn(async () => undefined),
     resolveVolumeCovers: mocks.resolveVolumeCovers,
+    getDownloadCover: vi.fn(async () => null),
     downloads: {
       getSnapshot: mocks.getDownloadSnapshot,
       enqueue: mocks.enqueueDownload,
@@ -261,6 +262,38 @@ beforeEach(() => {
 })
 
 describe('registerIpcHandlers configuration boundary', () => {
+  it('resolves covers using only a validated task ID', async () => {
+    const taskId = '550e8400-e29b-41d4-a716-446655440000'
+    vi.mocked(services.getDownloadCover).mockResolvedValue('data:image/png;base64,aW1hZ2U=')
+    await expect(invoke('download:get-cover', {}, { taskId }))
+      .resolves.toBe('data:image/png;base64,aW1hZ2U=')
+    expect(services.getDownloadCover).toHaveBeenCalledWith(taskId)
+    expect(services.crawler.getImageContent).not.toHaveBeenCalled()
+  })
+
+  it('rejects cover paths, URLs and invalid IDs supplied by the renderer', async () => {
+    for (const payload of [
+      null, { taskId: '../secrets.enc' }, { taskId: 123 },
+      { taskId: '550e8400-e29b-41d4-a716-446655440000', path: '/etc/passwd' },
+      { taskId: '550e8400-e29b-41d4-a716-446655440000', url: 'https://example.com' },
+    ]) {
+      await expect(invoke('download:get-cover', {}, payload)).rejects.toThrow()
+    }
+    expect(services.getDownloadCover).not.toHaveBeenCalled()
+  })
+
+  it('logs cover lookup failures without logging returned image data or disrupting downloads', async () => {
+    const taskId = '550e8400-e29b-41d4-a716-446655440000'
+    vi.mocked(services.getDownloadCover).mockRejectedValue(new Error('cache unavailable'))
+    await expect(invoke('download:get-cover', {}, { taskId })).rejects.toThrow('cache unavailable')
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      'download.get-cover.failed', '操作失败', expect.any(Error),
+      expect.objectContaining({ taskId, operationId: expect.any(String) }),
+    )
+    await invoke('download:get-snapshot', {})
+    expect(mocks.getDownloadSnapshot).toHaveBeenCalled()
+  })
+
   it('returns only the secret-free public snapshot', async () => {
     const result = await invoke('config:get', {})
     const serialized = JSON.stringify(result)
